@@ -56,6 +56,7 @@ import { TournamentAssistant } from './components/TournamentAssistant';
 import { SearchWinner } from './components/SearchWinner';
 import { EventReport } from './components/EventReport';
 import { BoutChart } from './components/BoutChart';
+import { AdminFontSizeControls } from './components/AdminFontSizeControls';
 import { 
   syncToGoogleSheets as rawSyncToGoogleSheets, 
   updateWinnerInGoogleSheets as rawUpdateWinnerInGoogleSheets, 
@@ -1335,6 +1336,10 @@ export default function App() {
   const [publicEventId, setPublicEventId] = useSyncedState<string>('tkd_public_event_id', 'active');
   const [visibleRingsCount, setVisibleRingsCount] = useSyncedState<number>('tkd_visible_rings_count', 12);
   const [slideInterval, setSlideInterval] = useSyncedState<number>('tkd_slide_interval', 15);
+  const [activeNameFontScale, setActiveNameFontScale] = useSyncedState<number>('tkd_active_name_font_scale', 100);
+  const [activeClubFontScale, setActiveClubFontScale] = useSyncedState<number>('tkd_active_club_font_scale', 100);
+  const [standbyNameFontScale, setStandbyNameFontScale] = useSyncedState<number>('tkd_standby_name_font_scale', 100);
+  const [standbyClubFontScale, setStandbyClubFontScale] = useSyncedState<number>('tkd_standby_club_font_scale', 100);
   const [backupData, setBackupData] = useLocalState<Record<string, { mappings: BoutMapping[], matches: MatchData[] }>>('tkd_backup_data_v3', {});
   const [backupToLoad, setBackupToLoad] = useState<{ mappings: Partial<BoutMapping>[], matches: MatchData[] } | null>(null);
   const [isQuotaExceeded, setIsQuotaExceeded] = useState(false);
@@ -2927,7 +2932,8 @@ export default function App() {
         red_club: currentBout.red_club || '',
         eventId: currentEventId,
         ring: ringNumber,
-        winType: winType || 'PTF'
+        winType: winType || 'PTF',
+        points: currentBout.points
       };
       
       setMatchHistory(prev => {
@@ -2943,7 +2949,9 @@ export default function App() {
         syncedAt: serverTimestamp()
       };
       if (toSave.winnerSide === undefined) delete toSave.winnerSide;
+              if (toSave.points === undefined) delete toSave.points;
       if (toSave.winnerClub === undefined) delete toSave.winnerClub;
+      if (toSave.points === undefined) delete toSave.points;
       
       if (!isFirestoreQuotaExceeded) {
         setDoc(doc(db, 'matchHistory', historyId), toSave).catch(err => {
@@ -4118,6 +4126,14 @@ export default function App() {
         onUpdateEventName={handleUpdateActiveEventName}
         displayEventName={displayEventName}
         onUpdateDisplayEventName={setDisplayEventName}
+        activeNameFontScale={activeNameFontScale}
+        setActiveNameFontScale={setActiveNameFontScale}
+        activeClubFontScale={activeClubFontScale}
+        setActiveClubFontScale={setActiveClubFontScale}
+        standbyNameFontScale={standbyNameFontScale}
+        setStandbyNameFontScale={setStandbyNameFontScale}
+        standbyClubFontScale={standbyClubFontScale}
+        setStandbyClubFontScale={setStandbyClubFontScale}
       />
     );
   }
@@ -4144,6 +4160,14 @@ export default function App() {
         onUpdateEventName={handleUpdateActiveEventName}
         displayEventName={displayEventName}
         onUpdateDisplayEventName={setDisplayEventName}
+        activeNameFontScale={activeNameFontScale}
+        setActiveNameFontScale={setActiveNameFontScale}
+        activeClubFontScale={activeClubFontScale}
+        setActiveClubFontScale={setActiveClubFontScale}
+        standbyNameFontScale={standbyNameFontScale}
+        setStandbyNameFontScale={setStandbyNameFontScale}
+        standbyClubFontScale={standbyClubFontScale}
+        setStandbyClubFontScale={setStandbyClubFontScale}
       />
     );
   }
@@ -4936,6 +4960,14 @@ export default function App() {
               onUpdateEventName={handleUpdateActiveEventName}
               displayEventName={displayEventName}
               onUpdateDisplayEventName={setDisplayEventName}
+              activeNameFontScale={activeNameFontScale}
+              setActiveNameFontScale={setActiveNameFontScale}
+              activeClubFontScale={activeClubFontScale}
+              setActiveClubFontScale={setActiveClubFontScale}
+              standbyNameFontScale={standbyNameFontScale}
+              setStandbyNameFontScale={setStandbyNameFontScale}
+              standbyClubFontScale={standbyClubFontScale}
+              setStandbyClubFontScale={setStandbyClubFontScale}
             />
           )}
 
@@ -4960,6 +4992,14 @@ export default function App() {
               onUpdateEventName={handleUpdateActiveEventName}
               displayEventName={displayEventName}
               onUpdateDisplayEventName={setDisplayEventName}
+              activeNameFontScale={activeNameFontScale}
+              setActiveNameFontScale={setActiveNameFontScale}
+              activeClubFontScale={activeClubFontScale}
+              setActiveClubFontScale={setActiveClubFontScale}
+              standbyNameFontScale={standbyNameFontScale}
+              setStandbyNameFontScale={setStandbyNameFontScale}
+              standbyClubFontScale={standbyClubFontScale}
+              setStandbyClubFontScale={setStandbyClubFontScale}
             />
           )}
 
@@ -4983,6 +5023,14 @@ export default function App() {
               onUpdateEventName={handleUpdateActiveEventName}
               displayEventName={displayEventName}
               onUpdateDisplayEventName={setDisplayEventName}
+              activeNameFontScale={activeNameFontScale}
+              setActiveNameFontScale={setActiveNameFontScale}
+              activeClubFontScale={activeClubFontScale}
+              setActiveClubFontScale={setActiveClubFontScale}
+              standbyNameFontScale={standbyNameFontScale}
+              setStandbyNameFontScale={setStandbyNameFontScale}
+              standbyClubFontScale={standbyClubFontScale}
+              setStandbyClubFontScale={setStandbyClubFontScale}
             />
           )}
 
@@ -5006,6 +5054,14 @@ export default function App() {
               onUpdateEventName={handleUpdateActiveEventName}
               displayEventName={displayEventName}
               onUpdateDisplayEventName={setDisplayEventName}
+              activeNameFontScale={activeNameFontScale}
+              setActiveNameFontScale={setActiveNameFontScale}
+              activeClubFontScale={activeClubFontScale}
+              setActiveClubFontScale={setActiveClubFontScale}
+              standbyNameFontScale={standbyNameFontScale}
+              setStandbyNameFontScale={setStandbyNameFontScale}
+              standbyClubFontScale={standbyClubFontScale}
+              setStandbyClubFontScale={setStandbyClubFontScale}
             />
           )}
 
@@ -5794,6 +5850,23 @@ export default function App() {
                         </button>
                       </div>
                     </div>
+                    <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 col-span-1 md:col-span-2">
+                      <div>
+                        <p className="text-sm font-bold text-slate-700">Big LED Screen Font Sizing</p>
+                        <p className="text-[10px] text-slate-500">Adjust active court athlete name, club name, and standby player font scaling across all LED boards and public views</p>
+                      </div>
+                      <AdminFontSizeControls
+                        activeNameFontScale={activeNameFontScale}
+                        setActiveNameFontScale={setActiveNameFontScale}
+                        activeClubFontScale={activeClubFontScale}
+                        setActiveClubFontScale={setActiveClubFontScale}
+                        standbyNameFontScale={standbyNameFontScale}
+                        setStandbyNameFontScale={setStandbyNameFontScale}
+                        standbyClubFontScale={standbyClubFontScale}
+                        setStandbyClubFontScale={setStandbyClubFontScale}
+                        dark={false}
+                      />
+                    </div>
                     <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-between">
                       <div>
                         <p className="text-sm font-bold text-slate-700">PDPA Privacy Mode</p>
@@ -6081,7 +6154,8 @@ export default function App() {
                 red_name: found?.red_name || '',
                 red_club: found?.red_club || '',
                 eventId: currentEventId,
-                ring: Number(ringNumber)
+                ring: Number(ringNumber),
+                points: found?.points
               };
               
               setMatchHistory(prev => {
@@ -6095,6 +6169,7 @@ export default function App() {
                 syncedAt: serverTimestamp()
               };
               if (toSave.winnerSide === undefined) delete toSave.winnerSide;
+              if (toSave.points === undefined) delete toSave.points;
               if (toSave.winnerClub === undefined) delete toSave.winnerClub;
 
               if (!isFirestoreQuotaExceeded) {
@@ -6309,6 +6384,7 @@ export default function App() {
                   syncedAt: serverTimestamp()
                 };
                 if (toSave.winnerSide === undefined) delete toSave.winnerSide;
+              if (toSave.points === undefined) delete toSave.points;
                 if (toSave.winnerClub === undefined) delete toSave.winnerClub;
 
                 if (!isFirestoreQuotaExceeded) {
@@ -7013,6 +7089,8 @@ interface RingCardProps {
   onRemoveSuspended?: (boutNumber: string | number) => void;
   onSuspendCurrentBout?: () => void;
   transfers?: BoutTransferBroadcast[];
+  activeNameFontScale?: number;
+  activeClubFontScale?: number;
 }
 
 interface EditResultModalProps {
@@ -7750,7 +7828,11 @@ function AddRingModal({ onClose, onAdd, existingRings, namingMode }: AddRingModa
   );
 }
 
-function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdate, onPointsUpdate, onUpdateTotalBouts, onStart, onDelete, onWinnerSelect, currentEventId, onForceSync, isAutoPull, onToggleAutoPull, user, boutNumberingMode = 'alphanumeric', layout = 'winner', showInspectionPopupSetting = true, onReturnToQueue, onResumeSuspended, onRemoveSuspended, onSuspendCurrentBout, transfers = [] }: RingCardProps & { currentEventId?: string | null, onForceSync?: (data: MatchData) => void }) {
+function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdate, onPointsUpdate, onUpdateTotalBouts, onStart, onDelete, onWinnerSelect, currentEventId, onForceSync, isAutoPull, onToggleAutoPull, user, boutNumberingMode = 'alphanumeric', layout = 'winner', showInspectionPopupSetting = true, onReturnToQueue, onResumeSuspended, onRemoveSuspended, onSuspendCurrentBout, transfers = [], activeNameFontScale, activeClubFontScale }: RingCardProps & { currentEventId?: string | null, onForceSync?: (data: MatchData) => void }) {
+  const [syncedNameScale] = useSyncedState<number>('tkd_active_name_font_scale', 100);
+  const [syncedClubScale] = useSyncedState<number>('tkd_active_club_font_scale', 100);
+  const effectiveNameScale = activeNameFontScale ?? syncedNameScale;
+  const effectiveClubScale = activeClubFontScale ?? syncedClubScale;
   const [now, setNow] = useState(new Date());
 
   useEffect(() => {
@@ -8097,11 +8179,11 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
               </div>
               
               <div className="flex items-start gap-4">
-                <FighterSide color="blue" name={cleanPlaceholder(current.blue_name)} club={cleanPlaceholder(current.blue_club)} privacy={current.privacy_mode} inspected={current.blue_inspected} />
+                <FighterSide color="blue" name={cleanPlaceholder(current.blue_name)} club={cleanPlaceholder(current.blue_club)} privacy={current.privacy_mode} inspected={current.blue_inspected} activeNameFontScale={effectiveNameScale} activeClubFontScale={effectiveClubScale} />
                 {!isPoomsaeMode && (
                   <>
                     <div className="text-xs font-black text-slate-300 italic mt-6">VS</div>
-                    <FighterSide color="red" name={cleanPlaceholder(current.red_name)} club={cleanPlaceholder(current.red_club)} privacy={current.privacy_mode} inspected={current.red_inspected} />
+                    <FighterSide color="red" name={cleanPlaceholder(current.red_name)} club={cleanPlaceholder(current.red_club)} privacy={current.privacy_mode} inspected={current.red_inspected} activeNameFontScale={effectiveNameScale} activeClubFontScale={effectiveClubScale} />
                   </>
                 )}
               </div>
@@ -8112,13 +8194,85 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
                 <div className="pt-6 border-t border-slate-100">
                   {isPoomsaeMode ? (
                     <div className="space-y-4">
-                      <p className="text-center text-[10px] font-black text-slate-400 uppercase tracking-widest">Poomsae Performance</p>
+                      <p className="text-center text-[10px] font-black text-slate-400 uppercase tracking-widest">Poomsae Final Score</p>
+                      
+                      <div className="flex items-center justify-center gap-6">
+                        <div className="flex flex-col items-center gap-2">
+                          <span className="text-[10px] font-black uppercase text-[#00a2e8]">Blue Score</span>
+                          <input 
+                            type="number"
+                            step="0.01"
+                            className="w-32 h-20 text-center border-2 border-[#00a2e8] rounded-lg font-black text-3xl bg-[#0e1726] text-white focus:outline-none focus:ring-2 focus:ring-[#00a2e8]"
+                            value={points.r1Blue || ''}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setPoints(p => {
+                                let winner = p.r1Winner;
+                                if (val !== '' && p.r1Red !== '') {
+                                  const b = parseFloat(val);
+                                  const r = parseFloat(p.r1Red);
+                                  if (!isNaN(b) && !isNaN(r)) {
+                                    if (b > r) winner = 'Blue';
+                                    else if (r > b) winner = 'Red';
+                                  }
+                                } else if (val === '' && p.r1Red === '') {
+                                  winner = '';
+                                }
+                                return { ...p, r1Blue: val, r1Winner: winner };
+                              });
+                              handlePointsUpdate();
+                            }}
+                          />
+                        </div>
+
+                        {current?.red_name && current.red_name !== '---' && !current.red_name.includes('WINNER') && (
+                          <div className="flex flex-col items-center gap-2">
+                            <span className="text-[10px] font-black uppercase text-[#ed1c24]">Red Score</span>
+                            <input 
+                              type="number"
+                              step="0.01"
+                              className="w-32 h-20 text-center border-2 border-[#ed1c24] rounded-lg font-black text-3xl bg-[#0e1726] text-white focus:outline-none focus:ring-2 focus:ring-[#ed1c24]"
+                              value={points.r1Red || ''}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setPoints(p => {
+                                  let winner = p.r1Winner;
+                                  if (val !== '' && p.r1Blue !== '') {
+                                    const r = parseFloat(val);
+                                    const b = parseFloat(p.r1Blue);
+                                    if (!isNaN(b) && !isNaN(r)) {
+                                      if (b > r) winner = 'Blue';
+                                      else if (r > b) winner = 'Red';
+                                    }
+                                  } else if (val === '' && p.r1Blue === '') {
+                                    winner = '';
+                                  }
+                                  return { ...p, r1Red: val, r1Winner: winner };
+                                });
+                                handlePointsUpdate();
+                              }}
+                            />
+                          </div>
+                        )}
+                      </div>
+
                       <button 
-                        onClick={() => onWinnerSelect('Completed')}
+                        onClick={() => {
+                          let winner = 'Completed';
+                          if (current?.red_name && current.red_name !== '---' && !current.red_name.includes('WINNER') && points.r1Blue && points.r1Red) {
+                            const b = parseFloat(points.r1Blue);
+                            const r = parseFloat(points.r1Red);
+                            if (!isNaN(b) && !isNaN(r)) {
+                              if (b > r) winner = 'Blue';
+                              else if (r > b) winner = 'Red';
+                            }
+                          }
+                          onWinnerSelect(winner);
+                        }}
                         className="w-full py-4 bg-green-600 hover:bg-green-700 text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-lg shadow-green-200 transition-all active:scale-95 flex items-center justify-center gap-2"
                       >
                         <CheckCircle2 size={18} />
-                        Mark as Completed
+                        Submit Score & Complete
                       </button>
                     </div>
                   ) : (
@@ -8135,7 +8289,7 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
                           <input 
                             type="number" 
                             className={cn(
-                              "w-full h-12 text-center border-2 border-[#00a2e8] transition-all font-black text-lg focus:outline-none focus:ring-2 focus:ring-[#00a2e8] mx-auto flex items-center justify-center rounded-lg", 
+                              "w-full h-16 sm:h-20 text-center border-2 border-[#00a2e8] transition-all font-black text-2xl sm:text-3xl focus:outline-none focus:ring-2 focus:ring-[#00a2e8] mx-auto flex items-center justify-center rounded-lg", 
                               (points.r1Winner === 'Blue' || (points.r1Winner === '' && points.r1Blue !== '' && points.r1Red !== '' && parseInt(points.r1Blue) > parseInt(points.r1Red))) 
                                 ? "bg-[#00a2e8] text-white scale-110 shadow-md ring-4 ring-blue-300 border-transparent" 
                                 : "bg-white text-slate-800"
@@ -8163,7 +8317,7 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
                           <input 
                             type="number" 
                             className={cn(
-                              "w-full h-12 text-center border-2 border-[#00a2e8] transition-all font-black text-lg focus:outline-none focus:ring-2 focus:ring-[#00a2e8] mx-auto flex items-center justify-center rounded-lg", 
+                              "w-full h-16 sm:h-20 text-center border-2 border-[#00a2e8] transition-all font-black text-2xl sm:text-3xl focus:outline-none focus:ring-2 focus:ring-[#00a2e8] mx-auto flex items-center justify-center rounded-lg", 
                               (points.r2Winner === 'Blue' || (points.r2Winner === '' && points.r2Blue !== '' && points.r2Red !== '' && parseInt(points.r2Blue) > parseInt(points.r2Red))) 
                                 ? "bg-[#00a2e8] text-white scale-110 shadow-md ring-4 ring-blue-300 border-transparent" 
                                 : "bg-white text-slate-800"
@@ -8191,7 +8345,7 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
                           <input 
                             type="number" 
                             className={cn(
-                              "w-full h-12 text-center border-2 border-[#00a2e8] transition-all font-black text-lg focus:outline-none focus:ring-2 focus:ring-[#00a2e8] mx-auto flex items-center justify-center rounded-lg", 
+                              "w-full h-16 sm:h-20 text-center border-2 border-[#00a2e8] transition-all font-black text-2xl sm:text-3xl focus:outline-none focus:ring-2 focus:ring-[#00a2e8] mx-auto flex items-center justify-center rounded-lg", 
                               (points.r3Winner === 'Blue' || (points.r3Winner === '' && points.r3Blue !== '' && points.r3Red !== '' && parseInt(points.r3Blue) > parseInt(points.r3Red))) 
                                 ? "bg-[#00a2e8] text-white scale-110 shadow-md ring-4 ring-blue-300 border-transparent" 
                                 : "bg-white text-slate-800"
@@ -8221,7 +8375,7 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
                           <input 
                             type="number" 
                             className={cn(
-                              "w-full h-12 text-center border-2 border-[#ed1c24] transition-all font-black text-lg focus:outline-none focus:ring-2 focus:ring-[#ed1c24] mx-auto flex items-center justify-center rounded-lg", 
+                              "w-full h-16 sm:h-20 text-center border-2 border-[#ed1c24] transition-all font-black text-2xl sm:text-3xl focus:outline-none focus:ring-2 focus:ring-[#ed1c24] mx-auto flex items-center justify-center rounded-lg", 
                               (points.r1Winner === 'Red' || (points.r1Winner === '' && points.r1Red !== '' && points.r1Blue !== '' && parseInt(points.r1Red) > parseInt(points.r1Blue))) 
                                 ? "bg-[#ed1c24] text-white scale-110 shadow-md ring-4 ring-red-300 border-transparent" 
                                 : "bg-white text-slate-800"
@@ -8249,7 +8403,7 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
                           <input 
                             type="number" 
                             className={cn(
-                              "w-full h-12 text-center border-2 border-[#ed1c24] transition-all font-black text-lg focus:outline-none focus:ring-2 focus:ring-[#ed1c24] mx-auto flex items-center justify-center rounded-lg", 
+                              "w-full h-16 sm:h-20 text-center border-2 border-[#ed1c24] transition-all font-black text-2xl sm:text-3xl focus:outline-none focus:ring-2 focus:ring-[#ed1c24] mx-auto flex items-center justify-center rounded-lg", 
                               (points.r2Winner === 'Red' || (points.r2Winner === '' && points.r2Red !== '' && points.r2Blue !== '' && parseInt(points.r2Red) > parseInt(points.r2Blue))) 
                                 ? "bg-[#ed1c24] text-white scale-110 shadow-md ring-4 ring-red-300 border-transparent" 
                                 : "bg-white text-slate-800"
@@ -8277,7 +8431,7 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
                           <input 
                             type="number" 
                             className={cn(
-                              "w-full h-12 text-center border-2 border-[#ed1c24] transition-all font-black text-lg focus:outline-none focus:ring-2 focus:ring-[#ed1c24] mx-auto flex items-center justify-center rounded-lg", 
+                              "w-full h-16 sm:h-20 text-center border-2 border-[#ed1c24] transition-all font-black text-2xl sm:text-3xl focus:outline-none focus:ring-2 focus:ring-[#ed1c24] mx-auto flex items-center justify-center rounded-lg", 
                               (points.r3Winner === 'Red' || (points.r3Winner === '' && points.r3Red !== '' && points.r3Blue !== '' && parseInt(points.r3Red) > parseInt(points.r3Blue))) 
                                 ? "bg-[#ed1c24] text-white scale-110 shadow-md ring-4 ring-red-300 border-transparent" 
                                 : "bg-white text-slate-800"
@@ -8718,14 +8872,15 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
   );
 }
 
-function FighterSide({ color, name, club, privacy, inspected }: { color: 'blue' | 'red', name: string, club: string, privacy: boolean, inspected?: boolean }) {
+function FighterSide({ color, name, club, privacy, inspected, activeNameFontScale = 100, activeClubFontScale = 100 }: { color: 'blue' | 'red', name: string, club: string, privacy: boolean, inspected?: boolean, activeNameFontScale?: number, activeClubFontScale?: number }) {
   const getDynamicFontSize = (name: string) => {
     const len = name.length;
-    if (len <= 15) return 'text-[18px]';
-    if (len <= 25) return 'text-[16px]';
-    if (len <= 35) return 'text-[14px]';
-    return 'text-[12px]';
+    if (len <= 15) return 18;
+    if (len <= 25) return 16;
+    if (len <= 35) return 14;
+    return 12;
   };
+  const baseSize = getDynamicFontSize(privacy ? "---" : cleanPlaceholder(name));
 
   return (
     <div className="flex-1 space-y-1">
@@ -8741,16 +8896,27 @@ function FighterSide({ color, name, club, privacy, inspected }: { color: 'blue' 
         "h-1 w-full rounded-full mb-2",
         color === 'blue' ? "bg-[#00a2e8]" : "bg-[#ed1c24]"
       )} />
-      <p className={cn(
-        "font-black text-slate-800 leading-tight line-clamp-3 whitespace-normal break-words",
-        getDynamicFontSize(privacy ? "---" : cleanPlaceholder(name))
-      )}>
+      <p 
+        className="font-black text-slate-800 leading-tight line-clamp-3 whitespace-normal break-words"
+        style={{
+          fontSize: `${baseSize * (activeNameFontScale / 100)}px`,
+          lineHeight: 1.15
+        }}
+      >
         {privacy ? "---" : cleanPlaceholder(name)}
       </p>
-      <p className={cn(
-        "text-[15px] font-bold uppercase",
-        color === 'blue' ? "text-[#00a2e8]" : "text-[#ed1c24]"
-      )}>{cleanPlaceholder(club)}</p>
+      <p 
+        className={cn(
+          "font-bold uppercase",
+          color === 'blue' ? "text-[#00a2e8]" : "text-[#ed1c24]"
+        )}
+        style={{
+          fontSize: `${15 * (activeClubFontScale / 100)}px`,
+          lineHeight: 1.15
+        }}
+      >
+        {cleanPlaceholder(club)}
+      </p>
     </div>
   );
 }
@@ -9155,6 +9321,10 @@ interface PublicRingCardProps {
   showEmptyBoutAsInactive?: boolean;
   publicViewLayout?: 'standard' | 'point';
   transfers?: BoutTransferBroadcast[];
+  activeNameFontScale?: number;
+  activeClubFontScale?: number;
+  standbyNameFontScale?: number;
+  standbyClubFontScale?: number;
 }
 
 function StandbyView({ 
@@ -9176,7 +9346,15 @@ function StandbyView({
   events = [],
   onUpdateEventName = () => {},
   displayEventName = '',
-  onUpdateDisplayEventName = () => {}
+  onUpdateDisplayEventName = () => {},
+  activeNameFontScale,
+  setActiveNameFontScale,
+  activeClubFontScale,
+  setActiveClubFontScale,
+  standbyNameFontScale,
+  setStandbyNameFontScale,
+  standbyClubFontScale,
+  setStandbyClubFontScale
 }: { 
   rings: RingStatus[], 
   boutQueue: {id: string, data: MatchData}[], 
@@ -9196,8 +9374,29 @@ function StandbyView({
   events?: EventData[],
   onUpdateEventName?: (name: string) => void,
   displayEventName?: string,
-  onUpdateDisplayEventName?: (name: string) => void
+  onUpdateDisplayEventName?: (name: string) => void,
+  activeNameFontScale?: number,
+  setActiveNameFontScale?: (val: number | ((prev: number) => number)) => void,
+  activeClubFontScale?: number,
+  setActiveClubFontScale?: (val: number | ((prev: number) => number)) => void,
+  standbyNameFontScale?: number,
+  setStandbyNameFontScale?: (val: number | ((prev: number) => number)) => void,
+  standbyClubFontScale?: number,
+  setStandbyClubFontScale?: (val: number | ((prev: number) => number)) => void
 }) {
+  const [syncedNameFontScale, setSyncedNameFontScale] = useSyncedState<number>('tkd_active_name_font_scale', 100);
+  const [syncedClubFontScale, setSyncedClubFontScale] = useSyncedState<number>('tkd_active_club_font_scale', 100);
+  const [syncedStandbyNameFontScale, setSyncedStandbyNameFontScale] = useSyncedState<number>('tkd_standby_name_font_scale', 100);
+  const [syncedStandbyClubFontScale, setSyncedStandbyClubFontScale] = useSyncedState<number>('tkd_standby_club_font_scale', 100);
+  const effectiveNameScale = activeNameFontScale ?? syncedNameFontScale;
+  const effectiveSetNameScale = setActiveNameFontScale ?? setSyncedNameFontScale;
+  const effectiveClubScale = activeClubFontScale ?? syncedClubFontScale;
+  const effectiveSetClubScale = setActiveClubFontScale ?? setSyncedClubFontScale;
+  const effectiveStandbyNameScale = standbyNameFontScale ?? syncedStandbyNameFontScale;
+  const effectiveSetStandbyNameScale = setStandbyNameFontScale ?? setSyncedStandbyNameFontScale;
+  const effectiveStandbyClubScale = standbyClubFontScale ?? syncedStandbyClubFontScale;
+  const effectiveSetStandbyClubScale = setStandbyClubFontScale ?? setSyncedStandbyClubFontScale;
+
   const containerRef = React.useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = React.useState(false);
   const [currentPage, setCurrentPage] = React.useState(0);
@@ -9323,6 +9522,19 @@ function StandbyView({
               </select>
             </div>
           )}
+          {isAdmin && (
+            <AdminFontSizeControls
+              activeNameFontScale={effectiveNameScale}
+              setActiveNameFontScale={effectiveSetNameScale}
+              activeClubFontScale={effectiveClubScale}
+              setActiveClubFontScale={effectiveSetClubScale}
+              standbyNameFontScale={effectiveStandbyNameScale}
+              setStandbyNameFontScale={effectiveSetStandbyNameScale}
+              standbyClubFontScale={effectiveStandbyClubScale}
+              setStandbyClubFontScale={effectiveSetStandbyClubScale}
+              dark={true}
+            />
+          )}
           <button 
             onClick={toggleFullScreen}
             className="p-3 bg-slate-900 text-white hover:bg-slate-800 rounded-2xl border border-slate-800 transition-all group"
@@ -9432,13 +9644,33 @@ function StandbyView({
                           "flex-1 bg-blue-600/90 flex flex-col justify-center px-4 relative",
                           !isPoomsaeModeCurrent && "border-b border-white/10"
                         )}>
-                          <p className="text-[14px] font-bold text-white uppercase leading-none mb-1">{current ? cleanPlaceholder(current.blue_club || "") : "---"}</p>
-                          <h4 className="text-[27px] font-black text-white uppercase leading-none truncate">{current ? cleanPlaceholder(current.blue_name || "") : "---"}</h4>
+                          <p 
+                            className="text-[14px] font-bold text-white uppercase leading-none mb-1"
+                            style={effectiveClubScale !== 100 ? { fontSize: `calc(14px * ${effectiveClubScale / 100})`, lineHeight: 1.15 } : undefined}
+                          >
+                            {current ? cleanPlaceholder(current.blue_club || "") : "---"}
+                          </p>
+                          <h4 
+                            className="text-[27px] font-black text-white uppercase leading-none truncate"
+                            style={effectiveNameScale !== 100 ? { fontSize: `calc(27px * ${effectiveNameScale / 100})`, lineHeight: 1.15 } : undefined}
+                          >
+                            {current ? cleanPlaceholder(current.blue_name || "") : "---"}
+                          </h4>
                         </div>
                         {!isPoomsaeModeCurrent && (
                           <div className="flex-1 bg-red-600/90 flex flex-col justify-center px-4 relative">
-                            <p className="text-[14px] font-bold text-white uppercase leading-none mb-1">{current ? cleanPlaceholder(current.red_club || "") : "---"}</p>
-                            <h4 className="text-[27px] font-black text-white uppercase leading-none truncate">{current ? cleanPlaceholder(current.red_name || "") : "---"}</h4>
+                            <p 
+                              className="text-[14px] font-bold text-white uppercase leading-none mb-1"
+                              style={effectiveClubScale !== 100 ? { fontSize: `calc(14px * ${effectiveClubScale / 100})`, lineHeight: 1.15 } : undefined}
+                            >
+                              {current ? cleanPlaceholder(current.red_club || "") : "---"}
+                            </p>
+                            <h4 
+                              className="text-[27px] font-black text-white uppercase leading-none truncate"
+                              style={effectiveNameScale !== 100 ? { fontSize: `calc(27px * ${effectiveNameScale / 100})`, lineHeight: 1.15 } : undefined}
+                            >
+                              {current ? cleanPlaceholder(current.red_name || "") : "---"}
+                            </h4>
                           </div>
                         )}
                       </div>
@@ -9471,11 +9703,21 @@ function StandbyView({
                         isPoomsaeItem ? "col-span-10" : "col-span-5 border-r border-white/10",
                         isRingInactive ? "bg-slate-800" : "bg-blue-600/80"
                       )}>
-                        <span className="text-[13px] font-bold text-white uppercase leading-tight break-words whitespace-normal w-full">{cleanPlaceholder(b?.data.blue_club || "")}</span>
-                        <span className={cn(
-                          "text-[16px] font-black uppercase leading-tight break-words whitespace-normal w-full mt-0.5",
-                          isRingInactive ? "text-slate-400" : "text-white"
-                        )}>{cleanPlaceholder(b?.data.blue_name || "")}</span>
+                        <span 
+                          style={effectiveStandbyClubScale !== 100 ? { fontSize: `calc(13px * ${effectiveStandbyClubScale / 100})`, lineHeight: 1.15 } : undefined}
+                          className="text-[13px] font-bold text-white uppercase leading-tight break-words whitespace-normal w-full"
+                        >
+                          {cleanPlaceholder(b?.data.blue_club || "")}
+                        </span>
+                        <span 
+                          style={effectiveStandbyNameScale !== 100 ? { fontSize: `calc(16px * ${effectiveStandbyNameScale / 100})`, lineHeight: 1.15 } : undefined}
+                          className={cn(
+                            "text-[16px] font-black uppercase leading-tight break-words whitespace-normal w-full mt-0.5",
+                            isRingInactive ? "text-slate-400" : "text-white"
+                          )}
+                        >
+                          {cleanPlaceholder(b?.data.blue_name || "")}
+                        </span>
                         {b?.data.blue_inspected ? (
                           <div className="absolute bottom-1 right-2 z-10">
                             <span 
@@ -9506,11 +9748,21 @@ function StandbyView({
                           "col-span-5 flex flex-col justify-center px-3 relative",
                           isRingInactive ? "bg-slate-800" : "bg-red-600/80"
                         )}>
-                          <span className="text-[13px] font-bold text-white uppercase leading-tight break-words whitespace-normal w-full">{cleanPlaceholder(b?.data.red_club || "")}</span>
-                          <span className={cn(
-                            "text-[16px] font-black uppercase leading-tight break-words whitespace-normal w-full mt-0.5",
-                            isRingInactive ? "text-slate-400" : "text-white"
-                          )}>{cleanPlaceholder(b?.data.red_name || "")}</span>
+                          <span 
+                            style={effectiveStandbyClubScale !== 100 ? { fontSize: `calc(13px * ${effectiveStandbyClubScale / 100})`, lineHeight: 1.15 } : undefined}
+                            className="text-[13px] font-bold text-white uppercase leading-tight break-words whitespace-normal w-full"
+                          >
+                            {cleanPlaceholder(b?.data.red_club || "")}
+                          </span>
+                          <span 
+                            style={effectiveStandbyNameScale !== 100 ? { fontSize: `calc(16px * ${effectiveStandbyNameScale / 100})`, lineHeight: 1.15 } : undefined}
+                            className={cn(
+                              "text-[16px] font-black uppercase leading-tight break-words whitespace-normal w-full mt-0.5",
+                              isRingInactive ? "text-slate-400" : "text-white"
+                            )}
+                          >
+                            {cleanPlaceholder(b?.data.red_name || "")}
+                          </span>
                           {b?.data.red_inspected ? (
                             <div className="absolute bottom-1 right-2 z-10">
                               <span 
@@ -9570,7 +9822,15 @@ function SiteView({
   events = [],
   onUpdateEventName = () => {},
   displayEventName = '',
-  onUpdateDisplayEventName = () => {}
+  onUpdateDisplayEventName = () => {},
+  activeNameFontScale,
+  setActiveNameFontScale,
+  activeClubFontScale,
+  setActiveClubFontScale,
+  standbyNameFontScale,
+  setStandbyNameFontScale,
+  standbyClubFontScale,
+  setStandbyClubFontScale
 }: { 
   rings: RingStatus[], 
   boutQueue: {id: string, data: MatchData}[], 
@@ -9590,8 +9850,29 @@ function SiteView({
   events?: EventData[],
   onUpdateEventName?: (name: string) => void,
   displayEventName?: string,
-  onUpdateDisplayEventName?: (name: string) => void
+  onUpdateDisplayEventName?: (name: string) => void,
+  activeNameFontScale?: number,
+  setActiveNameFontScale?: (val: number | ((prev: number) => number)) => void,
+  activeClubFontScale?: number,
+  setActiveClubFontScale?: (val: number | ((prev: number) => number)) => void,
+  standbyNameFontScale?: number,
+  setStandbyNameFontScale?: (val: number | ((prev: number) => number)) => void,
+  standbyClubFontScale?: number,
+  setStandbyClubFontScale?: (val: number | ((prev: number) => number)) => void
 }) {
+  const [syncedNameFontScale, setSyncedNameFontScale] = useSyncedState<number>('tkd_active_name_font_scale', 100);
+  const [syncedClubFontScale, setSyncedClubFontScale] = useSyncedState<number>('tkd_active_club_font_scale', 100);
+  const [syncedStandbyNameFontScale, setSyncedStandbyNameFontScale] = useSyncedState<number>('tkd_standby_name_font_scale', 100);
+  const [syncedStandbyClubFontScale, setSyncedStandbyClubFontScale] = useSyncedState<number>('tkd_standby_club_font_scale', 100);
+  const effectiveNameScale = activeNameFontScale ?? syncedNameFontScale;
+  const effectiveSetNameScale = setActiveNameFontScale ?? setSyncedNameFontScale;
+  const effectiveClubScale = activeClubFontScale ?? syncedClubFontScale;
+  const effectiveSetClubScale = setActiveClubFontScale ?? setSyncedClubFontScale;
+  const effectiveStandbyNameScale = standbyNameFontScale ?? syncedStandbyNameFontScale;
+  const effectiveSetStandbyNameScale = setStandbyNameFontScale ?? setSyncedStandbyNameFontScale;
+  const effectiveStandbyClubScale = standbyClubFontScale ?? syncedStandbyClubFontScale;
+  const effectiveSetStandbyClubScale = setStandbyClubFontScale ?? setSyncedStandbyClubFontScale;
+
   const containerRef = React.useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = React.useState(false);
   const [currentPage, setCurrentPage] = React.useState(0);
@@ -9717,6 +9998,19 @@ function SiteView({
               </select>
             </div>
           )}
+          {isAdmin && (
+            <AdminFontSizeControls
+              activeNameFontScale={effectiveNameScale}
+              setActiveNameFontScale={effectiveSetNameScale}
+              activeClubFontScale={effectiveClubScale}
+              setActiveClubFontScale={effectiveSetClubScale}
+              standbyNameFontScale={effectiveStandbyNameScale}
+              setStandbyNameFontScale={effectiveSetStandbyNameScale}
+              standbyClubFontScale={effectiveStandbyClubScale}
+              setStandbyClubFontScale={effectiveSetStandbyClubScale}
+              dark={true}
+            />
+          )}
           <button 
             onClick={toggleFullScreen}
             className="p-3 bg-slate-900 text-white hover:bg-slate-800 rounded-2xl border border-slate-800 transition-all group"
@@ -9803,13 +10097,33 @@ function SiteView({
                           "flex-1 bg-blue-600/90 flex flex-col justify-center px-4 relative",
                           !isPoomsaeModeCurrent && "border-b border-white/10"
                         )}>
-                          <p className="text-[14px] font-bold text-[#ffd700] uppercase leading-none mb-1">{current ? cleanPlaceholder(current.blue_club || "") : "---"}</p>
-                          <h4 className="text-[27px] font-black text-white uppercase leading-none truncate">{current ? cleanPlaceholder(current.blue_name || "") : "---"}</h4>
+                          <p 
+                            className="text-[14px] font-bold text-[#ffd700] uppercase leading-none mb-1"
+                            style={effectiveClubScale !== 100 ? { fontSize: `calc(14px * ${effectiveClubScale / 100})`, lineHeight: 1.15 } : undefined}
+                          >
+                            {current ? cleanPlaceholder(current.blue_club || "") : "---"}
+                          </p>
+                          <h4 
+                            className="text-[27px] font-black text-white uppercase leading-none truncate"
+                            style={effectiveNameScale !== 100 ? { fontSize: `calc(27px * ${effectiveNameScale / 100})`, lineHeight: 1.15 } : undefined}
+                          >
+                            {current ? cleanPlaceholder(current.blue_name || "") : "---"}
+                          </h4>
                         </div>
                         {!isPoomsaeModeCurrent && (
                           <div className="flex-1 bg-red-600/90 flex flex-col justify-center px-4 relative">
-                            <p className="text-[14px] font-bold text-[#ffd700] uppercase leading-none mb-1">{current ? cleanPlaceholder(current.red_club || "") : "---"}</p>
-                            <h4 className="text-[27px] font-black text-white uppercase leading-none truncate">{current ? cleanPlaceholder(current.red_name || "") : "---"}</h4>
+                            <p 
+                              className="text-[14px] font-bold text-[#ffd700] uppercase leading-none mb-1"
+                              style={effectiveClubScale !== 100 ? { fontSize: `calc(14px * ${effectiveClubScale / 100})`, lineHeight: 1.15 } : undefined}
+                            >
+                              {current ? cleanPlaceholder(current.red_club || "") : "---"}
+                            </p>
+                            <h4 
+                              className="text-[27px] font-black text-white uppercase leading-none truncate"
+                              style={effectiveNameScale !== 100 ? { fontSize: `calc(27px * ${effectiveNameScale / 100})`, lineHeight: 1.15 } : undefined}
+                            >
+                              {current ? cleanPlaceholder(current.red_name || "") : "---"}
+                            </h4>
                           </div>
                         )}
                       </div>
@@ -9842,22 +10156,42 @@ function SiteView({
                         isPoomsaeItem ? "col-span-10" : "col-span-5 border-r border-white/10",
                         isRingInactive ? "bg-slate-800" : "bg-blue-600/80"
                       )}>
-                        <span className="text-[13px] font-bold text-[#ffd700] uppercase leading-tight break-words whitespace-normal w-full">{cleanPlaceholder(b?.data.blue_club || "")}</span>
-                        <span className={cn(
-                          "text-[16px] font-black uppercase leading-tight break-words whitespace-normal w-full mt-0.5",
-                          isRingInactive ? "text-slate-400" : "text-white"
-                        )}>{cleanPlaceholder(b?.data.blue_name || "")}</span>
+                        <span 
+                          style={effectiveStandbyClubScale !== 100 ? { fontSize: `calc(13px * ${effectiveStandbyClubScale / 100})`, lineHeight: 1.15 } : undefined}
+                          className="text-[13px] font-bold text-[#ffd700] uppercase leading-tight break-words whitespace-normal w-full"
+                        >
+                          {cleanPlaceholder(b?.data.blue_club || "")}
+                        </span>
+                        <span 
+                          style={effectiveStandbyNameScale !== 100 ? { fontSize: `calc(16px * ${effectiveStandbyNameScale / 100})`, lineHeight: 1.15 } : undefined}
+                          className={cn(
+                            "text-[16px] font-black uppercase leading-tight break-words whitespace-normal w-full mt-0.5",
+                            isRingInactive ? "text-slate-400" : "text-white"
+                          )}
+                        >
+                          {cleanPlaceholder(b?.data.blue_name || "")}
+                        </span>
                       </div>
                       {!isPoomsaeItem && (
                         <div className={cn(
                           "col-span-5 flex flex-col justify-center px-3 relative",
                           isRingInactive ? "bg-slate-800" : "bg-red-600/80"
                         )}>
-                          <span className="text-[13px] font-bold text-[#ffd700] uppercase leading-tight break-words whitespace-normal w-full">{cleanPlaceholder(b?.data.red_club || "")}</span>
-                          <span className={cn(
-                            "text-[16px] font-black uppercase leading-tight break-words whitespace-normal w-full mt-0.5",
-                            isRingInactive ? "text-slate-400" : "text-white"
-                          )}>{cleanPlaceholder(b?.data.red_name || "")}</span>
+                          <span 
+                            style={effectiveStandbyClubScale !== 100 ? { fontSize: `calc(13px * ${effectiveStandbyClubScale / 100})`, lineHeight: 1.15 } : undefined}
+                            className="text-[13px] font-bold text-[#ffd700] uppercase leading-tight break-words whitespace-normal w-full"
+                          >
+                            {cleanPlaceholder(b?.data.red_club || "")}
+                          </span>
+                          <span 
+                            style={effectiveStandbyNameScale !== 100 ? { fontSize: `calc(16px * ${effectiveStandbyNameScale / 100})`, lineHeight: 1.15 } : undefined}
+                            className={cn(
+                              "text-[16px] font-black uppercase leading-tight break-words whitespace-normal w-full mt-0.5",
+                              isRingInactive ? "text-slate-400" : "text-white"
+                            )}
+                          >
+                            {cleanPlaceholder(b?.data.red_name || "")}
+                          </span>
                         </div>
                       )}
                     </div>
@@ -9892,7 +10226,15 @@ function PointsView({
   events = [],
   onUpdateEventName = () => {},
   displayEventName = '',
-  onUpdateDisplayEventName = () => {}
+  onUpdateDisplayEventName = () => {},
+  activeNameFontScale,
+  setActiveNameFontScale,
+  activeClubFontScale,
+  setActiveClubFontScale,
+  standbyNameFontScale,
+  setStandbyNameFontScale,
+  standbyClubFontScale,
+  setStandbyClubFontScale
 }: { 
   rings: RingStatus[], 
   boutQueue: {id: string, data: MatchData}[], 
@@ -9911,8 +10253,29 @@ function PointsView({
   events?: EventData[],
   onUpdateEventName?: (name: string) => void,
   displayEventName?: string,
-  onUpdateDisplayEventName?: (name: string) => void
+  onUpdateDisplayEventName?: (name: string) => void,
+  activeNameFontScale?: number,
+  setActiveNameFontScale?: (val: number | ((prev: number) => number)) => void,
+  activeClubFontScale?: number,
+  setActiveClubFontScale?: (val: number | ((prev: number) => number)) => void,
+  standbyNameFontScale?: number,
+  setStandbyNameFontScale?: (val: number | ((prev: number) => number)) => void,
+  standbyClubFontScale?: number,
+  setStandbyClubFontScale?: (val: number | ((prev: number) => number)) => void
 }) {
+  const [syncedNameFontScale, setSyncedNameFontScale] = useSyncedState<number>('tkd_active_name_font_scale', 100);
+  const [syncedClubFontScale, setSyncedClubFontScale] = useSyncedState<number>('tkd_active_club_font_scale', 100);
+  const [syncedStandbyNameFontScale, setSyncedStandbyNameFontScale] = useSyncedState<number>('tkd_standby_name_font_scale', 100);
+  const [syncedStandbyClubFontScale, setSyncedStandbyClubFontScale] = useSyncedState<number>('tkd_standby_club_font_scale', 100);
+  const effectiveNameScale = activeNameFontScale ?? syncedNameFontScale;
+  const effectiveSetNameScale = setActiveNameFontScale ?? setSyncedNameFontScale;
+  const effectiveClubScale = activeClubFontScale ?? syncedClubFontScale;
+  const effectiveSetClubScale = setActiveClubFontScale ?? setSyncedClubFontScale;
+  const effectiveStandbyNameScale = standbyNameFontScale ?? syncedStandbyNameFontScale;
+  const effectiveSetStandbyNameScale = setStandbyNameFontScale ?? setSyncedStandbyNameFontScale;
+  const effectiveStandbyClubScale = standbyClubFontScale ?? syncedStandbyClubFontScale;
+  const effectiveSetStandbyClubScale = setStandbyClubFontScale ?? setSyncedStandbyClubFontScale;
+
   const containerRef = React.useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = React.useState(false);
   const [currentPage, setCurrentPage] = React.useState(0);
@@ -10038,6 +10401,19 @@ function PointsView({
               </select>
             </div>
           )}
+          {isAdmin && (
+            <AdminFontSizeControls
+              activeNameFontScale={effectiveNameScale}
+              setActiveNameFontScale={effectiveSetNameScale}
+              activeClubFontScale={effectiveClubScale}
+              setActiveClubFontScale={effectiveSetClubScale}
+              standbyNameFontScale={effectiveStandbyNameScale}
+              setStandbyNameFontScale={effectiveSetStandbyNameScale}
+              standbyClubFontScale={effectiveStandbyClubScale}
+              setStandbyClubFontScale={effectiveSetStandbyClubScale}
+              dark={true}
+            />
+          )}
           <button 
             onClick={toggleFullScreen}
             className="p-3 bg-slate-900 text-white hover:bg-slate-800 rounded-2xl border border-slate-800 transition-all group"
@@ -10122,13 +10498,33 @@ function PointsView({
                             "flex-1 bg-blue-600/90 flex flex-col justify-center px-4 relative",
                             !isPoomsaeModeCurrent && "border-b border-white/10"
                           )}>
-                            <p className="text-[15px] font-bold text-[#ffd700] uppercase leading-none mb-1">{current ? cleanPlaceholder(current.blue_club || "") : "---"}</p>
-                            <h4 className="text-[23px] font-black text-white uppercase leading-none truncate">{current ? cleanPlaceholder(current.blue_name || "") : "---"}</h4>
+                            <p 
+                              className="text-[15px] font-bold text-[#ffd700] uppercase leading-none mb-1"
+                              style={effectiveClubScale !== 100 ? { fontSize: `calc(15px * ${effectiveClubScale / 100})`, lineHeight: 1.15 } : undefined}
+                            >
+                              {current ? cleanPlaceholder(current.blue_club || "") : "---"}
+                            </p>
+                            <h4 
+                              className="text-[23px] font-black text-white uppercase leading-none truncate"
+                              style={effectiveNameScale !== 100 ? { fontSize: `calc(23px * ${effectiveNameScale / 100})`, lineHeight: 1.15 } : undefined}
+                            >
+                              {current ? cleanPlaceholder(current.blue_name || "") : "---"}
+                            </h4>
                           </div>
                           {!isPoomsaeModeCurrent && (
                             <div className="flex-1 bg-red-600/90 flex flex-col justify-center px-4 relative">
-                              <p className="text-[15px] font-bold text-[#ffd700] uppercase leading-none mb-1">{current ? cleanPlaceholder(current.red_club || "") : "---"}</p>
-                              <h4 className="text-[23px] font-black text-white uppercase leading-none truncate">{current ? cleanPlaceholder(current.red_name || "") : "---"}</h4>
+                              <p 
+                                className="text-[15px] font-bold text-[#ffd700] uppercase leading-none mb-1"
+                                style={effectiveClubScale !== 100 ? { fontSize: `calc(15px * ${effectiveClubScale / 100})`, lineHeight: 1.15 } : undefined}
+                              >
+                                {current ? cleanPlaceholder(current.red_club || "") : "---"}
+                              </p>
+                              <h4 
+                                className="text-[23px] font-black text-white uppercase leading-none truncate"
+                                style={effectiveNameScale !== 100 ? { fontSize: `calc(23px * ${effectiveNameScale / 100})`, lineHeight: 1.15 } : undefined}
+                              >
+                                {current ? cleanPlaceholder(current.red_name || "") : "---"}
+                              </h4>
                             </div>
                           )}
                         </div>
@@ -10140,8 +10536,8 @@ function PointsView({
                             const explicitVal = pt[winKey as 'r1Winner' | 'r2Winner' | 'r3Winner'];
                             if (explicitVal === 'Blue' || explicitVal === 'Red') return explicitVal;
                             
-                            const blueVal = pt[`r${roundNum}Blue` as 'r1Blue' | 'r2Blue' | 'r3Blue'] !== undefined && pt[`r${roundNum}Blue` as 'r1Blue' | 'r2Blue' | 'r3Blue'] !== null ? parseInt(pt[`r${roundNum}Blue` as 'r1Blue' | 'r2Blue' | 'r3Blue'] || '') : NaN;
-                            const redVal = pt[`r${roundNum}Red` as 'r1Red' | 'r2Red' | 'r3Red'] !== undefined && pt[`r${roundNum}Red` as 'r1Red' | 'r2Red' | 'r3Red'] !== null ? parseInt(pt[`r${roundNum}Red` as 'r1Red' | 'r2Red' | 'r3Red'] || '') : NaN;
+                            const blueVal = pt[`r${roundNum}Blue` as 'r1Blue' | 'r2Blue' | 'r3Blue'] !== undefined && pt[`r${roundNum}Blue` as 'r1Blue' | 'r2Blue' | 'r3Blue'] !== null ? parseFloat(pt[`r${roundNum}Blue` as 'r1Blue' | 'r2Blue' | 'r3Blue'] || '') : NaN;
+                            const redVal = pt[`r${roundNum}Red` as 'r1Red' | 'r2Red' | 'r3Red'] !== undefined && pt[`r${roundNum}Red` as 'r1Red' | 'r2Red' | 'r3Red'] !== null ? parseFloat(pt[`r${roundNum}Red` as 'r1Red' | 'r2Red' | 'r3Red'] || '') : NaN;
                             if (!isNaN(blueVal) && !isNaN(redVal)) {
                               if (blueVal > redVal) return 'Blue';
                               if (redVal > blueVal) return 'Red';
@@ -10246,11 +10642,21 @@ function PointsView({
                         isPoomsaeItem ? "col-span-9" : "col-span-5 border-r border-white/10",
                         isRingInactive ? "bg-slate-800" : "bg-blue-600/80"
                       )}>
-                        <span className="text-[13px] font-bold text-[#ffd700] uppercase leading-none">{cleanPlaceholder(b?.data.blue_club || "")}</span>
-                        <span className={cn(
-                          "text-[15px] font-black uppercase truncate leading-tight",
-                          isRingInactive ? "text-slate-400" : "text-white"
-                        )}>{cleanPlaceholder(b?.data.blue_name || "")}</span>
+                        <span 
+                          style={effectiveStandbyClubScale !== 100 ? { fontSize: `calc(13px * ${effectiveStandbyClubScale / 100})`, lineHeight: 1.15 } : undefined}
+                          className="text-[13px] font-bold text-[#ffd700] uppercase leading-none"
+                        >
+                          {cleanPlaceholder(b?.data.blue_club || "")}
+                        </span>
+                        <span 
+                          style={effectiveStandbyNameScale !== 100 ? { fontSize: `calc(15px * ${effectiveStandbyNameScale / 100})`, lineHeight: 1.15 } : undefined}
+                          className={cn(
+                            "text-[15px] font-black uppercase truncate leading-tight",
+                            isRingInactive ? "text-slate-400" : "text-white"
+                          )}
+                        >
+                          {cleanPlaceholder(b?.data.blue_name || "")}
+                        </span>
                         
                       </div>
                       {!isPoomsaeItem && (
@@ -10258,11 +10664,21 @@ function PointsView({
                           "col-span-4 flex flex-col justify-center px-3 relative",
                           isRingInactive ? "bg-slate-800" : "bg-red-600/80"
                         )}>
-                          <span className="text-[13px] font-bold text-[#ffd700] uppercase leading-none">{cleanPlaceholder(b?.data.red_club || "")}</span>
-                          <span className={cn(
-                            "text-[15px] font-black uppercase truncate leading-tight",
-                            isRingInactive ? "text-slate-400" : "text-white"
-                        )}>{cleanPlaceholder(b?.data.red_name || "")}</span>
+                          <span 
+                            style={effectiveStandbyClubScale !== 100 ? { fontSize: `calc(13px * ${effectiveStandbyClubScale / 100})`, lineHeight: 1.15 } : undefined}
+                            className="text-[13px] font-bold text-[#ffd700] uppercase leading-none"
+                          >
+                            {cleanPlaceholder(b?.data.red_club || "")}
+                          </span>
+                          <span 
+                            style={effectiveStandbyNameScale !== 100 ? { fontSize: `calc(15px * ${effectiveStandbyNameScale / 100})`, lineHeight: 1.15 } : undefined}
+                            className={cn(
+                              "text-[15px] font-black uppercase truncate leading-tight",
+                              isRingInactive ? "text-slate-400" : "text-white"
+                            )}
+                          >
+                            {cleanPlaceholder(b?.data.red_name || "")}
+                          </span>
                           
                         </div>
                       )}
@@ -10300,7 +10716,15 @@ function OnsiteView({
   events = [],
   onUpdateEventName = () => {},
   displayEventName = '',
-  onUpdateDisplayEventName = () => {}
+  onUpdateDisplayEventName = () => {},
+  activeNameFontScale,
+  setActiveNameFontScale,
+  activeClubFontScale,
+  setActiveClubFontScale,
+  standbyNameFontScale,
+  setStandbyNameFontScale,
+  standbyClubFontScale,
+  setStandbyClubFontScale
 }: { 
   rings: RingStatus[], 
   boutQueue: {id: string, data: MatchData}[], 
@@ -10319,8 +10743,29 @@ function OnsiteView({
   events?: EventData[],
   onUpdateEventName?: (name: string) => void,
   displayEventName?: string,
-  onUpdateDisplayEventName?: (name: string) => void
+  onUpdateDisplayEventName?: (name: string) => void,
+  activeNameFontScale?: number,
+  setActiveNameFontScale?: (val: number | ((prev: number) => number)) => void,
+  activeClubFontScale?: number,
+  setActiveClubFontScale?: (val: number | ((prev: number) => number)) => void,
+  standbyNameFontScale?: number,
+  setStandbyNameFontScale?: (val: number | ((prev: number) => number)) => void,
+  standbyClubFontScale?: number,
+  setStandbyClubFontScale?: (val: number | ((prev: number) => number)) => void
 }) {
+  const [syncedNameFontScale, setSyncedNameFontScale] = useSyncedState<number>('tkd_active_name_font_scale', 100);
+  const [syncedClubFontScale, setSyncedClubFontScale] = useSyncedState<number>('tkd_active_club_font_scale', 100);
+  const [syncedStandbyNameFontScale, setSyncedStandbyNameFontScale] = useSyncedState<number>('tkd_standby_name_font_scale', 100);
+  const [syncedStandbyClubFontScale, setSyncedStandbyClubFontScale] = useSyncedState<number>('tkd_standby_club_font_scale', 100);
+  const effectiveNameScale = activeNameFontScale ?? syncedNameFontScale;
+  const effectiveSetNameScale = setActiveNameFontScale ?? setSyncedNameFontScale;
+  const effectiveClubScale = activeClubFontScale ?? syncedClubFontScale;
+  const effectiveSetClubScale = setActiveClubFontScale ?? setSyncedClubFontScale;
+  const effectiveStandbyNameScale = standbyNameFontScale ?? syncedStandbyNameFontScale;
+  const effectiveSetStandbyNameScale = setStandbyNameFontScale ?? setSyncedStandbyNameFontScale;
+  const effectiveStandbyClubScale = standbyClubFontScale ?? syncedStandbyClubFontScale;
+  const effectiveSetStandbyClubScale = setStandbyClubFontScale ?? setSyncedStandbyClubFontScale;
+
   const containerRef = React.useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = React.useState(false);
   const [currentPage, setCurrentPage] = React.useState(0);
@@ -10460,6 +10905,19 @@ function OnsiteView({
                 </select>
               </div>
             )}
+            {isAdmin && (
+              <AdminFontSizeControls
+                activeNameFontScale={effectiveNameScale}
+                setActiveNameFontScale={effectiveSetNameScale}
+                activeClubFontScale={effectiveClubScale}
+                setActiveClubFontScale={effectiveSetClubScale}
+                standbyNameFontScale={effectiveStandbyNameScale}
+                setStandbyNameFontScale={effectiveSetStandbyNameScale}
+                standbyClubFontScale={effectiveStandbyClubScale}
+                setStandbyClubFontScale={effectiveSetStandbyClubScale}
+                dark={true}
+              />
+            )}
             <div className="flex flex-col items-end">
               <div className="flex items-center gap-2">
                 <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
@@ -10489,6 +10947,21 @@ function OnsiteView({
               <p className="text-[10px] font-black text-white uppercase tracking-[0.3em] mt-1">Live Multi-Court Monitoring System</p>
             </div>
           </div>
+          {isAdmin && (
+            <div className="absolute top-6 right-20 z-50">
+              <AdminFontSizeControls
+                activeNameFontScale={effectiveNameScale}
+                setActiveNameFontScale={effectiveSetNameScale}
+                activeClubFontScale={effectiveClubScale}
+                setActiveClubFontScale={effectiveSetClubScale}
+                standbyNameFontScale={effectiveStandbyNameScale}
+                setStandbyNameFontScale={effectiveSetStandbyNameScale}
+                standbyClubFontScale={effectiveStandbyClubScale}
+                setStandbyClubFontScale={effectiveSetStandbyClubScale}
+                dark={true}
+              />
+            </div>
+          )}
           <button 
             onClick={toggleFullScreen}
             className="absolute top-6 right-6 p-3 bg-slate-900/50 hover:bg-slate-800 text-slate-400 hover:text-white rounded-2xl border border-slate-800 transition-all z-50 opacity-0 hover:opacity-100"
@@ -10584,10 +11057,16 @@ function OnsiteView({
                         )}>
                           <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-white/20 to-transparent pointer-events-none" />
                           <div className="absolute -right-4 top-1/2 -translate-y-1/2 text-8xl font-black text-white/5 italic select-none">{(!current || !hasPlayers(current)) ? 'BLURRED' : 'BLUE'}</div>
-                          <p className="text-[16px] font-black text-yellow-400 uppercase tracking-[0.2em] mb-1 relative z-10 truncate w-full">
+                          <p 
+                            className="text-[16px] font-black text-yellow-400 uppercase tracking-[0.2em] mb-1 relative z-10 truncate w-full"
+                            style={effectiveClubScale !== 100 ? { fontSize: `calc(16px * ${effectiveClubScale / 100})`, lineHeight: 1.15 } : undefined}
+                          >
                             {current ? cleanPlaceholder(current.blue_club || "") : "---"}
                           </p>
-                          <h4 className="font-black text-white uppercase relative z-10 leading-tight text-[25px] break-words whitespace-normal w-full">
+                          <h4 
+                            className="font-black text-white uppercase relative z-10 leading-tight text-[25px] break-words whitespace-normal w-full"
+                            style={effectiveNameScale !== 100 ? { fontSize: `calc(25px * ${effectiveNameScale / 100})`, lineHeight: 1.15 } : undefined}
+                          >
                             {current?.privacy_mode || !current?.blue_name ? "---" : cleanPlaceholder(current.blue_name)}
                           </h4>
                         </div>
@@ -10607,10 +11086,16 @@ function OnsiteView({
                           <div className="flex-1 h-full bg-red-600 flex flex-col justify-center px-10 text-right relative overflow-hidden group">
                             <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-bl from-white/20 to-transparent pointer-events-none" />
                             <div className="absolute -left-4 top-1/2 -translate-y-1/2 text-8xl font-black text-white/5 italic select-none">{(!current || !hasPlayers(current)) ? 'BLURRED' : 'RED'}</div>
-                            <p className="text-[16px] font-black text-yellow-400 uppercase tracking-[0.2em] mb-1 relative z-10 truncate w-full text-right">
+                            <p 
+                              className="text-[16px] font-black text-yellow-400 uppercase tracking-[0.2em] mb-1 relative z-10 truncate w-full text-right"
+                              style={effectiveClubScale !== 100 ? { fontSize: `calc(16px * ${effectiveClubScale / 100})`, lineHeight: 1.15 } : undefined}
+                            >
                               {current ? cleanPlaceholder(current.red_club || "") : "---"}
                             </p>
-                            <h4 className="font-black text-white uppercase relative z-10 leading-tight text-[25px] break-words whitespace-normal w-full text-right">
+                            <h4 
+                              className="font-black text-white uppercase relative z-10 leading-tight text-[25px] break-words whitespace-normal w-full text-right"
+                              style={effectiveNameScale !== 100 ? { fontSize: `calc(25px * ${effectiveNameScale / 100})`, lineHeight: 1.15 } : undefined}
+                            >
                               {current?.privacy_mode || !current?.red_name ? "---" : cleanPlaceholder(current.red_name)}
                             </h4>
                           </div>
@@ -10652,14 +11137,20 @@ function OnsiteView({
                           isRingInactive ? "bg-slate-800" : "bg-blue-600/90"
                         )}>
                           {!isRingInactive && <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-white/10 to-transparent pointer-events-none" />}
-                          <p className="text-[9px] font-bold text-yellow-400 uppercase leading-none mb-0.5 relative z-10">
+                          <p 
+                            className="text-[9px] font-bold text-yellow-400 uppercase leading-none mb-0.5 relative z-10"
+                            style={effectiveStandbyClubScale !== 100 ? { fontSize: `calc(9px * ${effectiveStandbyClubScale / 100})`, lineHeight: 1.15 } : undefined}
+                          >
                             {bout ? cleanPlaceholder(bout.data.blue_club) : ""}
                           </p>
-                          <p className={cn(
-                            "font-black uppercase tracking-[1px] relative z-10 leading-tight line-clamp-2 whitespace-normal break-words",
-                            getStandbyDynamicFontSize(bout?.data.blue_name || ""),
-                            isRingInactive ? "text-slate-400" : "text-white"
-                          )}>
+                          <p 
+                            className={cn(
+                              "font-black uppercase tracking-[1px] relative z-10 leading-tight line-clamp-2 whitespace-normal break-words",
+                              effectiveStandbyNameScale === 100 && getStandbyDynamicFontSize(bout?.data.blue_name || ""),
+                              isRingInactive ? "text-slate-400" : "text-white"
+                            )}
+                            style={effectiveStandbyNameScale !== 100 ? { fontSize: `calc(11px * ${effectiveStandbyNameScale / 100})`, lineHeight: 1.15 } : undefined}
+                          >
                             {bout ? (bout.data.privacy_mode ? "---" : cleanPlaceholder(bout.data.blue_name)) : ""}
                           </p>
                         </div>
@@ -10681,14 +11172,20 @@ function OnsiteView({
                             isRingInactive ? "bg-slate-800" : "bg-red-600/90"
                           )}>
                             {!isRingInactive && <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-bl from-white/10 to-transparent pointer-events-none" />}
-                            <p className="text-[9px] font-bold text-yellow-400 uppercase leading-none mb-0.5 relative z-10">
+                            <p 
+                              className="text-[9px] font-bold text-yellow-400 uppercase leading-none mb-0.5 relative z-10"
+                              style={effectiveStandbyClubScale !== 100 ? { fontSize: `calc(9px * ${effectiveStandbyClubScale / 100})`, lineHeight: 1.15 } : undefined}
+                            >
                               {bout ? cleanPlaceholder(bout.data.red_club) : ""}
                             </p>
-                            <p className={cn(
-                              "font-black uppercase tracking-[1px] relative z-10 leading-tight line-clamp-2 whitespace-normal break-words",
-                              getStandbyDynamicFontSize(bout?.data.red_name || ""),
-                              isRingInactive ? "text-slate-400" : "text-white"
-                            )}>
+                            <p 
+                              className={cn(
+                                "font-black uppercase tracking-[1px] relative z-10 leading-tight line-clamp-2 whitespace-normal break-words",
+                                effectiveStandbyNameScale === 100 && getStandbyDynamicFontSize(bout?.data.red_name || ""),
+                                isRingInactive ? "text-slate-400" : "text-white"
+                              )}
+                              style={effectiveStandbyNameScale !== 100 ? { fontSize: `calc(11px * ${effectiveStandbyNameScale / 100})`, lineHeight: 1.15 } : undefined}
+                            >
                               {bout ? (bout.data.privacy_mode ? "---" : cleanPlaceholder(bout.data.red_name)) : ""}
                             </p>
                           </div>
@@ -10745,7 +11242,15 @@ function PublicDashboardView({
   events = [],
   onUpdateEventName = () => {},
   displayEventName = '',
-  onUpdateDisplayEventName = () => {}
+  onUpdateDisplayEventName = () => {},
+  activeNameFontScale,
+  setActiveNameFontScale,
+  activeClubFontScale,
+  setActiveClubFontScale,
+  standbyNameFontScale,
+  setStandbyNameFontScale,
+  standbyClubFontScale,
+  setStandbyClubFontScale
 }: { 
   rings: RingStatus[], 
   boutQueue: {id: string, data: MatchData}[], 
@@ -10766,8 +11271,28 @@ function PublicDashboardView({
   events?: EventData[],
   onUpdateEventName?: (name: string) => void,
   displayEventName?: string,
-  onUpdateDisplayEventName?: (name: string) => void
+  onUpdateDisplayEventName?: (name: string) => void,
+  activeNameFontScale?: number,
+  setActiveNameFontScale?: (scale: number | ((prev: number) => number)) => void,
+  activeClubFontScale?: number,
+  setActiveClubFontScale?: (scale: number | ((prev: number) => number)) => void,
+  standbyNameFontScale?: number,
+  setStandbyNameFontScale?: (scale: number | ((prev: number) => number)) => void,
+  standbyClubFontScale?: number,
+  setStandbyClubFontScale?: (scale: number | ((prev: number) => number)) => void
 }) {
+  const [syncedNameScale, setSyncedNameScale] = useSyncedState<number>('tkd_active_name_font_scale', 100);
+  const [syncedClubScale, setSyncedClubScale] = useSyncedState<number>('tkd_active_club_font_scale', 100);
+  const [syncedStandbyNameScale, setSyncedStandbyNameScale] = useSyncedState<number>('tkd_standby_name_font_scale', 100);
+  const [syncedStandbyClubScale, setSyncedStandbyClubScale] = useSyncedState<number>('tkd_standby_club_font_scale', 100);
+  const effectiveNameScale = activeNameFontScale ?? syncedNameScale;
+  const effectiveSetNameScale = setActiveNameFontScale ?? setSyncedNameScale;
+  const effectiveClubScale = activeClubFontScale ?? syncedClubScale;
+  const effectiveSetClubScale = setActiveClubFontScale ?? setSyncedClubScale;
+  const effectiveStandbyNameScale = standbyNameFontScale ?? syncedStandbyNameScale;
+  const effectiveSetStandbyNameScale = setStandbyNameFontScale ?? setSyncedStandbyNameScale;
+  const effectiveStandbyClubScale = standbyClubFontScale ?? syncedStandbyClubScale;
+  const effectiveSetStandbyClubScale = setStandbyClubFontScale ?? setSyncedStandbyClubScale;
   const [logoClicks, setLogoClicks] = React.useState(0);
   const clickTimer = React.useRef<NodeJS.Timeout | null>(null);
   const [isQuotaExceeded, setIsQuotaExceeded] = React.useState(false);
@@ -10870,22 +11395,35 @@ function PublicDashboardView({
 
         <div className="flex items-center gap-4 shrink-0 justify-end z-10">
           {isAdmin && (
-            <div className="hidden sm:flex items-center gap-2 bg-slate-900/50 text-white rounded-xl border border-slate-700 px-3 py-1.5">
-              <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest select-none">Grid:</span>
-              <select
-                value={courtsPerRow}
-                onChange={(e) => {
-                  const val = parseInt(e.target.value, 10);
-                  setCourtsPerRow(val);
-                  localStorage.setItem('tkd_public_courts_per_row', val.toString());
-                }}
-                className="bg-transparent text-white text-xs font-black outline-none border-none focus:ring-0 cursor-pointer"
-              >
-                {[1, 2, 3, 4, 5, 6, 8].map(n => (
-                  <option key={n} value={n} className="bg-slate-800 text-white">{n} Courts / Row</option>
-                ))}
-              </select>
-            </div>
+            <>
+              <AdminFontSizeControls
+                activeNameFontScale={effectiveNameScale}
+                setActiveNameFontScale={effectiveSetNameScale}
+                activeClubFontScale={effectiveClubScale}
+                setActiveClubFontScale={effectiveSetClubScale}
+                standbyNameFontScale={effectiveStandbyNameScale}
+                setStandbyNameFontScale={effectiveSetStandbyNameScale}
+                standbyClubFontScale={effectiveStandbyClubScale}
+                setStandbyClubFontScale={effectiveSetStandbyClubScale}
+                dark={true}
+              />
+              <div className="hidden sm:flex items-center gap-2 bg-slate-900/50 text-white rounded-xl border border-slate-700 px-3 py-1.5">
+                <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest select-none">Grid:</span>
+                <select
+                  value={courtsPerRow}
+                  onChange={(e) => {
+                    const val = parseInt(e.target.value, 10);
+                    setCourtsPerRow(val);
+                    localStorage.setItem('tkd_public_courts_per_row', val.toString());
+                  }}
+                  className="bg-transparent text-white text-xs font-black outline-none border-none focus:ring-0 cursor-pointer"
+                >
+                  {[1, 2, 3, 4, 5, 6, 8].map(n => (
+                    <option key={n} value={n} className="bg-slate-800 text-white">{n} Courts / Row</option>
+                  ))}
+                </select>
+              </div>
+            </>
           )}
         </div>
       </header>
@@ -10962,6 +11500,10 @@ function PublicDashboardView({
                     showEmptyBoutAsInactive={showEmptyBoutAsInactive}
                     publicViewLayout={publicViewLayout}
                     transfers={boutTransfers}
+                    activeNameFontScale={effectiveNameScale}
+                    activeClubFontScale={effectiveClubScale}
+                    standbyNameFontScale={effectiveStandbyNameScale}
+                    standbyClubFontScale={effectiveStandbyClubScale}
                   />
                 );
               })}
@@ -11004,7 +11546,15 @@ function PublicDashboardView({
   );
 }
 
-function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, boutNumberingMode = 'alphanumeric', ringQueue, showPublicStandbyQueue = true, showEmptyBoutAsInactive = false, publicViewLayout = 'standard', transfers = [] }: PublicRingCardProps) {
+function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, boutNumberingMode = 'alphanumeric', ringQueue, showPublicStandbyQueue = true, showEmptyBoutAsInactive = false, publicViewLayout = 'standard', transfers = [], activeNameFontScale, activeClubFontScale, standbyNameFontScale, standbyClubFontScale }: PublicRingCardProps) {
+  const [syncedNameScale] = useSyncedState<number>('tkd_active_name_font_scale', 100);
+  const [syncedClubScale] = useSyncedState<number>('tkd_active_club_font_scale', 100);
+  const [syncedStandbyNameScale] = useSyncedState<number>('tkd_standby_name_font_scale', 100);
+  const [syncedStandbyClubScale] = useSyncedState<number>('tkd_standby_club_font_scale', 100);
+  const effectiveNameScale = activeNameFontScale ?? syncedNameScale;
+  const effectiveClubScale = activeClubFontScale ?? syncedClubScale;
+  const effectiveStandbyNameScale = standbyNameFontScale ?? syncedStandbyNameScale;
+  const effectiveStandbyClubScale = standbyClubFontScale ?? syncedStandbyClubScale;
   const [now, setNow] = React.useState(new Date());
 
   React.useEffect(() => {
@@ -11144,10 +11694,16 @@ function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, b
               <div className="flex flex-col items-center justify-center gap-2 sm:gap-6 py-1 sm:py-4">
                 {/* BLUE SIDE */}
                 <div className="text-center space-y-0.5 w-full px-1 sm:px-2">
-                  <p className="text-[18px] sm:text-[26px] md:text-[34px] font-black text-[#00a2e8] leading-tight uppercase tracking-tight break-words mx-auto w-full">
+                  <p 
+                    style={{ fontSize: `calc(clamp(18px, 2.5vw, 34px) * (${effectiveNameScale} / 100))`, lineHeight: 1.15 }}
+                    className="text-[18px] sm:text-[26px] md:text-[34px] font-black text-[#00a2e8] uppercase tracking-tight break-words mx-auto w-full"
+                  >
                     {current ? (current.privacy_mode ? "---" : cleanPlaceholder(current.blue_name)) : ""}
                   </p>
-                  <p className="text-white font-black text-[8px] sm:text-sm uppercase tracking-widest leading-snug break-words whitespace-normal w-full">
+                  <p 
+                    style={{ fontSize: `calc(clamp(9px, 1.2vw, 14px) * (${effectiveClubScale} / 100))`, lineHeight: 1.2 }}
+                    className="text-white font-black text-[8px] sm:text-sm uppercase tracking-widest break-words whitespace-normal w-full"
+                  >
                     {current ? cleanPlaceholder(current.blue_club) : ""}
                   </p>
                 </div>
@@ -11160,10 +11716,16 @@ function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, b
 
                     {/* RED SIDE */}
                     <div className="text-center space-y-0.5 w-full px-1 sm:px-2">
-                      <p className="text-[18px] sm:text-[26px] md:text-[34px] font-black text-[#ed1c24] leading-tight uppercase tracking-tight break-words mx-auto w-full">
+                      <p 
+                        style={{ fontSize: `calc(clamp(18px, 2.5vw, 34px) * (${effectiveNameScale} / 100))`, lineHeight: 1.15 }}
+                        className="text-[18px] sm:text-[26px] md:text-[34px] font-black text-[#ed1c24] uppercase tracking-tight break-words mx-auto w-full"
+                      >
                         {current ? (current.privacy_mode ? "---" : cleanPlaceholder(current.red_name)) : ""}
                       </p>
-                      <p className="text-white font-black text-[8px] sm:text-sm uppercase tracking-widest leading-snug break-words whitespace-normal w-full">
+                      <p 
+                        style={{ fontSize: `calc(clamp(9px, 1.2vw, 14px) * (${effectiveClubScale} / 100))`, lineHeight: 1.2 }}
+                        className="text-white font-black text-[8px] sm:text-sm uppercase tracking-widest break-words whitespace-normal w-full"
+                      >
                         {current ? cleanPlaceholder(current.red_club) : ""}
                       </p>
                     </div>
@@ -11181,8 +11743,8 @@ function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, b
                     const explicitVal = pt[winKey as 'r1Winner' | 'r2Winner' | 'r3Winner'];
                     if (explicitVal === 'Blue' || explicitVal === 'Red') return explicitVal;
                     
-                    const blueVal = pt[`r${roundNum}Blue` as 'r1Blue' | 'r2Blue' | 'r3Blue'] !== undefined && pt[`r${roundNum}Blue` as 'r1Blue' | 'r2Blue' | 'r3Blue'] !== null ? parseInt(pt[`r${roundNum}Blue` as 'r1Blue' | 'r2Blue' | 'r3Blue'] || '') : NaN;
-                    const redVal = pt[`r${roundNum}Red` as 'r1Red' | 'r2Red' | 'r3Red'] !== undefined && pt[`r${roundNum}Red` as 'r1Red' | 'r2Red' | 'r3Red'] !== null ? parseInt(pt[`r${roundNum}Red` as 'r1Red' | 'r2Red' | 'r3Red'] || '') : NaN;
+                    const blueVal = pt[`r${roundNum}Blue` as 'r1Blue' | 'r2Blue' | 'r3Blue'] !== undefined && pt[`r${roundNum}Blue` as 'r1Blue' | 'r2Blue' | 'r3Blue'] !== null ? parseFloat(pt[`r${roundNum}Blue` as 'r1Blue' | 'r2Blue' | 'r3Blue'] || '') : NaN;
+                    const redVal = pt[`r${roundNum}Red` as 'r1Red' | 'r2Red' | 'r3Red'] !== undefined && pt[`r${roundNum}Red` as 'r1Red' | 'r2Red' | 'r3Red'] !== null ? parseFloat(pt[`r${roundNum}Red` as 'r1Red' | 'r2Red' | 'r3Red'] || '') : NaN;
                     if (!isNaN(blueVal) && !isNaN(redVal)) {
                       if (blueVal > redVal) return 'Blue';
                       if (redVal > blueVal) return 'Red';
@@ -11262,10 +11824,16 @@ function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, b
                   <div className="grid grid-cols-[1fr,auto,1fr] gap-1.5 sm:gap-4 items-center pb-1">
                     <div className="flex flex-col min-w-0">
                       <div className="h-0.5 w-full bg-[#00a2e8] rounded-full mb-1 sm:mb-2 shadow-[0_0_8px_rgba(0,162,232,0.8)]" />
-                      <span className="font-bold text-[#00a2e8] text-[18px] sm:text-[24px] leading-tight whitespace-normal break-words text-center">
+                      <span 
+                        style={{ fontSize: `calc(clamp(16px, 2vw, 24px) * (${effectiveNameScale} / 100))`, lineHeight: 1.15 }}
+                        className="font-bold text-[#00a2e8] text-[18px] sm:text-[24px] whitespace-normal break-words text-center"
+                      >
                         {current ? (current.privacy_mode ? "---" : cleanPlaceholder(current.blue_name)) : ""}
                       </span>
-                      <span className="font-bold text-white text-[9px] sm:text-sm leading-tight whitespace-normal break-words text-center mt-0.5">
+                      <span 
+                        style={{ fontSize: `calc(clamp(9px, 1.2vw, 14px) * (${effectiveClubScale} / 100))`, lineHeight: 1.2 }}
+                        className="font-bold text-white text-[9px] sm:text-sm whitespace-normal break-words text-center mt-0.5"
+                      >
                         {current ? (current.privacy_mode ? "---" : cleanPlaceholder(current.blue_club)) : ""}
                       </span>
                     </div>
@@ -11274,10 +11842,16 @@ function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, b
 
                     <div className="flex flex-col min-w-0">
                       <div className="h-0.5 w-full bg-[#ed1c24] rounded-full mb-1 sm:mb-2 shadow-[0_0_8px_rgba(237,28,36,0.8)]" />
-                      <span className="font-bold text-[#ed1c24] text-[18px] sm:text-[24px] leading-tight whitespace-normal break-words text-center">
+                      <span 
+                        style={{ fontSize: `calc(clamp(16px, 2vw, 24px) * (${effectiveNameScale} / 100))`, lineHeight: 1.15 }}
+                        className="font-bold text-[#ed1c24] text-[18px] sm:text-[24px] whitespace-normal break-words text-center"
+                      >
                         {current ? (current.privacy_mode ? "---" : cleanPlaceholder(current.red_name)) : ""}
                       </span>
-                      <span className="font-bold text-white text-[9px] sm:text-sm leading-tight whitespace-normal break-words text-center mt-0.5">
+                      <span 
+                        style={{ fontSize: `calc(clamp(9px, 1.2vw, 14px) * (${effectiveClubScale} / 100))`, lineHeight: 1.2 }}
+                        className="font-bold text-white text-[9px] sm:text-sm whitespace-normal break-words text-center mt-0.5"
+                      >
                         {current ? (current.privacy_mode ? "---" : cleanPlaceholder(current.red_club)) : ""}
                       </span>
                     </div>
@@ -11285,10 +11859,16 @@ function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, b
                 ) : (
                   <div className="flex flex-col max-w-sm mx-auto w-full px-1">
                     <div className="h-0.5 w-full bg-[#00a2e8] rounded-full mb-1 sm:mb-2 shadow-[0_0_8px_rgba(0,162,232,0.8)]" />
-                    <span className="font-bold text-[#00a2e8] text-[18px] sm:text-[24px] leading-tight whitespace-normal break-words text-center">
+                    <span 
+                      style={{ fontSize: `calc(clamp(16px, 2vw, 24px) * (${effectiveNameScale} / 100))`, lineHeight: 1.15 }}
+                      className="font-bold text-[#00a2e8] text-[18px] sm:text-[24px] whitespace-normal break-words text-center"
+                    >
                       {current ? (current.privacy_mode ? "---" : cleanPlaceholder(current.blue_name)) : ""}
                     </span>
-                    <span className="font-bold text-white text-[9px] sm:text-sm leading-tight whitespace-normal break-words text-center mt-0.5">
+                    <span 
+                      style={{ fontSize: `calc(clamp(9px, 1.2vw, 14px) * (${effectiveClubScale} / 100))`, lineHeight: 1.2 }}
+                      className="font-bold text-white text-[9px] sm:text-sm whitespace-normal break-words text-center mt-0.5"
+                    >
                       {current ? (current.privacy_mode ? "---" : cleanPlaceholder(current.blue_club)) : ""}
                     </span>
                   </div>
@@ -11342,16 +11922,22 @@ function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, b
                         isRingInactive ? "border-slate-600" : "border-[#00a2e8]"
                       )}>
                         {!isRingInactive && <div className="absolute top-0 right-0 w-full h-full bg-gradient-to-r from-blue-900/10 to-transparent pointer-events-none" />}
-                        <p className={cn(
-                          "text-[9px] sm:text-[11px] font-bold uppercase leading-normal sm:leading-tight mb-0.5 break-words whitespace-normal",
-                          isRingInactive ? "text-slate-400" : "text-white"
-                        )}>
+                        <p 
+                          className={cn(
+                            "text-[9px] sm:text-[11px] font-bold uppercase leading-normal sm:leading-tight mb-0.5 break-words whitespace-normal",
+                            isRingInactive ? "text-slate-400" : "text-white"
+                          )}
+                          style={effectiveStandbyClubScale !== 100 ? { fontSize: `calc((9px + (2px * (100vw - 640px) / 384)) * ${effectiveStandbyClubScale / 100})`, lineHeight: 1.15 } : undefined}
+                        >
                           {bout ? cleanPlaceholder(bout.data.blue_club) : ""}
                         </p>
-                        <p className={cn(
-                          "text-[12px] sm:text-[15px] font-black uppercase tracking-[0.5px] leading-tight break-words whitespace-normal w-full",
-                          isRingInactive ? "text-slate-500" : "text-[#00a2e8]"
-                        )}>
+                        <p 
+                          className={cn(
+                            "text-[12px] sm:text-[15px] font-black uppercase tracking-[0.5px] leading-tight break-words whitespace-normal w-full",
+                            isRingInactive ? "text-slate-500" : "text-[#00a2e8]"
+                          )}
+                          style={effectiveStandbyNameScale !== 100 ? { fontSize: `calc((12px + (3px * (100vw - 640px) / 384)) * ${effectiveStandbyNameScale / 100})`, lineHeight: 1.15 } : undefined}
+                        >
                           {bout ? (bout.data.privacy_mode ? "---" : cleanPlaceholder(bout.data.blue_name)) : ""}
                         </p>
                       </div>
@@ -11363,16 +11949,22 @@ function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, b
                           isRingInactive ? "border-slate-600" : "border-[#ed1c24]"
                         )}>
                           {!isRingInactive && <div className="absolute top-0 right-0 w-full h-full bg-gradient-to-r from-red-900/10 to-transparent pointer-events-none" />}
-                          <p className={cn(
-                            "text-[9px] sm:text-[11px] font-bold uppercase leading-normal sm:leading-tight mb-0.5 break-words whitespace-normal",
-                            isRingInactive ? "text-slate-400" : "text-white"
-                          )}>
+                          <p 
+                            className={cn(
+                              "text-[9px] sm:text-[11px] font-bold uppercase leading-normal sm:leading-tight mb-0.5 break-words whitespace-normal",
+                              isRingInactive ? "text-slate-400" : "text-white"
+                            )}
+                            style={effectiveStandbyClubScale !== 100 ? { fontSize: `calc((9px + (2px * (100vw - 640px) / 384)) * ${effectiveStandbyClubScale / 100})`, lineHeight: 1.15 } : undefined}
+                          >
                             {bout ? cleanPlaceholder(bout.data.red_club) : ""}
                           </p>
-                          <p className={cn(
-                            "text-[12px] sm:text-[15px] font-black uppercase tracking-[0.5px] leading-tight break-words whitespace-normal w-full",
-                            isRingInactive ? "text-slate-500" : "text-[#ed1c24]"
-                          )}>
+                          <p 
+                            className={cn(
+                              "text-[12px] sm:text-[15px] font-black uppercase tracking-[0.5px] leading-tight break-words whitespace-normal w-full",
+                              isRingInactive ? "text-slate-500" : "text-[#ed1c24]"
+                            )}
+                            style={effectiveStandbyNameScale !== 100 ? { fontSize: `calc((12px + (3px * (100vw - 640px) / 384)) * ${effectiveStandbyNameScale / 100})`, lineHeight: 1.15 } : undefined}
+                          >
                             {bout ? (bout.data.privacy_mode ? "---" : cleanPlaceholder(bout.data.red_name)) : ""}
                           </p>
                         </div>

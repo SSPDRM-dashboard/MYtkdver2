@@ -21,6 +21,8 @@ interface RawMatch {
   redName: string;
   redClub: string;
   winner: string;
+  r1Blue?: number;
+  r1Red?: number;
 }
 
 interface WinnerResult {
@@ -278,6 +280,65 @@ export function computeCategoryResults(matchList: RawMatch[], placementOption: '
   categories.forEach((cat: string) => {
     const catMatches = resolvedMatches.filter(m => m.category === cat);
     if (catMatches.length === 0) return;
+
+    // Is this a Poomsae single-player or cutoff category?
+    // We check if it's explicitly named Poomsae and see if it's primarily composed of single-player scores.
+    // If it's a 1v1 bracket (has a red player), it should still go through bracket logic unless it's purely a score leaderboard.
+    const isPoomsaeCat = cat.toUpperCase().includes('POOMSAE') || cat.toUpperCase().includes('FREESTYLE');
+    const isSinglePlayerPoomsae = isPoomsaeCat && catMatches.some(m => !m.redName || m.redName === '---');
+    
+    console.log(`[Poomsae Debug] Category: ${cat}, isPoomsaeCat: ${isPoomsaeCat}, isSinglePlayerPoomsae: ${isSinglePlayerPoomsae}`, catMatches);
+
+    if (isSinglePlayerPoomsae) {
+      // Poomsae Cut-off / Single Player Leaderboard Logic
+      // Collect all unique participants and their highest scores
+      const leaderboard: Array<{ name: string; club: string; score: number }> = [];
+
+      catMatches.forEach(m => {
+        console.log(`[Poomsae Debug] Inspecting match ${m.matchNoStr} for athlete ${m.blueName}. Points: blue=${m.r1Blue}, red=${m.r1Red}`);
+        if (isValidAthlete(m.blueName) && m.r1Blue !== undefined && !isNaN(m.r1Blue)) {
+          leaderboard.push({ name: m.blueName.trim(), club: m.blueClub.trim(), score: m.r1Blue });
+        }
+        if (isValidAthlete(m.redName) && m.r1Red !== undefined && !isNaN(m.r1Red)) {
+          leaderboard.push({ name: m.redName.trim(), club: m.redClub.trim(), score: m.r1Red });
+        }
+      });
+      
+      console.log(`[Poomsae Debug] Parsed leaderboard:`, leaderboard);
+
+      // Sort descending by score
+      leaderboard.sort((a, b) => b.score - a.score);
+
+      // We only care about unique athletes (in case of double entries or multi-round cutoffs, take their best score)
+      const uniqueLeaderboard: Array<{ name: string; club: string; score: number }> = [];
+      const seenAthletes = new Set<string>();
+      for (const entry of leaderboard) {
+        const key = cleanAthleteName(entry.name);
+        if (!seenAthletes.has(key)) {
+          seenAthletes.add(key);
+          uniqueLeaderboard.push(entry);
+        }
+      }
+
+      const bronzes: WinnerResult[] = [];
+      if (uniqueLeaderboard.length >= 3) {
+        bronzes.push({ place: '3rd', name: uniqueLeaderboard[2].name, club: isValidClub(uniqueLeaderboard[2].club) ? uniqueLeaderboard[2].club : '' });
+      }
+      // Depending on rules, 4th might also be a bronze or 4th place.
+      if (uniqueLeaderboard.length >= 4 && placementOption === 'b') {
+        bronzes.push({ place: '4th', name: uniqueLeaderboard[3].name, club: isValidClub(uniqueLeaderboard[3].club) ? uniqueLeaderboard[3].club : '' });
+      } else if (uniqueLeaderboard.length >= 4 && placementOption === 'a') {
+        bronzes.push({ place: '3rd', name: uniqueLeaderboard[3].name, club: isValidClub(uniqueLeaderboard[3].club) ? uniqueLeaderboard[3].club : '' });
+      }
+
+      results.push({
+        category: cat,
+        gold: uniqueLeaderboard.length >= 1 ? { place: '1st', name: uniqueLeaderboard[0].name, club: isValidClub(uniqueLeaderboard[0].club) ? uniqueLeaderboard[0].club : '' } : null,
+        silver: uniqueLeaderboard.length >= 2 ? { place: '2nd', name: uniqueLeaderboard[1].name, club: isValidClub(uniqueLeaderboard[1].club) ? uniqueLeaderboard[1].club : '' } : null,
+        bronzes
+      });
+      return; // Skip standard bracket logic
+    }
 
     // Check for explicit 3rd-Place Playoff / Bronze Match
     const thirdPlaceMatch = catMatches.find(m => 
@@ -753,7 +814,9 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
                       blueClub: m.blue_club,
                       redName: m.red_name,
                       redClub: m.red_club,
-                      winner: winnerName
+                      winner: winnerName,
+                      r1Blue: hist && hist.points?.r1Blue ? parseFloat(hist.points.r1Blue) : (m.points?.r1Blue ? parseFloat(m.points.r1Blue) : undefined),
+                      r1Red: hist && hist.points?.r1Red ? parseFloat(hist.points.r1Red) : (m.points?.r1Red ? parseFloat(m.points.r1Red) : undefined)
                     });
                   }
                 });
@@ -814,6 +877,8 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
                       const blueClub = row[6] || '';
                       const redName = row[7] || '';
                       const redClub = row[8] || '';
+                      const r1Blue = row.length > 10 && row[10] ? parseFloat(row[10]) : undefined;
+                      const r1Red = row.length > 11 && row[11] ? parseFloat(row[11]) : undefined;
 
                       // Override winner if completed in matchHistory local app state
                       const hist = (matchHistory || []).find(h => 
@@ -821,6 +886,8 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
                         isBoutMatch(h.bout, matchNoStr)
                       );
                       const winnerName = hist ? hist.winner : winner;
+                      const finalR1Blue = hist && hist.points?.r1Blue ? parseFloat(hist.points.r1Blue) : r1Blue;
+                      const finalR1Red = hist && hist.points?.r1Red ? parseFloat(hist.points.r1Red) : r1Red;
 
                       const combinedItem = {
                         event: sheetEventName,
@@ -831,7 +898,9 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
                         blueClub: blueClub.trim(),
                         redName: redName.trim(),
                         redClub: redClub.trim(),
-                        winner: winnerName.trim()
+                        winner: winnerName.trim(),
+                        r1Blue: finalR1Blue,
+                        r1Red: finalR1Red
                       };
 
                       const existingIdx = combinedMatches.findIndex(m => 
@@ -867,7 +936,9 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
           );
           return {
             ...m,
-            winner: hist ? hist.winner : m.winner
+            winner: hist ? hist.winner : m.winner,
+            r1Blue: hist && hist.points?.r1Blue ? parseFloat(hist.points.r1Blue) : m.r1Blue,
+            r1Red: hist && hist.points?.r1Red ? parseFloat(hist.points.r1Red) : m.r1Red
           };
         });
       }

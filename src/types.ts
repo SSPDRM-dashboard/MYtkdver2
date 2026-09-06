@@ -81,4 +81,5 @@ export interface MatchHistoryItem {
   ring?: number;
   syncedAt?: string | Date | any;
   winType?: string;
+  points?: any;
 }
