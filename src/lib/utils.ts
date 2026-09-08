@@ -278,6 +278,19 @@ export function isPoomsaeCategory(category?: string | null): boolean {
   return upper.includes('POOMSAE') || upper.includes('FREESTYLE');
 }
 
+export function isPlayoffBout(matchNoStr?: string | null): boolean {
+  if (!matchNoStr) return false;
+  const upper = matchNoStr.trim().toUpperCase();
+  return (
+    upper.includes('BRONZE') ||
+    upper.includes('3RD') ||
+    upper.includes('3/4') ||
+    upper.includes('3-4') ||
+    upper.includes('PLAYOFF') ||
+    upper.includes('THIRD')
+  );
+}
+
 export function getEventSpreadsheetUrl(event?: { sheetUrl?: string, winnerSheetUrl?: string }): string | null {
   if (!event) return null;
   if (event.winnerSheetUrl && event.winnerSheetUrl.includes('docs.google.com/spreadsheets')) {

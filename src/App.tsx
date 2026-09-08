@@ -3880,11 +3880,18 @@ export default function App() {
     }
 
     // Safely auto-generate all 12 rings with clean active/upcoming matches
+    // We use a high version number to force the CRDT merge to accept this clean slate over older remote rings
+    const currentVersions = rings.map(r => r.version || 0);
+    const maxVersion = currentVersions.length > 0 ? Math.max(...currentVersions) : 0;
+    
     const nextRings: RingStatus[] = Array.from({ length: 12 }, (_, i) => ({
       ringNumber: i + 1,
       currentBout: null,
       onDeck: null,
-      inTheHole: null
+      inTheHole: null,
+      suspendedBouts: [],
+      version: maxVersion + 10,
+      updatedAt: Date.now()
     }));
     
     setRings(nextRings);

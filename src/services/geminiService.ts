@@ -129,63 +129,70 @@ export async function analyzeBracketWithGemini(params: {
 
   const model = isThinkingMode ? "gemini-3.1-pro-preview" : "gemini-3.8-flash";
 
-  const response = await ai.models.generateContent({
-    model,
-    contents: [
-      {
-        parts: [
-          { text: prompt },
-          {
-            inlineData: {
-              mimeType: effectiveMimeType,
-              data: base64Data,
-            },
-          },
-        ],
-      },
-    ],
-    config: {
-      systemInstruction: "You are an automated tournament bracket data extractor. Extract match bouts, solo poomsae entries, and bout advancement trees from documents and images. You strictly output valid JSON matching the schema with no conversational filler, notes, or explanations.",
-      temperature: 0.1,
-      responseMimeType: "application/json",
-      thinkingConfig: isThinkingMode ? { thinkingLevel: ThinkingLevel.HIGH } : undefined,
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          matches: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                ring: { type: Type.NUMBER },
-                bout: { type: Type.STRING },
-                category: { type: Type.STRING },
-                blue_name: { type: Type.STRING },
-                blue_club: { type: Type.STRING },
-                red_name: { type: Type.STRING },
-                red_club: { type: Type.STRING },
+  try {
+    const response = await ai.models.generateContent({
+      model,
+      contents: [
+        {
+          parts: [
+            { text: prompt },
+            {
+              inlineData: {
+                mimeType: effectiveMimeType,
+                data: base64Data,
               },
-              required: ["bout", "category", "blue_name", "red_name"],
             },
-          },
-          mappings: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                sourceBout: { type: Type.STRING },
-                nextBout: { type: Type.STRING },
-                slot: { type: Type.STRING, enum: ["Chung", "Hong"] },
+          ],
+        },
+      ],
+      config: {
+        systemInstruction: "You are an automated tournament bracket data extractor. Extract match bouts, solo poomsae entries, and bout advancement trees from documents and images. You strictly output valid JSON matching the schema with no conversational filler, notes, or explanations.",
+        temperature: 0.1,
+        responseMimeType: "application/json",
+        thinkingConfig: isThinkingMode ? { thinkingLevel: ThinkingLevel.HIGH } : undefined,
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            matches: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  ring: { type: Type.NUMBER },
+                  bout: { type: Type.STRING },
+                  category: { type: Type.STRING },
+                  blue_name: { type: Type.STRING },
+                  blue_club: { type: Type.STRING },
+                  red_name: { type: Type.STRING },
+                  red_club: { type: Type.STRING },
+                },
+                required: ["bout", "category", "blue_name", "red_name"],
               },
-              required: ["sourceBout", "nextBout", "slot"],
+            },
+            mappings: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  sourceBout: { type: Type.STRING },
+                  nextBout: { type: Type.STRING },
+                  slot: { type: Type.STRING, enum: ["Chung", "Hong"] },
+                },
+                required: ["sourceBout", "nextBout", "slot"],
+              },
             },
           },
         },
       },
-    },
-  });
+    });
 
-  return response.text || "";
+    return response.text || "";
+  } catch (err: any) {
+    if (err.message && err.message.includes("is not valid JSON") && err.message.includes("Unexpected token")) {
+      throw new Error("Network Error: The AI service connection was intercepted. Your network or ISP returned an HTML error page (e.g., 404 proxy page) instead of connecting to Google's API servers. Please check your firewall or try a different network.");
+    }
+    throw err;
+  }
 }
 
 export async function refineBracketWithGemini(params: {
@@ -250,49 +257,56 @@ export async function refineBracketWithGemini(params: {
     - Do not include unescaped double quotes inside string values under any circumstances.
   `;
 
-  const response = await ai.models.generateContent({
-    model: "gemini-3.8-flash",
-    contents: prompt,
-    config: {
-      systemInstruction: "You are an automated tournament bracket auditor. Return strictly valid JSON conforming to the schema.",
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          matches: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                ring: { type: Type.NUMBER },
-                bout: { type: Type.STRING },
-                category: { type: Type.STRING },
-                blue_name: { type: Type.STRING },
-                blue_club: { type: Type.STRING },
-                red_name: { type: Type.STRING },
-                red_club: { type: Type.STRING },
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-3.8-flash",
+      contents: prompt,
+      config: {
+        systemInstruction: "You are an automated tournament bracket auditor. Return strictly valid JSON conforming to the schema.",
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            matches: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  ring: { type: Type.NUMBER },
+                  bout: { type: Type.STRING },
+                  category: { type: Type.STRING },
+                  blue_name: { type: Type.STRING },
+                  blue_club: { type: Type.STRING },
+                  red_name: { type: Type.STRING },
+                  red_club: { type: Type.STRING },
+                },
+                required: ["bout", "category", "blue_name", "red_name"],
               },
-              required: ["bout", "category", "blue_name", "red_name"],
             },
-          },
-          mappings: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                sourceBout: { type: Type.STRING },
-                nextBout: { type: Type.STRING },
-                slot: { type: Type.STRING, enum: ["Chung", "Hong"] },
+            mappings: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  sourceBout: { type: Type.STRING },
+                  nextBout: { type: Type.STRING },
+                  slot: { type: Type.STRING, enum: ["Chung", "Hong"] },
+                },
+                required: ["sourceBout", "nextBout", "slot"],
               },
-              required: ["sourceBout", "nextBout", "slot"],
             },
           },
         },
       },
-    },
-  });
+    });
 
-  return response.text || "";
+    return response.text || "";
+  } catch (err: any) {
+    if (err.message && err.message.includes("is not valid JSON") && err.message.includes("Unexpected token")) {
+      throw new Error("Network Error: The AI service connection was intercepted. Your network or ISP returned an HTML error page (e.g., 404 proxy page) instead of connecting to Google's API servers. Please check your firewall or try a different network.");
+    }
+    throw err;
+  }
 }
 
 export async function chatWithGemini(params: {
@@ -356,15 +370,22 @@ export async function chatWithGemini(params: {
     formattedContents.push({ role: "user", parts: [{ text: input }] });
   }
 
-  const response = await ai.models.generateContent({
-    model: "gemini-3.8-flash",
-    contents: formattedContents,
-    config: {
-      temperature: 0.7,
-      topP: 0.95,
-      topK: 40,
-    },
-  });
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-3.8-flash",
+      contents: formattedContents,
+      config: {
+        temperature: 0.7,
+        topP: 0.95,
+        topK: 40,
+      },
+    });
 
-  return response.text || "";
+    return response.text || "";
+  } catch (err: any) {
+    if (err.message && err.message.includes("is not valid JSON") && err.message.includes("Unexpected token")) {
+      throw new Error("Network Error: The AI service connection was intercepted. Your network or ISP returned an HTML error page (e.g., 404 proxy page) instead of connecting to Google's API servers. Please check your firewall or try a different network.");
+    }
+    throw err;
+  }
 }

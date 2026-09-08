@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { EventData, MatchHistoryItem } from '../types';
 import { Download, RefreshCw, Trophy, Medal, Building2, Search, Upload, Trash2, FileSpreadsheet, X, Plus, Swords, Sparkles, Crown, Award, Filter, User } from 'lucide-react';
 import Papa from 'papaparse';
-import { getBoutNumber, isBoutMatch, cn, isPoomsaeCategory } from '../lib/utils';
+import { getBoutNumber, isBoutMatch, cn, isPoomsaeCategory, isPlayoffBout } from '../lib/utils';
 
 interface EventReportProps {
   currentEventId: string | null;
@@ -120,7 +120,22 @@ export function getMatchParticipants(m: RawMatch): {
   loserClub: string;
   isCompleted: boolean;
 } {
-  const winnerRaw = (m.winner || '').trim();
+  let winnerRaw = (m.winner || '').trim();
+
+  // If winner wasn't explicitly saved as a string, check if point scores determine the winner
+  if (!winnerRaw && m.r1Blue !== undefined && m.r1Red !== undefined && !isNaN(m.r1Blue) && !isNaN(m.r1Red)) {
+    if (m.r1Blue > m.r1Red && isValidAthlete(m.blueName)) {
+      winnerRaw = m.blueName;
+    } else if (m.r1Red > m.r1Blue && isValidAthlete(m.redName)) {
+      winnerRaw = m.redName;
+    }
+  }
+
+  // If it's a solo performance with a recorded score
+  if (!winnerRaw && isValidAthlete(m.blueName) && (!isValidAthlete(m.redName) || m.redName === '---') && m.r1Blue !== undefined && !isNaN(m.r1Blue)) {
+    winnerRaw = m.blueName;
+  }
+
   if (!winnerRaw || winnerRaw === '-' || winnerRaw.toLowerCase() === 'bye') {
     return { winnerName: '', winnerClub: '', loserName: '', loserClub: '', isCompleted: false };
   }
@@ -140,16 +155,16 @@ export function getMatchParticipants(m: RawMatch): {
     return {
       winnerName: m.blueName,
       winnerClub: m.blueClub,
-      loserName: m.redName,
-      loserClub: m.redClub,
+      loserName: isValidAthlete(m.redName) ? m.redName : '',
+      loserClub: isValidAthlete(m.redName) ? m.redClub : '',
       isCompleted: true
     };
   } else if (isRedWin && !isBlueWin) {
     return {
       winnerName: m.redName,
       winnerClub: m.redClub,
-      loserName: m.blueName,
-      loserClub: m.blueClub,
+      loserName: isValidAthlete(m.blueName) ? m.blueName : '',
+      loserClub: isValidAthlete(m.blueName) ? m.blueClub : '',
       isCompleted: true
     };
   } else {
@@ -157,24 +172,26 @@ export function getMatchParticipants(m: RawMatch): {
       return {
         winnerName: m.blueName,
         winnerClub: m.blueClub,
-        loserName: m.redName,
-        loserClub: m.redClub,
+        loserName: isValidAthlete(m.redName) ? m.redName : '',
+        loserClub: isValidAthlete(m.redName) ? m.redClub : '',
         isCompleted: true
       };
     } else if (namesMatch(winnerRaw, m.redName)) {
       return {
         winnerName: m.redName,
         winnerClub: m.redClub,
-        loserName: m.blueName,
-        loserClub: m.blueClub,
+        loserName: isValidAthlete(m.blueName) ? m.blueName : '',
+        loserClub: isValidAthlete(m.blueName) ? m.blueClub : '',
         isCompleted: true
       };
     } else {
+      const isRedLoser = m.blueName && namesMatch(m.blueName, winnerRaw);
+      const isBlueLoser = m.redName && namesMatch(m.redName, winnerRaw);
       return {
         winnerName: winnerRaw,
         winnerClub: m.blueClub || m.redClub,
-        loserName: m.blueName && !namesMatch(m.blueName, winnerRaw) ? m.blueName : m.redName,
-        loserClub: m.blueName && !namesMatch(m.blueName, winnerRaw) ? m.blueClub : m.redClub,
+        loserName: isRedLoser ? m.redName : (isBlueLoser ? m.blueName : (m.redName || m.blueName)),
+        loserClub: isRedLoser ? m.redClub : (isBlueLoser ? m.blueClub : (m.redClub || m.blueClub)),
         isCompleted: true
       };
     }
@@ -228,7 +245,7 @@ export function computeCategoryResults(matchList: RawMatch[], placementOption: '
     // First criteria: Exact match with intelligent Ring prefix applied
     let sourceMatch = matchList.find(m => m.category === category && m.matchNoStr.toUpperCase() === preferredSourceBoutStr.toUpperCase());
     
-    // Fallback criteria: Use our lenient boolean check across the category
+    // Fallback criteria: Use lenient boolean check across the category
     if (!sourceMatch) {
        sourceMatch = matchList.find(m => m.category === category && isBoutMatch(m.matchNoStr, sourceBoutStr));
     }
@@ -247,7 +264,7 @@ export function computeCategoryResults(matchList: RawMatch[], placementOption: '
 
   // Multi-pass resolution over matches to resolve chains of bracket advancements
   let resolvedMatches = [...matchList];
-  for (let pass = 0; pass < 2; pass++) {
+  for (let pass = 0; pass < 3; pass++) {
     resolvedMatches = resolvedMatches.map(m => {
       const blueResolved = resolveParticipant(m.blueName, m.blueClub, m.category, m.matchNoStr, new Set());
       const redResolved = resolveParticipant(m.redName, m.redClub, m.category, m.matchNoStr, new Set());
@@ -281,35 +298,39 @@ export function computeCategoryResults(matchList: RawMatch[], placementOption: '
     const catMatches = resolvedMatches.filter(m => m.category === cat);
     if (catMatches.length === 0) return;
 
-    // Is this a Poomsae single-player or cutoff category?
-    // We check if it's explicitly named Poomsae and see if it's primarily composed of single-player scores.
-    // If it's a 1v1 bracket (has a red player), it should still go through bracket logic unless it's purely a score leaderboard.
-    const isPoomsaeCat = cat.toUpperCase().includes('POOMSAE') || cat.toUpperCase().includes('FREESTYLE');
-    const isSinglePlayerPoomsae = isPoomsaeCat && catMatches.some(m => !m.redName || m.redName === '---');
-    
-    console.log(`[Poomsae Debug] Category: ${cat}, isPoomsaeCat: ${isPoomsaeCat}, isSinglePlayerPoomsae: ${isSinglePlayerPoomsae}`, catMatches);
+    // 1. Check if this category is a Solo Leaderboard (Cut-off system where athletes perform individually)
+    // In a 1v1 bracket, bouts have Red competitors (apart from Byes in preliminary rounds).
+    // A category is a Solo Leaderboard ONLY if there are NO head-to-head bouts at all.
+    const hasAnyHeadToHead = catMatches.some(m => 
+      isValidAthlete(m.redName) && 
+      m.redName.trim() !== '---' && 
+      !m.redName.toUpperCase().includes('BYE')
+    );
+    const isSoloLeaderboard = !hasAnyHeadToHead;
 
-    if (isSinglePlayerPoomsae) {
+    if (isSoloLeaderboard) {
       // Poomsae Cut-off / Single Player Leaderboard Logic
-      // Collect all unique participants and their highest scores
       const leaderboard: Array<{ name: string; club: string; score: number }> = [];
 
       catMatches.forEach(m => {
-        console.log(`[Poomsae Debug] Inspecting match ${m.matchNoStr} for athlete ${m.blueName}. Points: blue=${m.r1Blue}, red=${m.r1Red}`);
-        if (isValidAthlete(m.blueName) && m.r1Blue !== undefined && !isNaN(m.r1Blue)) {
-          leaderboard.push({ name: m.blueName.trim(), club: m.blueClub.trim(), score: m.r1Blue });
+        if (isValidAthlete(m.blueName)) {
+          const score = (m.r1Blue !== undefined && !isNaN(m.r1Blue)) 
+            ? m.r1Blue 
+            : ((m.winner && m.winner !== '-') ? 1 : 0);
+          leaderboard.push({ name: m.blueName.trim(), club: (m.blueClub || '').trim(), score });
         }
-        if (isValidAthlete(m.redName) && m.r1Red !== undefined && !isNaN(m.r1Red)) {
-          leaderboard.push({ name: m.redName.trim(), club: m.redClub.trim(), score: m.r1Red });
+        if (isValidAthlete(m.redName) && m.redName.trim() !== '---' && !m.redName.toUpperCase().includes('BYE')) {
+          const score = (m.r1Red !== undefined && !isNaN(m.r1Red)) 
+            ? m.r1Red 
+            : ((m.winner && m.winner !== '-') ? 1 : 0);
+          leaderboard.push({ name: m.redName.trim(), club: (m.redClub || '').trim(), score });
         }
       });
-      
-      console.log(`[Poomsae Debug] Parsed leaderboard:`, leaderboard);
 
       // Sort descending by score
       leaderboard.sort((a, b) => b.score - a.score);
 
-      // We only care about unique athletes (in case of double entries or multi-round cutoffs, take their best score)
+      // Deduplicate unique athletes (take highest score)
       const uniqueLeaderboard: Array<{ name: string; club: string; score: number }> = [];
       const seenAthletes = new Set<string>();
       for (const entry of leaderboard) {
@@ -324,11 +345,12 @@ export function computeCategoryResults(matchList: RawMatch[], placementOption: '
       if (uniqueLeaderboard.length >= 3) {
         bronzes.push({ place: '3rd', name: uniqueLeaderboard[2].name, club: isValidClub(uniqueLeaderboard[2].club) ? uniqueLeaderboard[2].club : '' });
       }
-      // Depending on rules, 4th might also be a bronze or 4th place.
-      if (uniqueLeaderboard.length >= 4 && placementOption === 'b') {
-        bronzes.push({ place: '4th', name: uniqueLeaderboard[3].name, club: isValidClub(uniqueLeaderboard[3].club) ? uniqueLeaderboard[3].club : '' });
-      } else if (uniqueLeaderboard.length >= 4 && placementOption === 'a') {
-        bronzes.push({ place: '3rd', name: uniqueLeaderboard[3].name, club: isValidClub(uniqueLeaderboard[3].club) ? uniqueLeaderboard[3].club : '' });
+      if (uniqueLeaderboard.length >= 4) {
+        if (placementOption === 'b') {
+          bronzes.push({ place: '4th', name: uniqueLeaderboard[3].name, club: isValidClub(uniqueLeaderboard[3].club) ? uniqueLeaderboard[3].club : '' });
+        } else {
+          bronzes.push({ place: '3rd', name: uniqueLeaderboard[3].name, club: isValidClub(uniqueLeaderboard[3].club) ? uniqueLeaderboard[3].club : '' });
+        }
       }
 
       results.push({
@@ -337,50 +359,54 @@ export function computeCategoryResults(matchList: RawMatch[], placementOption: '
         silver: uniqueLeaderboard.length >= 2 ? { place: '2nd', name: uniqueLeaderboard[1].name, club: isValidClub(uniqueLeaderboard[1].club) ? uniqueLeaderboard[1].club : '' } : null,
         bronzes
       });
-      return; // Skip standard bracket logic
+      return;
     }
 
-    // Check for explicit 3rd-Place Playoff / Bronze Match
-    const thirdPlaceMatch = catMatches.find(m => 
-      catMatches.length > 1 && (
-        m.matchNoStr.toUpperCase().includes("BRONZE") || 
-        m.matchNoStr.toUpperCase().includes("3RD") ||
-        m.matchNoStr.toUpperCase().includes("3/4") ||
-        m.matchNoStr.toUpperCase().includes("PLAYOFF")
-      )
-    );
+    // 2. Head-to-Head Bracket Category (Poomsae Bracket or Kyorugi Bracket)
+    // Follows AGENTS.md Tournament Placement Guidelines:
+    // 1. Identify Final: Find by category and the match with the highest bout_number (excluding 3rd-place playoff).
+    // 2. Assign 1st/2nd: Winner = 1st (Gold), Loser = 2nd (Silver).
+    // 3. Identify Semi-Finals: Find the two matches that fed into the Final (or preceding bouts).
+    // 4. Assign 3rd/4th:
+    //    - If third_place_match exists: Winner = 3rd, Loser = 4th.
+    //    - If not:
+    //        - Option A (Joint 3rd): Both Losers = 3rd.
+    //        - Option B (Playoff ranking): 1st Semi Loser = 3rd, 2nd Semi Loser = 4th.
 
-    // Regular matches (excluding the designated third-place playoff)
-    const regularMatches = catMatches.filter(m => m !== thirdPlaceMatch);
-    if (regularMatches.length === 0) {
+    // A. Check if any match is explicitly named as a bronze / 3rd-place playoff
+    let thirdPlaceMatch = catMatches.find(m => catMatches.length > 1 && isPlayoffBout(m.matchNoStr));
+
+    // Candidate matches for the Final (excluding explicitly named playoff match)
+    const nonPlayoffMatches = catMatches.filter(m => m !== thirdPlaceMatch);
+    if (nonPlayoffMatches.length === 0) {
       results.push({ category: cat, gold: null, silver: null, bronzes: [] });
       return;
     }
 
-    // Sort descending by matchNo (highest bout number is Final)
-    regularMatches.sort((a, b) => b.matchNo - a.matchNo);
-    const finalMatch = regularMatches[0];
+    // Sort descending by matchNo (highest bout number is candidate Final)
+    nonPlayoffMatches.sort((a, b) => b.matchNo - a.matchNo);
+    
+    // Check if any match explicitly has "FINAL" in its bout code/label (and not SEMI/QUARTER)
+    const explicitFinal = nonPlayoffMatches.find(m => {
+      const u = m.matchNoStr.toUpperCase();
+      return u.includes('FINAL') && !u.includes('SEMI') && !u.includes('QUARTER') && !u.includes('1/2') && !u.includes('1/4');
+    });
 
-    const finalRes = getMatchParticipants(finalMatch);
-    if (!finalRes.isCompleted) {
-      results.push({ category: cat, gold: null, silver: null, bronzes: [] });
-      return;
-    }
+    let finalMatch = explicitFinal || nonPlayoffMatches[0];
 
-    const goldName = finalRes.winnerName;
-    const goldClub = finalRes.winnerClub;
-    const silverName = finalRes.loserName;
-    const silverClub = finalRes.loserClub;
-
-    const bronzes: WinnerResult[] = [];
-    const previousMatches = regularMatches.filter(m => m !== finalMatch);
-
-    // Collect Semi-Final Losers using 3-tier discovery
+    // Collect Semi-Final Losers using feeder analysis and preceding bouts
     const semiLosers: Array<{ name: string; club: string }> = [];
+    const finalRes = getMatchParticipants(finalMatch);
+    const goldName = finalRes.isCompleted ? finalRes.winnerName : '';
+    const goldClub = finalRes.isCompleted ? finalRes.winnerClub : '';
+    const silverName = finalRes.isCompleted ? finalRes.loserName : '';
+    const silverClub = finalRes.isCompleted ? finalRes.loserClub : '';
 
-    // Tier 1: Feeder Matches (Where Gold or Silver competed and won earlier)
+    const otherMatches = catMatches.filter(m => m !== finalMatch);
+
+    // Feeder Match Discovery: Find matches where Gold or Silver competed earlier
     if (isValidAthlete(goldName)) {
-      const goldMatch = previousMatches.find(m => {
+      const goldFeeder = otherMatches.find(m => {
         const p = getMatchParticipants(m);
         return p.isCompleted && (
           namesMatch(p.winnerName, goldName) || 
@@ -388,8 +414,8 @@ export function computeCategoryResults(matchList: RawMatch[], placementOption: '
           namesMatch(m.redName, goldName)
         );
       });
-      if (goldMatch) {
-        const p = getMatchParticipants(goldMatch);
+      if (goldFeeder) {
+        const p = getMatchParticipants(goldFeeder);
         if (isValidAthlete(p.loserName) && !namesMatch(p.loserName, goldName) && !namesMatch(p.loserName, silverName)) {
           if (!semiLosers.some(sl => namesMatch(sl.name, p.loserName))) {
             semiLosers.push({ name: p.loserName, club: p.loserClub });
@@ -399,7 +425,7 @@ export function computeCategoryResults(matchList: RawMatch[], placementOption: '
     }
 
     if (isValidAthlete(silverName)) {
-      const silverMatch = previousMatches.find(m => {
+      const silverFeeder = otherMatches.find(m => {
         const p = getMatchParticipants(m);
         return p.isCompleted && (
           namesMatch(p.winnerName, silverName) || 
@@ -407,8 +433,8 @@ export function computeCategoryResults(matchList: RawMatch[], placementOption: '
           namesMatch(m.redName, silverName)
         );
       });
-      if (silverMatch) {
-        const p = getMatchParticipants(silverMatch);
+      if (silverFeeder) {
+        const p = getMatchParticipants(silverFeeder);
         if (isValidAthlete(p.loserName) && !namesMatch(p.loserName, goldName) && !namesMatch(p.loserName, silverName)) {
           if (!semiLosers.some(sl => namesMatch(sl.name, p.loserName))) {
             semiLosers.push({ name: p.loserName, club: p.loserClub });
@@ -417,39 +443,46 @@ export function computeCategoryResults(matchList: RawMatch[], placementOption: '
       }
     }
 
-    // Tier 2: Preceding Bouts in Category (Rule in AGENTS.md: "Look at the two bouts immediately preceding the Final")
-    if (semiLosers.length < 2 && previousMatches.length > 0) {
-      for (const m of previousMatches) {
-        const p = getMatchParticipants(m);
-        if (p.isCompleted && isValidAthlete(p.loserName)) {
-          const isGoldOrSilver = namesMatch(p.loserName, goldName) || namesMatch(p.loserName, silverName);
-          const alreadyAdded = semiLosers.some(sl => namesMatch(sl.name, p.loserName));
-          if (!isGoldOrSilver && !alreadyAdded) {
-            semiLosers.push({ name: p.loserName, club: p.loserClub });
-            if (semiLosers.length >= 2) break;
-          }
+    // Preceding bouts in category (AGENTS.md: "Look at the two bouts immediately preceding the Final")
+    const precedingMatches = otherMatches
+      .filter(m => m !== thirdPlaceMatch)
+      .sort((a, b) => b.matchNo - a.matchNo);
+
+    for (const m of precedingMatches) {
+      if (semiLosers.length >= 2) break;
+      const p = getMatchParticipants(m);
+      if (p.isCompleted && isValidAthlete(p.loserName)) {
+        const isGoldOrSilver = namesMatch(p.loserName, goldName) || namesMatch(p.loserName, silverName);
+        const alreadyAdded = semiLosers.some(sl => namesMatch(sl.name, p.loserName));
+        if (!isGoldOrSilver && !alreadyAdded) {
+          semiLosers.push({ name: p.loserName, club: p.loserClub });
         }
       }
     }
 
-    // Tier 3: Any other eliminated athlete from category matches
-    if (semiLosers.length < 2) {
-      for (const m of catMatches) {
-        if (m === finalMatch) continue;
-        const p = getMatchParticipants(m);
-        if (p.isCompleted && isValidAthlete(p.loserName)) {
-          const isGoldOrSilver = namesMatch(p.loserName, goldName) || namesMatch(p.loserName, silverName);
-          const alreadyAdded = semiLosers.some(sl => namesMatch(sl.name, p.loserName));
-          if (!isGoldOrSilver && !alreadyAdded) {
-            semiLosers.push({ name: p.loserName, club: p.loserClub });
-            if (semiLosers.length >= 2) break;
-          }
+    // Feeder pairing check for 3rd-Place Playoff:
+    // If thirdPlaceMatch was not identified by name, but we have 2 semi-final losers,
+    // check if there is a bout played BETWEEN those two semi-final losers
+    if (!thirdPlaceMatch && semiLosers.length >= 2) {
+      const pairedMatch = otherMatches.find(m => {
+        return (
+          (namesMatch(m.blueName, semiLosers[0].name) && namesMatch(m.redName, semiLosers[1].name)) ||
+          (namesMatch(m.blueName, semiLosers[1].name) && namesMatch(m.redName, semiLosers[0].name))
+        );
+      });
+      if (pairedMatch) {
+        thirdPlaceMatch = pairedMatch;
+        // If pairedMatch was mistakenly picked as finalMatch, promote the next highest as Final
+        if (finalMatch === pairedMatch) {
+          const altFinal = nonPlayoffMatches.find(m => m !== pairedMatch);
+          if (altFinal) finalMatch = altFinal;
         }
       }
     }
 
-    // Assign 3rd / 4th Place based on placementOption
-    if (placementOption === 'b' && thirdPlaceMatch) {
+    // Assign 3rd & 4th Places
+    const bronzes: WinnerResult[] = [];
+    if (thirdPlaceMatch) {
       const tpRes = getMatchParticipants(thirdPlaceMatch);
       if (tpRes.isCompleted && isValidAthlete(tpRes.winnerName)) {
         bronzes.push({ place: '3rd', name: tpRes.winnerName.trim(), club: isValidClub(tpRes.winnerClub) ? tpRes.winnerClub.trim() : '' });
@@ -457,11 +490,12 @@ export function computeCategoryResults(matchList: RawMatch[], placementOption: '
           bronzes.push({ place: '4th', name: tpRes.loserName.trim(), club: isValidClub(tpRes.loserClub) ? tpRes.loserClub.trim() : '' });
         }
       } else {
+        // Playoff not completed or pending: fallback to semi-final losers
         if (semiLosers.length >= 1 && isValidAthlete(semiLosers[0].name)) {
           bronzes.push({ place: '3rd', name: semiLosers[0].name.trim(), club: isValidClub(semiLosers[0].club) ? semiLosers[0].club.trim() : '' });
         }
         if (semiLosers.length >= 2 && isValidAthlete(semiLosers[1].name)) {
-          bronzes.push({ place: '4th', name: semiLosers[1].name.trim(), club: isValidClub(semiLosers[1].club) ? semiLosers[1].club.trim() : '' });
+          bronzes.push({ place: (placementOption === 'b' ? '4th' : '3rd'), name: semiLosers[1].name.trim(), club: isValidClub(semiLosers[1].club) ? semiLosers[1].club.trim() : '' });
         }
       }
     } else if (placementOption === 'b') {
@@ -797,7 +831,7 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
                     h.eventId === evId && 
                     isBoutMatch(h.bout, m.bout)
                   );
-                  const winnerName = hist ? hist.winner : '';
+                  const winnerName = (hist && hist.winner) ? hist.winner : (m.winner || '');
                   
                   const exists = combinedMatches.some(ex => 
                     ex.category === m.category && 
@@ -936,7 +970,7 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
           );
           return {
             ...m,
-            winner: hist ? hist.winner : m.winner,
+            winner: (hist && hist.winner) ? hist.winner : m.winner,
             r1Blue: hist && hist.points?.r1Blue ? parseFloat(hist.points.r1Blue) : m.r1Blue,
             r1Red: hist && hist.points?.r1Red ? parseFloat(hist.points.r1Red) : m.r1Red
           };
