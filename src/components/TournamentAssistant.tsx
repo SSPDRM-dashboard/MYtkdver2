@@ -16,6 +16,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatBoutNumber } from '../lib/utils';
 import { MatchData, EventData, RingStatus } from '../types';
+import { chatWithGemini } from '../services/geminiService';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -110,24 +111,15 @@ export function TournamentAssistant({
         - If you don't know something, say so.
       `;
 
-      const response = await fetch('/api/gemini/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          context,
-          messages: messages.map(m => ({ role: m.role, content: m.content })),
-          input
-        })
+      const text = await chatWithGemini({
+        context,
+        messages: messages.map(m => ({ role: m.role, content: m.content })),
+        input
       });
-
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to generate response.");
-      }
 
       const assistantMessage: Message = {
         role: 'assistant',
-        content: data.text || "I'm sorry, I couldn't generate a response.",
+        content: text || "I'm sorry, I couldn't generate a response.",
         timestamp: new Date()
       };
 

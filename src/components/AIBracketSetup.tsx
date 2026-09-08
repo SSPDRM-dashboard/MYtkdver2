@@ -15,7 +15,8 @@ import {
   X,
   Send,
   Sparkles,
-  Zap
+  Zap,
+  Key
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { MatchData, BoutMapping, EventData, RingStatus } from '../types';
@@ -25,6 +26,12 @@ import { handleGlobalQuotaTrigger, isFirestoreQuotaExceeded } from '../App';
 import { db } from '../firebase';
 import { syncToGoogleSheets } from '../services/googleSheets';
 import Papa from 'papaparse';
+import { 
+  analyzeBracketWithGemini, 
+  refineBracketWithGemini, 
+  getCustomGeminiApiKey, 
+  setCustomGeminiApiKey 
+} from '../services/geminiService';
 
 function sanitizeForFirestore(obj: any): any {
   if (obj === undefined || obj === null) return null;
@@ -333,6 +340,8 @@ export function AIBracketSetup({
 
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [showDuplicateModal, setShowDuplicateModal] = useState(false);
+  const [showApiKeyModal, setShowApiKeyModal] = useState(false);
+  const [apiKeyInput, setApiKeyInput] = useState(() => getCustomGeminiApiKey());
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const currentEvent = events.find(e => e.id === currentEventId);
@@ -349,21 +358,13 @@ export function AIBracketSetup({
     setError(null);
 
     try {
-      const response = await fetch('/api/gemini/refine-bracket', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          previewData,
-          isPoomsaeMode
-        })
+      const rawText = await refineBracketWithGemini({
+        previewData,
+        isPoomsaeMode,
+        customApiKey: apiKeyInput
       });
 
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to refine data.");
-      }
-
-      const result = cleanAndParseJSON(data.rawText);
+      const result = cleanAndParseJSON(rawText);
       setPreviewData(result);
     } catch (err: any) {
       console.error("Refinement Error:", err);
@@ -576,24 +577,16 @@ export function AIBracketSetup({
 
       const detectedMimeType = file.type || (file.name.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/png');
 
-      const response = await fetch('/api/gemini/analyze-bracket', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          base64Data,
-          mimeType: detectedMimeType,
-          isPoomsaeMode,
-          isThinkingMode,
-          adminNote
-        })
+      const rawText = await analyzeBracketWithGemini({
+        base64Data,
+        mimeType: detectedMimeType,
+        isPoomsaeMode,
+        isThinkingMode,
+        adminNote,
+        customApiKey: apiKeyInput
       });
 
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to analyze bracket file.");
-      }
-
-      const result = cleanAndParseJSON(data.rawText);
+      const result = cleanAndParseJSON(rawText);
       const normalizedResult = {
         matches: Array.isArray(result.matches) ? result.matches : [],
         mappings: Array.isArray(result.mappings) ? result.mappings : []
@@ -1162,17 +1155,79 @@ export function AIBracketSetup({
             </motion.div>
           </div>
         )}
+        {showApiKeyModal && (
+          <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl"
+            >
+              <div className="w-14 h-14 bg-indigo-50 rounded-2xl flex items-center justify-center mb-5 mx-auto">
+                <Key size={28} className="text-indigo-600" />
+              </div>
+              <h3 className="text-xl font-black text-center text-slate-900 mb-2">Gemini API Key</h3>
+              <p className="text-xs text-slate-500 text-center mb-6">
+                When using this app on static web hosts (Vercel, Netlify, custom domain), provide your Google Gemini API key to enable bracket extraction directly.
+              </p>
+              <div className="space-y-4">
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1">
+                    API Key
+                  </label>
+                  <input
+                    type="password"
+                    value={apiKeyInput}
+                    onChange={(e) => setApiKeyInput(e.target.value)}
+                    placeholder="AIzaSy..."
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+                <div className="flex gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowApiKeyModal(false)}
+                    className="flex-1 px-4 py-2.5 bg-slate-100 text-slate-700 font-bold rounded-xl hover:bg-slate-200 transition-colors text-sm"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCustomGeminiApiKey(apiKeyInput);
+                      setShowApiKeyModal(false);
+                    }}
+                    className="flex-1 px-4 py-2.5 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-colors text-sm shadow-md shadow-indigo-600/20"
+                  >
+                    Save Key
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
       </AnimatePresence>
 
       <div className="bg-white rounded-[2.5rem] p-8 border border-slate-200 shadow-sm">
-        <div className="flex items-center gap-4 mb-8">
-          <div className="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-900/20">
-            <RefreshCw size={24} className="text-white" />
+        <div className="flex items-center justify-between gap-4 mb-8">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-900/20">
+              <RefreshCw size={24} className="text-white" />
+            </div>
+            <div>
+              <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight italic">AI Bracket Setup</h2>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Upload PDF/Image to auto-generate matches & mappings</p>
+            </div>
           </div>
-          <div>
-            <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight italic">AI Bracket Setup</h2>
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Upload PDF/Image to auto-generate matches & mappings</p>
-          </div>
+          <button
+            type="button"
+            onClick={() => setShowApiKeyModal(true)}
+            className="flex items-center gap-2 px-3 py-2 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 transition-colors"
+            title="Configure Gemini API Key for web deployment"
+          >
+            <Key size={14} className={apiKeyInput ? "text-emerald-600" : "text-amber-500"} />
+            <span>{apiKeyInput ? "API Key Configured" : "Set API Key"}</span>
+          </button>
         </div>
 
         {!currentEventId ? (
