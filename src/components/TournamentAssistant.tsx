@@ -14,7 +14,6 @@ import {
   LayoutDashboard
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { GoogleGenAI } from "@google/genai";
 import { cn, formatBoutNumber } from '../lib/utils';
 import { MatchData, EventData, RingStatus } from '../types';
 
@@ -86,13 +85,6 @@ export function TournamentAssistant({
     setIsLoading(true);
 
     try {
-      const apiKey = import.meta.env.VITE_CUSTOM_API_KEY || import.meta.env.VITE_GEMINI_API_KEY || process.env.CUSTOM_API_KEY || process.env.GEMINI_API_KEY;
-      if (!apiKey) {
-        throw new Error("No API Key found. When deploying to Vercel, make sure to add VITE_GEMINI_API_KEY or VITE_CUSTOM_API_KEY to your environment variables.");
-      }
-      console.log("Using API Key starting with:", apiKey.substring(0, 5), "Is Custom?", !!import.meta.env.VITE_CUSTOM_API_KEY);
-
-      const ai = new GoogleGenAI({ apiKey });
       const currentEvent = events.find(e => e.id === currentEventId);
       
       // Prepare context about the tournament
@@ -118,26 +110,24 @@ export function TournamentAssistant({
         - If you don't know something, say so.
       `;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
-        contents: [
-          { role: 'user', parts: [{ text: context }] },
-          ...messages.map(m => ({
-            role: m.role === 'assistant' ? 'model' : 'user',
-            parts: [{ text: m.content }]
-          })),
-          { role: 'user', parts: [{ text: input }] }
-        ],
-        config: {
-          temperature: 0.7,
-          topP: 0.95,
-          topK: 40,
-        }
+      const response = await fetch('/api/gemini/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          context,
+          messages: messages.map(m => ({ role: m.role, content: m.content })),
+          input
+        })
       });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to generate response.");
+      }
 
       const assistantMessage: Message = {
         role: 'assistant',
-        content: response.text || "I'm sorry, I couldn't generate a response.",
+        content: data.text || "I'm sorry, I couldn't generate a response.",
         timestamp: new Date()
       };
 

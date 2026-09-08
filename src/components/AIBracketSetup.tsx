@@ -18,7 +18,6 @@ import {
   Zap
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { GoogleGenAI, Type, ThinkingLevel } from "@google/genai";
 import { MatchData, BoutMapping, EventData, RingStatus } from '../types';
 import { cn, normalizeBoutNumber, formatBoutNumber, isBoutMatch, normalizeBoutWithRing, getBoutNumber } from '../lib/utils';
 import { collection, addDoc, serverTimestamp, setDoc, doc } from 'firebase/firestore';
@@ -330,61 +329,25 @@ export function AIBracketSetup({
     setError(null);
 
     try {
-      const apiKey = import.meta.env.VITE_CUSTOM_API_KEY || import.meta.env.VITE_GEMINI_API_KEY || process.env.CUSTOM_API_KEY || process.env.GEMINI_API_KEY;
-      if (!apiKey) throw new Error("No API Key found. When deploying to Vercel, make sure to add VITE_GEMINI_API_KEY or VITE_CUSTOM_API_KEY to your environment variables.");
-      console.log("Using API Key starting with:", apiKey.substring(0, 5), "Is Custom?", !!import.meta.env.VITE_CUSTOM_API_KEY);
-
-      const ai = new GoogleGenAI({ apiKey });
-      const prompt = `
-        You are an expert tournament bracket auditor. I have extracted match data and advancement mappings from a bracket.
-        Please review the following JSON and fix any logical inconsistencies.
-        
-        COMMON ISSUES TO FIX:
-        1. Bout numbers that don't match the ring (e.g. Bout 101 should be Ring 1).
-        2. Mappings where the sourceBout doesn't exist in the matches list.
-        3. Mappings where sourceBout and nextBout are the same.
-        4. Inconsistent capitalization (everything should be UPPERCASE).
-        5. Missing categories or club names if they can be inferred from context.
-        
-        ${isPoomsaeMode ? `
-        POOMSAE MODE ACTIVE:
-        - This event is Poomsae/Freestyle.
-        - Ensure solo performers are correctly placed (Blue slot active, Red slot empty).
-        - Explicitly include "POOMSAE" in categories.
-        ` : ''}
-
-        ${adminNote ? `ADMIN NOTE: ${adminNote}` : ''}
-        
-        CURRENT DATA:
-        ${JSON.stringify(previewData, null, 2)}
-        
-        Return ONLY the corrected JSON in the same format.
-
-        CRITICAL FORMATTING RULES:
-        - Do not include unescaped double quotes inside string values under any circumstances (e.g., nicknames, abbreviations, or club names). If a name has quotes like "John "The Dragon" Smith", return "John \"The Dragon\" Smith" or "John 'The Dragon' Smith".
-        - The output must be standard compliant JSON, with all property names and string values strictly enclosed in double quotes.
-      `;
-
-      const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              matches: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { ring: { type: Type.NUMBER }, bout: { type: Type.STRING }, category: { type: Type.STRING }, blue_name: { type: Type.STRING }, blue_club: { type: Type.STRING }, red_name: { type: Type.STRING }, red_club: { type: Type.STRING } } } },
-              mappings: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { sourceBout: { type: Type.STRING }, nextBout: { type: Type.STRING }, slot: { type: Type.STRING } } } }
-            }
-          }
-        }
+      const response = await fetch('/api/gemini/refine-bracket', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          previewData,
+          isPoomsaeMode
+        })
       });
 
-      const result = cleanAndParseJSON(response.text);
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to refine data.");
+      }
+
+      const result = cleanAndParseJSON(data.rawText);
       setPreviewData(result);
     } catch (err: any) {
       console.error("Refinement Error:", err);
-      setError("Failed to refine data. Please try again.");
+      setError(err.message || "Failed to refine data. Please try again.");
     } finally {
       setIsProcessing(false);
     }
@@ -589,110 +552,26 @@ export function AIBracketSetup({
     }
 
     try {
-      const apiKey = import.meta.env.VITE_CUSTOM_API_KEY || import.meta.env.VITE_GEMINI_API_KEY || process.env.CUSTOM_API_KEY || process.env.GEMINI_API_KEY;
-      
-      if (!apiKey) {
-        throw new Error("No API Key found. When deploying to Vercel, make sure to add VITE_GEMINI_API_KEY or VITE_CUSTOM_API_KEY to your environment variables.");
-      }
-      console.log("Using API Key starting with:", apiKey.substring(0, 5), "Is Custom?", !!import.meta.env.VITE_CUSTOM_API_KEY);
-      
-      const ai = new GoogleGenAI({ apiKey });
       const base64Data = await fileToBase64(file);
-      
-      const prompt = `
-        You are an expert tournament bracket analyzer. Extract the bracket structure from this image.
-        
-        CRITICAL RULES:
-        - Vertical Hierarchy: Flow is LEFT to RIGHT.
-        - Match IDs: Rectangular boxes with alphanumeric codes (e.g., A01, A05, 2001) are Bout IDs.
-        - Color Assignment: Upper line = Blue Side (Chung), Lower line = Red Side (Hong).
-        - Advancement: Winner of a previous match fills the slot (Upper=Blue, Lower=Red) in the next Bout ID box.
-        - Player Names: Often start with "090 - ". Extract only the name.
-        - Club Names: Located directly BELOW the player's name.
-        - Ring Mapping: 
-          - 1000s=Ring 1, 2000s=Ring 2, 3000s=Ring 3, 4000s=Ring 4, 5000s=Ring 5, 6000s=Ring 6, 
-          - 7000s=Ring 7, 8000s=Ring 8, 9000s=Ring 9, 10000s=Ring 10, 11000s=Ring 11, 12000s=Ring 12.
-          - If alphanumeric (e.g. A01), A=1, B=2, C=3, D=4, E=5, F=6, G=7, H=8, I=9, J=10, K=11, L=12.
 
-        ${isPoomsaeMode ? `
-        INDIVIDUAL POOMSAE MODE ACTIVE:
-        - This document contains Poomsae performances that should be treated as individual solo entries.
-        - Map EACH player as their own separate SOLO entry (put player in "blue_name", leave "red_name" and "red_club" EMPTY).
-        - Use sequential bout numbers (e.g., 1, 2, 3, 4, 5...) based on the performance order in the document.
-        - Every single participant in the category must get an individual match record.
-        - The category name MUST include the suffix "INDIVIDUAL POOMSAE" (e.g., "Junior Female INDIVIDUAL POOMSAE").
-        - If the document is a bracket, treat every individual player slot in that bracket as a unique solo bout.
-        ` : 'STRICT RULE: Do NOT treat as Individual Poomsae. Every match MUST have a Blue and Red corner if data is available.'}
-
-        ${adminNote ? `ADMIN NOTE: ${adminNote}` : ''}
-
-        Return JSON:
-        {
-          "matches": [{"bout": "A01", "ring": 1, "category": "...", "blue_name": "...", "blue_club": "...", "red_name": "...", "red_club": "..."}],
-          "mappings": [{"sourceBout": "A01", "nextBout": "A05", "slot": "Chung"}]
-        }
-
-        CRITICAL FORMATTING RULES:
-        - Do not include unescaped double quotes inside string values under any circumstances (e.g., nicknames, abbreviations, or club names). If a name has quotes like "John "The Dragon" Smith", return "John \"The Dragon\" Smith" or "John 'The Dragon' Smith".
-        - The output must be standard compliant JSON, with all property names and string values strictly enclosed in double quotes.
-      `;
-
-      const response = await ai.models.generateContent({
-        model: isThinkingMode ? "gemini-3.1-pro-preview" : "gemini-3.5-flash",
-        contents: [
-          {
-            parts: [
-              { text: prompt },
-              {
-                inlineData: {
-                  mimeType: file.type || "image/png",
-                  data: base64Data,
-                },
-              },
-            ],
-          },
-        ],
-        config: {
-          temperature: 0.1,
-          responseMimeType: "application/json",
-          thinkingConfig: isThinkingMode ? { thinkingLevel: ThinkingLevel.HIGH } : undefined,
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              matches: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    ring: { type: Type.NUMBER },
-                    bout: { type: Type.STRING },
-                    category: { type: Type.STRING },
-                    blue_name: { type: Type.STRING },
-                    blue_club: { type: Type.STRING },
-                    red_name: { type: Type.STRING },
-                    red_club: { type: Type.STRING },
-                  },
-                  required: ["bout", "category", "blue_name", "red_name"],
-                },
-              },
-              mappings: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    sourceBout: { type: Type.STRING },
-                    nextBout: { type: Type.STRING },
-                    slot: { type: Type.STRING, enum: ["Chung", "Hong"] },
-                  },
-                  required: ["sourceBout", "nextBout", "slot"],
-                },
-              },
-            },
-          },
-        },
+      const response = await fetch('/api/gemini/analyze-bracket', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          base64Data,
+          mimeType: file.type || 'image/png',
+          isPoomsaeMode,
+          isThinkingMode,
+          adminNote
+        })
       });
 
-      const result = cleanAndParseJSON(response.text);
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to analyze bracket file.");
+      }
+
+      const result = cleanAndParseJSON(data.rawText);
       const normalizedResult = {
         matches: Array.isArray(result.matches) ? result.matches : [],
         mappings: Array.isArray(result.mappings) ? result.mappings : []
