@@ -18,6 +18,54 @@ function getGeminiClient(customApiKey?: string) {
   });
 }
 
+// Resilient helper to handle temporary 503 / high demand spikes with backoff and model fallbacks
+async function generateWithRetry(
+  ai: GoogleGenAI,
+  primaryModel: string,
+  params: any,
+  maxRetries = 2
+) {
+  const modelsToTry = [
+    primaryModel,
+    primaryModel === "gemini-3.8-flash" ? "gemini-flash-latest" : primaryModel,
+    "gemini-3.1-flash-lite",
+  ];
+
+  let lastError: any = null;
+
+  for (const model of modelsToTry) {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        return await ai.models.generateContent({
+          ...params,
+          model,
+        });
+      } catch (err: any) {
+        lastError = err;
+        const msg = (err?.message || "").toLowerCase();
+        const isTransient =
+          msg.includes("503") ||
+          msg.includes("high demand") ||
+          msg.includes("unavailable") ||
+          msg.includes("resource_exhausted") ||
+          msg.includes("429") ||
+          msg.includes("overloaded");
+
+        if (!isTransient || attempt === maxRetries) {
+          if (!isTransient) throw err;
+          break;
+        }
+
+        const delay = (attempt + 1) * 1500;
+        console.warn(`Transient ${err?.status || '503'} on ${model} (attempt ${attempt + 1}), retrying in ${delay}ms...`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
+  }
+
+  throw lastError;
+}
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
@@ -40,9 +88,15 @@ async function startServer() {
         return res.status(400).json({ error: "Missing base64Data in request payload." });
       }
 
+      // Auto-detect PDF via magic bytes (%PDF = JVBERi in base64)
+      let effectiveMimeType = mimeType || "image/png";
+      if (base64Data.startsWith("JVBERi") || (mimeType && mimeType.includes("pdf"))) {
+        effectiveMimeType = "application/pdf";
+      }
+
       const ai = getGeminiClient(customApiKey);
       const prompt = `
-        You are an expert tournament bracket analyzer. Extract the bracket structure from this image.
+        You are an expert tournament bracket analyzer. Extract all bracket structures and match data from this document/image.
         
         CRITICAL RULES:
         - Vertical Hierarchy: Flow is LEFT to RIGHT.
@@ -68,26 +122,28 @@ async function startServer() {
 
         ${adminNote ? `ADMIN NOTE: ${adminNote}` : ''}
 
-        Return JSON:
+        Return JSON matching this schema:
         {
           "matches": [{"bout": "A01", "ring": 1, "category": "...", "blue_name": "...", "blue_club": "...", "red_name": "...", "red_club": "..."}],
           "mappings": [{"sourceBout": "A01", "nextBout": "A05", "slot": "Chung"}]
         }
 
         CRITICAL FORMATTING RULES:
-        - Do not include unescaped double quotes inside string values under any circumstances (e.g., nicknames, abbreviations, or club names). If a name has quotes like "John "The Dragon" Smith", return "John \\"The Dragon\\" Smith" or "John 'The Dragon' Smith".
-        - The output must be standard compliant JSON, with all property names and string values strictly enclosed in double quotes.
+        - Start your output directly with { and return ONLY the JSON object.
+        - Do not output any conversational remarks, notes, or explanations like 'The page contains...'.
+        - Do not include unescaped double quotes inside string values under any circumstances.
       `;
 
-      const response = await ai.models.generateContent({
-        model: isThinkingMode ? "gemini-3.1-pro-preview" : "gemini-3.8-flash",
+      const requestedModel = isThinkingMode ? "gemini-3.1-pro-preview" : "gemini-3.8-flash";
+
+      const response = await generateWithRetry(ai, requestedModel, {
         contents: [
           {
             parts: [
               { text: prompt },
               {
                 inlineData: {
-                  mimeType: mimeType || "image/png",
+                  mimeType: effectiveMimeType,
                   data: base64Data,
                 },
               },
@@ -95,6 +151,7 @@ async function startServer() {
           },
         ],
         config: {
+          systemInstruction: "You are an automated tournament bracket data extractor. Extract match bouts, solo poomsae entries, and bout advancement trees from documents and images. You strictly output valid JSON matching the schema with no conversational filler, notes, or explanations.",
           temperature: 0.1,
           responseMimeType: "application/json",
           thinkingConfig: isThinkingMode ? { thinkingLevel: ThinkingLevel.HIGH } : undefined,
@@ -137,7 +194,11 @@ async function startServer() {
       return res.json({ rawText: response.text });
     } catch (err: any) {
       console.error("Server Bracket Analysis Error:", err);
-      return res.status(500).json({ error: err.message || "Failed to analyze bracket file." });
+      const is503 = (err?.message || "").includes("503") || (err?.message || "").includes("high demand") || (err?.message || "").includes("UNAVAILABLE");
+      const userMsg = is503 
+        ? "The AI service is currently experiencing high demand. Please wait a moment and try again."
+        : (err.message || "Failed to analyze bracket file.");
+      return res.status(is503 ? 503 : 500).json({ error: userMsg });
     }
   });
 
@@ -175,14 +236,14 @@ async function startServer() {
         Return ONLY the corrected JSON in the same format.
 
         CRITICAL FORMATTING RULES:
-        - Do not include unescaped double quotes inside string values under any circumstances (e.g., nicknames, abbreviations, or club names). If a name has quotes like "John "The Dragon" Smith", return "John \\"The Dragon\\" Smith" or "John 'The Dragon' Smith".
-        - The output must be standard compliant JSON, with all property names and string values strictly enclosed in double quotes.
+        - Start directly with { and return ONLY the JSON.
+        - Do not include unescaped double quotes inside string values under any circumstances.
       `;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3.8-flash",
+      const response = await generateWithRetry(ai, "gemini-3.8-flash", {
         contents: prompt,
         config: {
+          systemInstruction: "You are an automated tournament bracket auditor. Return strictly valid JSON conforming to the schema.",
           responseMimeType: "application/json",
           responseSchema: {
             type: Type.OBJECT,
@@ -221,7 +282,11 @@ async function startServer() {
       return res.json({ rawText: response.text });
     } catch (err: any) {
       console.error("Server Bracket Refinement Error:", err);
-      return res.status(500).json({ error: err.message || "Failed to refine bracket data." });
+      const is503 = (err?.message || "").includes("503") || (err?.message || "").includes("high demand") || (err?.message || "").includes("UNAVAILABLE");
+      const userMsg = is503 
+        ? "The AI service is currently experiencing high demand. Please wait a moment and try again."
+        : (err.message || "Failed to refine bracket data.");
+      return res.status(is503 ? 503 : 500).json({ error: userMsg });
     }
   });
 
@@ -254,8 +319,7 @@ async function startServer() {
         formattedContents.push({ role: "user", parts: [{ text: input }] });
       }
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3.8-flash",
+      const response = await generateWithRetry(ai, "gemini-3.8-flash", {
         contents: formattedContents,
         config: {
           temperature: 0.7,
@@ -267,7 +331,11 @@ async function startServer() {
       return res.json({ text: response.text || "" });
     } catch (err: any) {
       console.error("Server Chat Error:", err);
-      return res.status(500).json({ error: err.message || "Failed to generate assistant response." });
+      const is503 = (err?.message || "").includes("503") || (err?.message || "").includes("high demand") || (err?.message || "").includes("UNAVAILABLE");
+      const userMsg = is503 
+        ? "The AI service is currently experiencing high demand. Please wait a moment and try again."
+        : (err.message || "Failed to generate assistant response.");
+      return res.status(is503 ? 503 : 500).json({ error: userMsg });
     }
   });
 

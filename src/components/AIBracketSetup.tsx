@@ -46,14 +46,34 @@ function cleanAndParseJSON(rawText: string | undefined): any {
 
   let cleaned = rawText.trim();
 
-  // 1. Strip markdown code block wraps
-  if (cleaned.startsWith("```")) {
-    cleaned = cleaned.replace(/^```[a-zA-Z]*\n/i, "");
-    cleaned = cleaned.replace(/\n```$/, "");
-    cleaned = cleaned.trim();
+  // 1. Strip or extract markdown code blocks anywhere in text
+  const codeBlockMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (codeBlockMatch && codeBlockMatch[1]) {
+    cleaned = codeBlockMatch[1].trim();
   }
 
-  // 2. Try simple JSON.parse first
+  // 2. Locate JSON bounds to eliminate conversational intro/outro (e.g. "The page contains...")
+  const firstBrace = cleaned.indexOf('{');
+  const firstBracket = cleaned.indexOf('[');
+  let startIdx = -1;
+  if (firstBrace !== -1 && firstBracket !== -1) {
+    startIdx = Math.min(firstBrace, firstBracket);
+  } else {
+    startIdx = Math.max(firstBrace, firstBracket);
+  }
+
+  const lastBrace = cleaned.lastIndexOf('}');
+  const lastBracket = cleaned.lastIndexOf(']');
+  const endIdx = Math.max(lastBrace, lastBracket);
+
+  if (startIdx === -1 || endIdx <= startIdx) {
+    // No JSON structure detected at all - return the model's message
+    throw new Error(cleaned);
+  }
+
+  cleaned = cleaned.substring(startIdx, endIdx + 1).trim();
+
+  // 3. Try direct JSON.parse first
   try {
     return JSON.parse(cleaned);
   } catch (initialError: any) {
@@ -159,7 +179,7 @@ function cleanAndParseJSON(rawText: string | undefined): any {
   } catch (finalError: any) {
     console.error("Deep repair failed. Raw text:", rawText);
     console.log("Repaired attempt:", repaired);
-    throw new Error(`JSON parsing failed: ${finalError.message}. Help: Ensure nicknames or special names are escaped.`);
+    throw new Error(`JSON parsing failed: ${finalError.message}.`);
   }
 }
 
@@ -554,12 +574,14 @@ export function AIBracketSetup({
     try {
       const base64Data = await fileToBase64(file);
 
+      const detectedMimeType = file.type || (file.name.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/png');
+
       const response = await fetch('/api/gemini/analyze-bracket', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           base64Data,
-          mimeType: file.type || 'image/png',
+          mimeType: detectedMimeType,
           isPoomsaeMode,
           isThinkingMode,
           adminNote
@@ -680,7 +702,9 @@ export function AIBracketSetup({
       
       if (err instanceof Error) {
         const msg = err.message.toLowerCase();
-        if (msg.includes("timed out")) {
+        if (msg.includes("503") || msg.includes("high demand") || msg.includes("unavailable")) {
+          errorMessage = "The AI service is currently experiencing high demand. Please wait a few moments and try again.";
+        } else if (msg.includes("timed out")) {
           errorMessage = "The request timed out. The image might be too complex or the connection is slow.";
         } else if (msg.includes("api_key_invalid") || msg.includes("api key")) {
           errorMessage = "Invalid API Key. Please check your configuration.";
@@ -691,7 +715,7 @@ export function AIBracketSetup({
         } else if (msg.includes("safety")) {
           errorMessage = "The file was flagged by safety filters. Please ensure it contains only tournament data.";
         } else {
-          errorMessage = `Error: ${err.message}`;
+          errorMessage = err.message.startsWith("Error:") ? err.message : `Error: ${err.message}`;
         }
       }
       
