@@ -696,13 +696,13 @@ export function AIBracketSetup({
       if (err instanceof Error) {
         const msg = err.message.toLowerCase();
         if (msg.includes("503") || msg.includes("high demand") || msg.includes("unavailable")) {
-          errorMessage = "The AI service is currently experiencing high demand. Please wait a few moments and try again.";
+          errorMessage = "The AI service is currently experiencing high demand. Please wait a moment and try again, or try uploading 1-2 pages of your PDF instead of the entire document.";
         } else if (msg.includes("timed out")) {
-          errorMessage = "The request timed out. The image might be too complex or the connection is slow.";
+          errorMessage = "The request timed out. The file might be too large or complex. Try uploading 1-2 pages at a time.";
         } else if (msg.includes("api_key_invalid") || msg.includes("api key")) {
-          errorMessage = "Invalid API Key. Please check your configuration.";
-        } else if (msg.includes("quota") || msg.includes("rate limit")) {
-          errorMessage = "API quota exceeded. Please try again in a few minutes.";
+          errorMessage = "Invalid API Key. Please check your configuration in the API Key settings.";
+        } else if (msg.includes("quota") || msg.includes("rate limit") || msg.includes("resource_exhausted")) {
+          errorMessage = "API quota exceeded. Google's per-minute rate limit resets every 60 seconds—please wait 1 minute and retry, or upload fewer pages at a time.";
         } else if (msg.includes("model not found") || msg.includes("404")) {
           errorMessage = "The AI model is currently unavailable. Please contact support.";
         } else if (msg.includes("safety")) {

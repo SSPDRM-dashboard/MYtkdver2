@@ -27,6 +27,65 @@ export function setCustomGeminiApiKey(key: string) {
   }
 }
 
+// Resilient client-side helper to handle temporary 503 / high demand spikes with backoff and model fallbacks
+async function generateWithRetryClient(
+  ai: GoogleGenAI,
+  primaryModel: string,
+  params: any,
+  maxRetries = 2
+) {
+  const modelsToTry = [
+    primaryModel,
+    primaryModel === "gemini-3.8-flash"
+      ? "gemini-flash-latest"
+      : primaryModel === "gemini-3.1-pro-preview"
+      ? "gemini-3.8-flash"
+      : primaryModel,
+    "gemini-3.1-flash-lite",
+  ];
+
+  const uniqueModels = Array.from(new Set(modelsToTry));
+  let lastError: any = null;
+
+  for (const model of uniqueModels) {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`[Gemini Client] Attempting model ${model} (try ${attempt + 1}/${maxRetries + 1})...`);
+        return await ai.models.generateContent({
+          ...params,
+          model,
+        });
+      } catch (err: any) {
+        lastError = err;
+        const msg = (err?.message || "").toLowerCase();
+        const isTransient =
+          msg.includes("503") ||
+          msg.includes("high demand") ||
+          msg.includes("unavailable") ||
+          msg.includes("resource_exhausted") ||
+          msg.includes("429") ||
+          msg.includes("overloaded") ||
+          msg.includes("timeout") ||
+          msg.includes("timed out") ||
+          msg.includes("try again") ||
+          msg.includes("quota");
+
+        if (!isTransient || attempt === maxRetries) {
+          if (!isTransient) throw err;
+          // Step to next fallback model
+          break;
+        }
+
+        const delay = (attempt + 1) * 1500;
+        console.warn(`[Gemini Client] Transient issue on ${model} (attempt ${attempt + 1}): ${err?.message || '503/Quota'}. Retrying in ${delay}ms...`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
+  }
+
+  throw lastError;
+}
+
 export async function analyzeBracketWithGemini(params: {
   base64Data: string;
   mimeType: string;
@@ -64,19 +123,13 @@ export async function analyzeBracketWithGemini(params: {
       if (res.ok && data.rawText) {
         return data.rawText;
       }
-      if (res.status === 503) {
-        throw new Error(data.error || "The AI service is currently experiencing high demand. Please try again in a moment.");
-      }
       if (!res.ok && data.error && !data.error.includes("404") && !data.error.includes("Not Found")) {
-        throw new Error(data.error);
+        console.warn("Server analyze endpoint returned error, proceeding to client fallback:", data.error);
       }
     }
-    // If not JSON or 404/405, this is a static web host (Vercel, Netlify, etc.) -> fall back to client SDK
+    // If not JSON or 404/405/500, this is a static web host (Vercel, Netlify, etc.) -> fall back to client SDK
   } catch (err: any) {
-    if (err.message && (err.message.includes("high demand") || err.message.includes("503"))) {
-      throw err;
-    }
-    console.warn("Server endpoint unavailable or returned HTML, switching to client-side Gemini fallback:", err.message);
+    console.warn("Server endpoint unavailable, switching to client-side Gemini fallback:", err?.message);
   }
 
   // 2. Client-side fallback for static web versions
@@ -130,8 +183,7 @@ export async function analyzeBracketWithGemini(params: {
   const model = isThinkingMode ? "gemini-3.1-pro-preview" : "gemini-3.8-flash";
 
   try {
-    const response = await ai.models.generateContent({
-      model,
+    const response = await generateWithRetryClient(ai, model, {
       contents: [
         {
           parts: [
@@ -219,15 +271,9 @@ export async function refineBracketWithGemini(params: {
       if (res.ok && data.rawText) {
         return data.rawText;
       }
-      if (res.status === 503) {
-        throw new Error(data.error || "The AI service is currently experiencing high demand. Please try again in a moment.");
-      }
     }
   } catch (err: any) {
-    if (err.message && (err.message.includes("high demand") || err.message.includes("503"))) {
-      throw err;
-    }
-    console.warn("Server refine endpoint unavailable, switching to client-side fallback:", err.message);
+    console.warn("Server refine endpoint unavailable, switching to client-side fallback:", err?.message);
   }
 
   const apiKey = customApiKey || getCustomGeminiApiKey();
@@ -258,8 +304,7 @@ export async function refineBracketWithGemini(params: {
   `;
 
   try {
-    const response = await ai.models.generateContent({
-      model: "gemini-3.8-flash",
+    const response = await generateWithRetryClient(ai, "gemini-3.8-flash", {
       contents: prompt,
       config: {
         systemInstruction: "You are an automated tournament bracket auditor. Return strictly valid JSON conforming to the schema.",
@@ -335,15 +380,9 @@ export async function chatWithGemini(params: {
       if (res.ok && data.text) {
         return data.text;
       }
-      if (res.status === 503) {
-        throw new Error(data.error || "The AI service is currently experiencing high demand. Please try again in a moment.");
-      }
     }
   } catch (err: any) {
-    if (err.message && (err.message.includes("high demand") || err.message.includes("503"))) {
-      throw err;
-    }
-    console.warn("Server chat endpoint unavailable, switching to client-side fallback:", err.message);
+    console.warn("Server chat endpoint unavailable, switching to client-side fallback:", err?.message);
   }
 
   const apiKey = customApiKey || getCustomGeminiApiKey();
@@ -371,8 +410,7 @@ export async function chatWithGemini(params: {
   }
 
   try {
-    const response = await ai.models.generateContent({
-      model: "gemini-3.8-flash",
+    const response = await generateWithRetryClient(ai, "gemini-3.8-flash", {
       contents: formattedContents,
       config: {
         temperature: 0.7,

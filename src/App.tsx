@@ -4100,6 +4100,73 @@ export default function App() {
     }));
   }, [rings, effectivePublicEventId, visibleRingsCount, events.length]);
 
+  const getStageForBout = (boutId: string | number, categoryName: string): string => {
+    if (!boutId || !categoryName) return "";
+    const activeEvtId = effectivePublicEventId || currentEventId;
+    
+    // 1. Try with AI mappings first
+    const catMappings = mappings.filter(m => 
+      m.eventId === activeEvtId && 
+      m.categoryName.trim().toUpperCase() === categoryName.trim().toUpperCase()
+    );
+    
+    if (catMappings.length > 0) {
+      let distance = 0;
+      let curr = String(boutId);
+      let iterations = 0;
+      while (iterations < 20) {
+        const m = catMappings.find(x => normalizeBoutNumber(x.sourceBout) === normalizeBoutNumber(curr));
+        if (!m || !m.nextBout) break;
+        curr = String(m.nextBout);
+        distance++;
+        iterations++;
+      }
+      
+      switch (distance) {
+        case 0: return "FINAL";
+        case 1: return "SEMI FINAL";
+        case 2: return "QUARTER FINAL";
+        case 3: return "ROUND OF 16";
+        case 4: return "ROUND OF 32";
+        case 5: return "ROUND OF 64";
+        case 6: return "ROUND OF 128";
+        default: return "";
+      }
+    } else {
+      // 2. Guess from bout chronological position in category
+      const allBouts = [
+        ...matchHistory.filter(h => h.eventId === activeEvtId && h.category === categoryName).map(h => h.bout),
+        ...boutQueue.filter(q => q.data.eventId === activeEvtId && q.data.category === categoryName).map(q => q.data.bout),
+        ...rings.filter(r => r.currentBout?.eventId === activeEvtId && r.currentBout?.category === categoryName).map(r => r.currentBout!.bout)
+      ];
+      
+      const uniqueBouts = Array.from(new Set(allBouts.map(b => normalizeBoutNumber(b.toString()))))
+        .sort((a, b) => {
+          const numA = parseInt(a.replace(/[^0-9]/g, ''));
+          const numB = parseInt(b.replace(/[^0-9]/g, ''));
+          if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
+          return a.localeCompare(b);
+        });
+        
+      if (uniqueBouts.length === 0) return "";
+      
+      const targetBout = normalizeBoutNumber(String(boutId));
+      const index = uniqueBouts.indexOf(targetBout);
+      if (index === -1) return "";
+      
+      const reverseIndex = uniqueBouts.length - 1 - index;
+      
+      if (reverseIndex === 0) return "FINAL";
+      if (reverseIndex <= 2) return "SEMI FINAL";
+      if (reverseIndex <= 6) return "QUARTER FINAL";
+      if (reverseIndex <= 14) return "ROUND OF 16";
+      if (reverseIndex <= 30) return "ROUND OF 32";
+      if (reverseIndex <= 62) return "ROUND OF 64";
+      
+      return "";
+    }
+  };
+
   const publicEventName = React.useMemo(() => {
     if (!effectivePublicEventId) return '';
     const event = events.find(e => e.id === effectivePublicEventId);
@@ -4114,7 +4181,8 @@ export default function App() {
     return (
       <PublicDashboardView 
         rings={publicRings} 
-        boutQueue={publicBoutQueue} 
+        boutQueue={publicBoutQueue}
+        getStageForBout={getStageForBout} 
         namingMode={ringNamingMode} 
         onBack={() => setShowLogin(true)} 
         isSpectator={true}
@@ -4149,7 +4217,8 @@ export default function App() {
     return (
       <PublicDashboardView 
         rings={publicRings} 
-        boutQueue={publicBoutQueue} 
+        boutQueue={publicBoutQueue}
+        getStageForBout={getStageForBout} 
         namingMode={ringNamingMode} 
         onBack={() => setIsPublicView(false)} 
         showTotalBouts={showTotalBoutsPublic}
@@ -4949,7 +5018,8 @@ export default function App() {
           {activeTab === 'standby' && (
             <StandbyView 
               rings={currentRings} 
-              boutQueue={currentBoutQueue} 
+              boutQueue={currentBoutQueue}
+              getStageForBout={getStageForBout} 
               namingMode={ringNamingMode} 
               activeAnnouncement={activeAnnouncement}
               onAnnouncementClose={handleAnnouncementClose}
@@ -4981,7 +5051,8 @@ export default function App() {
           {activeTab === 'site_view' && (
             <SiteView 
               rings={currentRings} 
-              boutQueue={currentBoutQueue} 
+              boutQueue={currentBoutQueue}
+              getStageForBout={getStageForBout} 
               namingMode={ringNamingMode} 
               activeAnnouncement={activeAnnouncement}
               onAnnouncementClose={handleAnnouncementClose}
@@ -5013,7 +5084,8 @@ export default function App() {
           {activeTab === 'points' && (
             <PointsView 
               rings={currentRings} 
-              boutQueue={currentBoutQueue} 
+              boutQueue={currentBoutQueue}
+              getStageForBout={getStageForBout} 
               namingMode={ringNamingMode} 
               activeAnnouncement={activeAnnouncement}
               onAnnouncementClose={handleAnnouncementClose}
@@ -5044,7 +5116,8 @@ export default function App() {
           {activeTab === 'general' && (
             <OnsiteView 
               rings={currentRings} 
-              boutQueue={currentBoutQueue} 
+              boutQueue={currentBoutQueue}
+              getStageForBout={getStageForBout} 
               namingMode={ringNamingMode} 
               activeAnnouncement={activeAnnouncement}
               onAnnouncementClose={handleAnnouncementClose}
@@ -9332,6 +9405,7 @@ interface PublicRingCardProps {
   activeClubFontScale?: number;
   standbyNameFontScale?: number;
   standbyClubFontScale?: number;
+  getStageForBout?: (boutId: string | number, categoryName: string) => string;
 }
 
 function StandbyView({ 
@@ -9361,7 +9435,8 @@ function StandbyView({
   standbyNameFontScale,
   setStandbyNameFontScale,
   standbyClubFontScale,
-  setStandbyClubFontScale
+  setStandbyClubFontScale,
+  getStageForBout
 }: { 
   rings: RingStatus[], 
   boutQueue: {id: string, data: MatchData}[], 
@@ -9389,7 +9464,9 @@ function StandbyView({
   standbyNameFontScale?: number,
   setStandbyNameFontScale?: (val: number | ((prev: number) => number)) => void,
   standbyClubFontScale?: number,
-  setStandbyClubFontScale?: (val: number | ((prev: number) => number)) => void
+  setStandbyClubFontScale?: (val: number | ((prev: number) => number)) => void,
+  getStageForBout?: (boutId: string | number, categoryName: string) => string
+
 }) {
   const [syncedNameFontScale, setSyncedNameFontScale] = useSyncedState<number>('tkd_active_name_font_scale', 100);
   const [syncedClubFontScale, setSyncedClubFontScale] = useSyncedState<number>('tkd_active_club_font_scale', 100);
@@ -9616,8 +9693,8 @@ function StandbyView({
               <div className="flex-[5.7] flex flex-col bg-[#0d1526] border border-white/10 rounded-lg overflow-hidden">
                 {/* Header */}
                 <div className="grid grid-cols-12 bg-[#1a2235] border-b border-white/10 py-2 px-4">
-                  <div className="col-span-2 bg-lime-500 text-slate-950 text-[16px] font-black px-3 py-1 rounded flex items-center justify-center mr-4">
-                    Ring {ringName}
+                  <div className="col-span-2 bg-lime-500 text-slate-950 text-[12px] xl:text-[14px] leading-tight text-center font-black px-1 xl:px-3 py-1 rounded flex items-center justify-center mr-4">
+                    {getStageForBout && current ? (getStageForBout(current.bout.toString(), current.category || "") || `Ring ${ringName}`) : `Ring ${ringName}`}
                   </div>
                   <div className="col-span-10 text-white text-[18px] font-bold flex items-center">
                     {cleanPlaceholder(current?.category || "")}
@@ -9837,7 +9914,8 @@ function SiteView({
   standbyNameFontScale,
   setStandbyNameFontScale,
   standbyClubFontScale,
-  setStandbyClubFontScale
+  setStandbyClubFontScale,
+  getStageForBout
 }: { 
   rings: RingStatus[], 
   boutQueue: {id: string, data: MatchData}[], 
@@ -9865,7 +9943,9 @@ function SiteView({
   standbyNameFontScale?: number,
   setStandbyNameFontScale?: (val: number | ((prev: number) => number)) => void,
   standbyClubFontScale?: number,
-  setStandbyClubFontScale?: (val: number | ((prev: number) => number)) => void
+  setStandbyClubFontScale?: (val: number | ((prev: number) => number)) => void,
+  getStageForBout?: (boutId: string | number, categoryName: string) => string
+
 }) {
   const [syncedNameFontScale, setSyncedNameFontScale] = useSyncedState<number>('tkd_active_name_font_scale', 100);
   const [syncedClubFontScale, setSyncedClubFontScale] = useSyncedState<number>('tkd_active_club_font_scale', 100);
@@ -10078,8 +10158,8 @@ function SiteView({
               <div className="flex-[5.7] flex flex-col bg-[#0d1526] border border-white/10 rounded-lg overflow-hidden">
                 {/* Header */}
                 <div className="grid grid-cols-12 bg-[#1a2235] border-b border-white/10 py-2 px-4">
-                  <div className="col-span-2 bg-lime-500 text-slate-950 text-[16px] font-black px-3 py-1 rounded flex items-center justify-center mr-4">
-                    Ring {ringName}
+                  <div className="col-span-2 bg-lime-500 text-slate-950 text-[12px] xl:text-[14px] leading-tight text-center font-black px-1 xl:px-3 py-1 rounded flex items-center justify-center mr-4">
+                    {getStageForBout && current ? (getStageForBout(current.bout.toString(), current.category || "") || `Ring ${ringName}`) : `Ring ${ringName}`}
                   </div>
                   <div className="col-span-10 text-white text-[18px] font-bold flex items-center">
                     {cleanPlaceholder(current?.category || "")}
@@ -10241,7 +10321,8 @@ function PointsView({
   standbyNameFontScale,
   setStandbyNameFontScale,
   standbyClubFontScale,
-  setStandbyClubFontScale
+  setStandbyClubFontScale,
+  getStageForBout
 }: { 
   rings: RingStatus[], 
   boutQueue: {id: string, data: MatchData}[], 
@@ -10268,7 +10349,9 @@ function PointsView({
   standbyNameFontScale?: number,
   setStandbyNameFontScale?: (val: number | ((prev: number) => number)) => void,
   standbyClubFontScale?: number,
-  setStandbyClubFontScale?: (val: number | ((prev: number) => number)) => void
+  setStandbyClubFontScale?: (val: number | ((prev: number) => number)) => void,
+  getStageForBout?: (boutId: string | number, categoryName: string) => string
+
 }) {
   const [syncedNameFontScale, setSyncedNameFontScale] = useSyncedState<number>('tkd_active_name_font_scale', 100);
   const [syncedClubFontScale, setSyncedClubFontScale] = useSyncedState<number>('tkd_active_club_font_scale', 100);
@@ -10466,8 +10549,8 @@ function PointsView({
               <div className="flex-[3.6] flex flex-col bg-[#0d1526] border border-white/10 rounded-lg overflow-hidden">
                 {/* Header */}
                 <div className="grid grid-cols-12 bg-[#1a2235] border-b border-white/10 py-2 px-4">
-                  <div className="col-span-2 bg-lime-500 text-slate-950 text-[16px] font-black px-3 py-1 rounded flex items-center justify-center mr-4">
-                    Ring {ringName}
+                  <div className="col-span-2 bg-lime-500 text-slate-950 text-[12px] xl:text-[14px] leading-tight text-center font-black px-1 xl:px-3 py-1 rounded flex items-center justify-center mr-4">
+                    {getStageForBout && current ? (getStageForBout(current.bout.toString(), current.category || "") || `Ring ${ringName}`) : `Ring ${ringName}`}
                   </div>
                   <div className="col-span-10 grid grid-cols-12 items-center">
                     <div className={cn(
@@ -10731,7 +10814,8 @@ function OnsiteView({
   standbyNameFontScale,
   setStandbyNameFontScale,
   standbyClubFontScale,
-  setStandbyClubFontScale
+  setStandbyClubFontScale,
+  getStageForBout
 }: { 
   rings: RingStatus[], 
   boutQueue: {id: string, data: MatchData}[], 
@@ -10758,7 +10842,9 @@ function OnsiteView({
   standbyNameFontScale?: number,
   setStandbyNameFontScale?: (val: number | ((prev: number) => number)) => void,
   standbyClubFontScale?: number,
-  setStandbyClubFontScale?: (val: number | ((prev: number) => number)) => void
+  setStandbyClubFontScale?: (val: number | ((prev: number) => number)) => void,
+  getStageForBout?: (boutId: string | number, categoryName: string) => string
+
 }) {
   const [syncedNameFontScale, setSyncedNameFontScale] = useSyncedState<number>('tkd_active_name_font_scale', 100);
   const [syncedClubFontScale, setSyncedClubFontScale] = useSyncedState<number>('tkd_active_club_font_scale', 100);
@@ -11257,7 +11343,8 @@ function PublicDashboardView({
   standbyNameFontScale,
   setStandbyNameFontScale,
   standbyClubFontScale,
-  setStandbyClubFontScale
+  setStandbyClubFontScale,
+  getStageForBout
 }: { 
   rings: RingStatus[], 
   boutQueue: {id: string, data: MatchData}[], 
@@ -11286,7 +11373,8 @@ function PublicDashboardView({
   standbyNameFontScale?: number,
   setStandbyNameFontScale?: (scale: number | ((prev: number) => number)) => void,
   standbyClubFontScale?: number,
-  setStandbyClubFontScale?: (scale: number | ((prev: number) => number)) => void
+  setStandbyClubFontScale?: (val: number | ((prev: number) => number)) => void,
+  getStageForBout?: (boutId: string | number, categoryName: string) => string
 }) {
   const [syncedNameScale, setSyncedNameScale] = useSyncedState<number>('tkd_active_name_font_scale', 100);
   const [syncedClubScale, setSyncedClubScale] = useSyncedState<number>('tkd_active_club_font_scale', 100);
@@ -11553,7 +11641,7 @@ function PublicDashboardView({
   );
 }
 
-function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, boutNumberingMode = 'alphanumeric', ringQueue, showPublicStandbyQueue = true, showEmptyBoutAsInactive = false, publicViewLayout = 'standard', transfers = [], activeNameFontScale, activeClubFontScale, standbyNameFontScale, standbyClubFontScale }: PublicRingCardProps) {
+function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, boutNumberingMode = 'alphanumeric', ringQueue, showPublicStandbyQueue = true, showEmptyBoutAsInactive = false, publicViewLayout = 'standard', transfers = [], activeNameFontScale, activeClubFontScale, standbyNameFontScale, standbyClubFontScale, getStageForBout }: PublicRingCardProps) {
   const [syncedNameScale] = useSyncedState<number>('tkd_active_name_font_scale', 100);
   const [syncedClubScale] = useSyncedState<number>('tkd_active_club_font_scale', 100);
   const [syncedStandbyNameScale] = useSyncedState<number>('tkd_standby_name_font_scale', 100);
@@ -11622,7 +11710,9 @@ function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, b
             {ringName}
           </div>
           <div>
-            <h4 className="font-black text-xs sm:text-[20px] uppercase tracking-wider sm:tracking-widest text-white mt-0">Ring {ringName}</h4>
+            <h4 className="font-black text-xs sm:text-[14px] uppercase tracking-wider sm:tracking-widest text-white mt-0">
+              {getStageForBout && current ? (getStageForBout(current.bout.toString(), current.category || "") || `Ring ${ringName}`) : `Ring ${ringName}`}
+            </h4>
             {!isRingInactive && (
               <div className="flex items-center gap-1.5">
                 <div className="w-1 h-1 sm:w-1.5 sm:h-1.5 bg-green-500 rounded-full animate-pulse" />

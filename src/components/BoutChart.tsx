@@ -35,8 +35,14 @@ export function BoutChart({ mappings, boutQueue, matchHistory, boutNumberingMode
     mappings.forEach(m => {
       if (m.categoryName) cats.add(m.categoryName.trim());
     });
+    boutQueue.forEach(q => {
+      if (q.data.category) cats.add(q.data.category.trim());
+    });
+    matchHistory.forEach(h => {
+      if (h.category) cats.add(h.category.trim());
+    });
     return Array.from(cats).filter(Boolean).sort();
-  }, [mappings]);
+  }, [mappings, boutQueue, matchHistory]);
 
   const { nodes, edges, width, height } = useMemo(() => {
     if (!selectedCategory) return { nodes: [], edges: [], width: 0, height: 0 };
