@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { EventData, MatchHistoryItem } from '../types';
-import { Download, RefreshCw, Trophy, Medal, Building2, Search, Upload, Trash2, FileSpreadsheet, X, Plus, Swords, Sparkles, Crown, Award, Filter, User } from 'lucide-react';
+import { Download, RefreshCw, Trophy, Medal, Building2, Search, Upload, Trash2, FileSpreadsheet, X, Plus, Swords, Sparkles, Crown, Award, Filter, User, Edit2, RotateCcw, Check } from 'lucide-react';
 import Papa from 'papaparse';
 import { getBoutNumber, isBoutMatch, cn, isPoomsaeCategory, isPlayoffBout } from '../lib/utils';
 
@@ -9,6 +9,7 @@ interface EventReportProps {
   events: EventData[];
   matchHistory?: MatchHistoryItem[];
   backupData?: Record<string, { mappings: any[], matches: any[] }>;
+  isAdmin?: boolean;
 }
 
 interface RawMatch {
@@ -36,6 +37,13 @@ interface CategoryResult {
   gold: WinnerResult | null;
   silver: WinnerResult | null;
   bronzes: WinnerResult[];
+  isCustomEdited?: boolean;
+}
+
+interface PlacingsOverride {
+  gold?: { name: string; club: string } | null;
+  silver?: { name: string; club: string } | null;
+  bronzes?: Array<{ place: '3rd' | '4th'; name: string; club: string }>;
 }
 
 export function isValidClub(club?: string | null): boolean {
@@ -569,7 +577,7 @@ function computeClubStandings(results: CategoryResult[]) {
   return standingsArr;
 }
 
-export function EventReport({ currentEventId, events, matchHistory = [], backupData = {} }: EventReportProps) {
+export function EventReport({ currentEventId, events, matchHistory = [], backupData = {}, isAdmin }: EventReportProps) {
   const [activeTab, setActiveTab] = useState<'winners' | 'by-rank' | 'summary' | 'total-overall'>('winners');
   const [discipline, setDiscipline] = useState<'kyorugi' | 'poomsae'>('kyorugi');
   const [isLoading, setIsLoading] = useState(false);
@@ -585,6 +593,56 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
   
   // Feature: Option to combine multiple events
   const [includeAllEvents, setIncludeAllEvents] = useState(false);
+
+  // Admin role check
+  const userIsAdmin = useMemo(() => {
+    if (isAdmin !== undefined) return isAdmin;
+    try {
+      const savedUser = localStorage.getItem('tkd_user');
+      return savedUser ? JSON.parse(savedUser)?.role === 'admin' : true;
+    } catch {
+      return true;
+    }
+  }, [isAdmin]);
+
+  // Placings Overrides per event
+  const [placingsOverrides, setPlacingsOverrides] = useState<Record<string, PlacingsOverride>>(() => {
+    if (!currentEventId) return {};
+    try {
+      const saved = localStorage.getItem(`tkd_category_placings_overrides_${currentEventId}`);
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  // Reload overrides when currentEventId changes
+  useEffect(() => {
+    if (!currentEventId) return;
+    try {
+      const saved = localStorage.getItem(`tkd_category_placings_overrides_${currentEventId}`);
+      setPlacingsOverrides(saved ? JSON.parse(saved) : {});
+    } catch {
+      setPlacingsOverrides({});
+    }
+  }, [currentEventId]);
+
+  // Editing state for category placings
+  const [editingCategory, setEditingCategory] = useState<CategoryResult | null>(null);
+  const [editForm, setEditForm] = useState<{
+    goldName: string;
+    goldClub: string;
+    silverName: string;
+    silverClub: string;
+    bronzes: Array<{ place: '3rd' | '4th'; name: string; club: string }>;
+  }>({
+    goldName: '',
+    goldClub: '',
+    silverName: '',
+    silverClub: '',
+    bronzes: []
+  });
+  const [customClubModes, setCustomClubModes] = useState<Record<string, boolean>>({});
 
   // Total Overall States
   interface UploadedFile {
@@ -1013,9 +1071,147 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
     return discipline === 'poomsae' ? poomsaeMatches : kyorugiMatches;
   }, [discipline, poomsaeMatches, kyorugiMatches]);
 
+  const availableClubs = useMemo(() => {
+    const clubsSet = new Set<string>();
+    matches.forEach(m => {
+      if (isValidClub(m.blueClub)) clubsSet.add(m.blueClub.trim());
+      if (isValidClub(m.redClub)) clubsSet.add(m.redClub.trim());
+    });
+    (matchHistory || []).forEach(h => {
+      if (isValidClub(h.blue_club)) clubsSet.add(h.blue_club.trim());
+      if (isValidClub(h.red_club)) clubsSet.add(h.red_club.trim());
+      if (isValidClub(h.winnerClub)) clubsSet.add(h.winnerClub.trim());
+    });
+    if (backupData) {
+      Object.values(backupData).forEach(ringData => {
+        ringData.matches?.forEach((m: any) => {
+          if (isValidClub(m.blue_club)) clubsSet.add(m.blue_club.trim());
+          if (isValidClub(m.red_club)) clubsSet.add(m.red_club.trim());
+        });
+      });
+    }
+    try {
+      const savedAthletes = localStorage.getItem('tkd_athletes');
+      if (savedAthletes) {
+        const athletes = JSON.parse(savedAthletes);
+        athletes.forEach((a: any) => {
+          if (isValidClub(a.club)) clubsSet.add(a.club.trim());
+        });
+      }
+    } catch (e) {}
+
+    Object.values(placingsOverrides).forEach((ov: PlacingsOverride) => {
+      if (ov.gold?.club && isValidClub(ov.gold.club)) clubsSet.add(ov.gold.club.trim());
+      if (ov.silver?.club && isValidClub(ov.silver.club)) clubsSet.add(ov.silver.club.trim());
+      ov.bronzes?.forEach(b => {
+        if (b.club && isValidClub(b.club)) clubsSet.add(b.club.trim());
+      });
+    });
+
+    return Array.from(clubsSet).filter(Boolean).sort((a, b) => a.localeCompare(b));
+  }, [matches, matchHistory, backupData, placingsOverrides]);
+
   const categoryResults = useMemo(() => {
-    return computeCategoryResults(activeMatches, placementOption);
-  }, [activeMatches, placementOption]);
+    const rawResults = computeCategoryResults(activeMatches, placementOption);
+    const presentCats = new Set(rawResults.map(r => r.category));
+
+    const merged: CategoryResult[] = rawResults.map(res => {
+      const override = placingsOverrides[res.category];
+      if (!override) return res;
+
+      return {
+        ...res,
+        gold: override.gold !== undefined ? (override.gold ? { place: '1st', name: override.gold.name.trim(), club: override.gold.club.trim() } : null) : res.gold,
+        silver: override.silver !== undefined ? (override.silver ? { place: '2nd', name: override.silver.name.trim(), club: override.silver.club.trim() } : null) : res.silver,
+        bronzes: override.bronzes !== undefined ? override.bronzes.map(b => ({ ...b, name: b.name.trim(), club: b.club.trim() })) : res.bronzes,
+        isCustomEdited: true
+      };
+    });
+
+    // Also include any overridden categories that might not be in activeMatches
+    Object.keys(placingsOverrides).forEach(cat => {
+      if (!presentCats.has(cat)) {
+        const isPoom = isPoomsaeCategory(cat);
+        if ((discipline === 'poomsae' && isPoom) || (discipline === 'kyorugi' && !isPoom)) {
+          const ov: PlacingsOverride = placingsOverrides[cat];
+          merged.push({
+            category: cat,
+            gold: ov.gold ? { place: '1st', name: ov.gold.name.trim(), club: ov.gold.club.trim() } : null,
+            silver: ov.silver ? { place: '2nd', name: ov.silver.name.trim(), club: ov.silver.club.trim() } : null,
+            bronzes: ov.bronzes ? ov.bronzes.map(b => ({ ...b, name: b.name.trim(), club: b.club.trim() })) : [],
+            isCustomEdited: true
+          });
+        }
+      }
+    });
+
+    return merged.sort((a, b) => a.category.localeCompare(b.category));
+  }, [activeMatches, placementOption, placingsOverrides, discipline]);
+
+  const handleOpenEditModal = (cat: CategoryResult) => {
+    setEditingCategory(cat);
+    let initialBronzes: Array<{ place: '3rd' | '4th'; name: string; club: string }> = [];
+    if (cat.bronzes && cat.bronzes.length > 0) {
+      initialBronzes = cat.bronzes.map(b => ({
+        place: (b.place === '4th' ? '4th' : '3rd') as '3rd' | '4th',
+        name: b.name || '',
+        club: b.club || ''
+      }));
+    } else {
+      if (placementOption === 'b') {
+        initialBronzes = [
+          { place: '3rd', name: '', club: '' },
+          { place: '4th', name: '', club: '' }
+        ];
+      } else {
+        initialBronzes = [
+          { place: '3rd', name: '', club: '' },
+          { place: '3rd', name: '', club: '' }
+        ];
+      }
+    }
+
+    setEditForm({
+      goldName: cat.gold?.name || '',
+      goldClub: cat.gold?.club || '',
+      silverName: cat.silver?.name || '',
+      silverClub: cat.silver?.club || '',
+      bronzes: initialBronzes
+    });
+    setCustomClubModes({});
+  };
+
+  const handleSaveEditPlacings = () => {
+    if (!editingCategory) return;
+    
+    const newOverrides: Record<string, PlacingsOverride> = {
+      ...placingsOverrides,
+      [editingCategory.category]: {
+        gold: editForm.goldName.trim() ? { name: editForm.goldName.trim(), club: editForm.goldClub.trim() } : null,
+        silver: editForm.silverName.trim() ? { name: editForm.silverName.trim(), club: editForm.silverClub.trim() } : null,
+        bronzes: editForm.bronzes.filter(b => b.name.trim()).map(b => ({
+          place: b.place,
+          name: b.name.trim(),
+          club: b.club.trim()
+        }))
+      }
+    };
+
+    setPlacingsOverrides(newOverrides);
+    if (currentEventId) {
+      localStorage.setItem(`tkd_category_placings_overrides_${currentEventId}`, JSON.stringify(newOverrides));
+    }
+    setEditingCategory(null);
+  };
+
+  const handleResetCategory = (categoryName: string) => {
+    const newOverrides = { ...placingsOverrides };
+    delete newOverrides[categoryName];
+    setPlacingsOverrides(newOverrides);
+    if (currentEventId) {
+      localStorage.setItem(`tkd_category_placings_overrides_${currentEventId}`, JSON.stringify(newOverrides));
+    }
+  };
 
   const clubStandings = useMemo(() => {
     return computeClubStandings(categoryResults);
@@ -1694,19 +1890,29 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
                      <th className="p-4 font-bold text-slate-600 text-sm"><div className="flex items-center gap-1"><Medal size={16} className="text-yellow-500"/> 1st Place (Gold)</div></th>
                      <th className="p-4 font-bold text-slate-600 text-sm"><div className="flex items-center gap-1"><Medal size={16} className="text-slate-400"/> 2nd Place (Silver)</div></th>
                      <th className="p-4 font-bold text-slate-600 text-sm"><div className="flex items-center gap-1"><Medal size={16} className="text-amber-700"/> {placementOption === 'b' ? '3rd & 4th Place (Playoff)' : '3rd Place (Joint Bronzes)'}</div></th>
+                     {userIsAdmin && (
+                       <th className="p-4 font-bold text-slate-600 text-sm text-right">Actions</th>
+                     )}
                    </tr>
                  </thead>
                  <tbody className="divide-y divide-slate-100">
                    {filteredCategories.length === 0 ? (
                      <tr>
-                       <td colSpan={4} className="p-8 text-center text-slate-500">
+                       <td colSpan={userIsAdmin ? 5 : 4} className="p-8 text-center text-slate-500">
                          {isLoading ? "Scanning bracket history..." : "No categories found for current search/division filter."}
                        </td>
                      </tr>
                    ) : filteredCategories.map((c, i) => (
                      <tr key={i} className="hover:bg-slate-50/50 transition-colors">
                        <td className="p-4">
-                         <div className="font-bold text-slate-800">{c.category}</div>
+                         <div className="flex flex-wrap items-center gap-2">
+                           <span className="font-bold text-slate-800">{c.category}</span>
+                           {c.isCustomEdited && (
+                             <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase px-2 py-0.5 rounded-md bg-amber-100 text-amber-800 border border-amber-300 shadow-2xs" title="Manually edited placings">
+                               Custom Edited
+                             </span>
+                           )}
+                         </div>
                          <span className="inline-block mt-1 text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-md bg-slate-100 text-slate-500 border border-slate-200">
                            {getCategoryDivision(c.category)}
                          </span>
@@ -1739,6 +1945,31 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
                            </div>
                          ) : <span className="text-slate-400">-</span>}
                        </td>
+                       {userIsAdmin && (
+                         <td className="p-4 text-right">
+                           <div className="flex items-center justify-end gap-1.5">
+                             <button
+                               type="button"
+                               onClick={() => handleOpenEditModal(c)}
+                               className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-xs font-bold transition-colors inline-flex items-center gap-1.5 border border-blue-200 shadow-2xs"
+                               title="Edit 1st, 2nd, and 3rd place winners"
+                             >
+                               <Edit2 size={13} />
+                               Edit Placings
+                             </button>
+                             {c.isCustomEdited && (
+                               <button
+                                 type="button"
+                                 onClick={() => handleResetCategory(c.category)}
+                                 className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors border border-transparent hover:border-red-200"
+                                 title="Reset to auto-calculated bracket placings"
+                               >
+                                 <RotateCcw size={14} />
+                               </button>
+                             )}
+                           </div>
+                         </td>
+                       )}
                      </tr>
                    ))}
                  </tbody>
@@ -2457,6 +2688,328 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
         )}
       </div>
 
+      {/* ADMIN PLACINGS EDIT MODAL */}
+      {editingCategory && (
+        <div id="placings-edit-modal-overlay" className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div id="placings-edit-modal-container" className="bg-white rounded-2xl max-w-2xl w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
+            {/* Modal Header */}
+            <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-blue-100 text-blue-700 rounded-xl">
+                  <Edit2 size={20} />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-800">Edit Category Placings</h3>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className="font-extrabold text-blue-900 text-xs">{editingCategory.category}</span>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-200 text-slate-700">
+                      {discipline === 'kyorugi' ? 'Kyorugi' : 'Poomsae'} • {getCategoryDivision(editingCategory.category)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                id="btn-close-placings-modal"
+                onClick={() => setEditingCategory(null)}
+                className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-200 rounded-xl transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 overflow-y-auto space-y-6">
+              <p className="text-xs text-slate-500 bg-blue-50 border border-blue-200 p-3 rounded-xl leading-relaxed">
+                <strong>Tournament Report Placings:</strong> You can manually update the athlete names and select their club affiliation from the registered clubs list. These adjustments will update category placings, overall winner tables, and club standings points across the report.
+              </p>
+
+              {/* 1st Place (Gold) */}
+              <div className="p-4 bg-yellow-50/60 rounded-xl border border-yellow-200/80 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="font-black text-xs uppercase tracking-wider text-yellow-900 flex items-center gap-1.5">
+                    <Medal size={16} className="text-yellow-600" />
+                    1st Place (Gold Medalist)
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setCustomClubModes(prev => ({ ...prev, gold: !prev.gold }))}
+                    className="text-[11px] font-bold text-yellow-900/80 hover:text-yellow-950 underline"
+                  >
+                    {customClubModes.gold ? "Select from list" : "+ Enter new club"}
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1">Athlete Name</label>
+                    <input
+                      type="text"
+                      id="input-placings-gold-name"
+                      placeholder="e.g. John Doe"
+                      value={editForm.goldName}
+                      onChange={(e) => setEditForm(prev => ({ ...prev, goldName: e.target.value }))}
+                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-yellow-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1">Club Affiliation</label>
+                    {customClubModes.gold ? (
+                      <input
+                        type="text"
+                        id="input-placings-gold-club-custom"
+                        placeholder="Type new club name..."
+                        value={editForm.goldClub}
+                        onChange={(e) => setEditForm(prev => ({ ...prev, goldClub: e.target.value }))}
+                        className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-yellow-500"
+                      />
+                    ) : (
+                      <select
+                        id="select-placings-gold-club"
+                        value={editForm.goldClub}
+                        onChange={(e) => setEditForm(prev => ({ ...prev, goldClub: e.target.value }))}
+                        className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-yellow-500"
+                      >
+                        <option value="">-- Select Club from List --</option>
+                        {availableClubs.map(c => (
+                          <option key={c} value={c}>{c}</option>
+                        ))}
+                        {editForm.goldClub && !availableClubs.includes(editForm.goldClub) && (
+                          <option value={editForm.goldClub}>{editForm.goldClub} (Custom)</option>
+                        )}
+                      </select>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* 2nd Place (Silver) */}
+              <div className="p-4 bg-slate-100/70 rounded-xl border border-slate-200 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="font-black text-xs uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                    <Medal size={16} className="text-slate-400" />
+                    2nd Place (Silver Medalist)
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setCustomClubModes(prev => ({ ...prev, silver: !prev.silver }))}
+                    className="text-[11px] font-bold text-slate-600 hover:text-slate-800 underline"
+                  >
+                    {customClubModes.silver ? "Select from list" : "+ Enter new club"}
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1">Athlete Name</label>
+                    <input
+                      type="text"
+                      id="input-placings-silver-name"
+                      placeholder="e.g. Jane Smith"
+                      value={editForm.silverName}
+                      onChange={(e) => setEditForm(prev => ({ ...prev, silverName: e.target.value }))}
+                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1">Club Affiliation</label>
+                    {customClubModes.silver ? (
+                      <input
+                        type="text"
+                        id="input-placings-silver-club-custom"
+                        placeholder="Type new club name..."
+                        value={editForm.silverClub}
+                        onChange={(e) => setEditForm(prev => ({ ...prev, silverClub: e.target.value }))}
+                        className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-500"
+                      />
+                    ) : (
+                      <select
+                        id="select-placings-silver-club"
+                        value={editForm.silverClub}
+                        onChange={(e) => setEditForm(prev => ({ ...prev, silverClub: e.target.value }))}
+                        className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-500"
+                      >
+                        <option value="">-- Select Club from List --</option>
+                        {availableClubs.map(c => (
+                          <option key={c} value={c}>{c}</option>
+                        ))}
+                        {editForm.silverClub && !availableClubs.includes(editForm.silverClub) && (
+                          <option value={editForm.silverClub}>{editForm.silverClub} (Custom)</option>
+                        )}
+                      </select>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* 3rd & 4th Place (Bronzes / Playoff) */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="font-black text-xs uppercase tracking-wider text-amber-900 flex items-center gap-1.5">
+                    <Medal size={16} className="text-amber-600" />
+                    3rd & 4th Place Placings
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditForm(prev => ({
+                        ...prev,
+                        bronzes: [
+                          ...prev.bronzes,
+                          { place: placementOption === 'b' && prev.bronzes.length >= 1 ? '4th' : '3rd', name: '', club: '' }
+                        ]
+                      }));
+                    }}
+                    className="text-xs font-bold text-blue-600 hover:text-blue-800 inline-flex items-center gap-1"
+                  >
+                    <Plus size={14} /> Add Place Entry
+                  </button>
+                </div>
+
+                {editForm.bronzes.map((bronzeItem, bIdx) => {
+                  const bronzeKey = `bronze_${bIdx}`;
+                  return (
+                    <div key={bIdx} className="p-4 bg-amber-50/50 rounded-xl border border-amber-200/70 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <select
+                            value={bronzeItem.place}
+                            onChange={(e) => {
+                              const newBronzes = [...editForm.bronzes];
+                              newBronzes[bIdx].place = e.target.value as '3rd' | '4th';
+                              setEditForm(prev => ({ ...prev, bronzes: newBronzes }));
+                            }}
+                            className="text-xs font-bold px-2 py-1 bg-white border border-amber-300 rounded text-amber-900 focus:outline-none"
+                          >
+                            <option value="3rd">3rd Place (Bronze)</option>
+                            <option value="4th">4th Place (Playoff)</option>
+                          </select>
+                          <span className="text-[11px] text-slate-500 font-semibold">Entry #{bIdx + 1}</span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <button
+                            type="button"
+                            onClick={() => setCustomClubModes(prev => ({ ...prev, [bronzeKey]: !prev[bronzeKey] }))}
+                            className="text-[11px] font-bold text-amber-900/80 hover:text-amber-950 underline"
+                          >
+                            {customClubModes[bronzeKey] ? "Select from list" : "+ Enter new club"}
+                          </button>
+                          {editForm.bronzes.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditForm(prev => ({
+                                  ...prev,
+                                  bronzes: prev.bronzes.filter((_, idx) => idx !== bIdx)
+                                }));
+                              }}
+                              className="text-slate-400 hover:text-red-600 p-1 rounded transition-colors"
+                              title="Remove entry"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-[11px] font-bold text-slate-600 mb-1">Athlete Name</label>
+                          <input
+                            type="text"
+                            id={`input-placings-bronze-${bIdx}-name`}
+                            placeholder="e.g. Athlete Name"
+                            value={bronzeItem.name}
+                            onChange={(e) => {
+                              const newBronzes = [...editForm.bronzes];
+                              newBronzes[bIdx].name = e.target.value;
+                              setEditForm(prev => ({ ...prev, bronzes: newBronzes }));
+                            }}
+                            className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-bold text-slate-600 mb-1">Club Affiliation</label>
+                          {customClubModes[bronzeKey] ? (
+                            <input
+                              type="text"
+                              id={`input-placings-bronze-${bIdx}-club-custom`}
+                              placeholder="Type new club name..."
+                              value={bronzeItem.club}
+                              onChange={(e) => {
+                                const newBronzes = [...editForm.bronzes];
+                                newBronzes[bIdx].club = e.target.value;
+                                setEditForm(prev => ({ ...prev, bronzes: newBronzes }));
+                              }}
+                              className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                            />
+                          ) : (
+                            <select
+                              id={`select-placings-bronze-${bIdx}-club`}
+                              value={bronzeItem.club}
+                              onChange={(e) => {
+                                const newBronzes = [...editForm.bronzes];
+                                newBronzes[bIdx].club = e.target.value;
+                                setEditForm(prev => ({ ...prev, bronzes: newBronzes }));
+                              }}
+                              className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                            >
+                              <option value="">-- Select Club from List --</option>
+                              {availableClubs.map(c => (
+                                <option key={c} value={c}>{c}</option>
+                              ))}
+                              {bronzeItem.club && !availableClubs.includes(bronzeItem.club) && (
+                                <option value={bronzeItem.club}>{bronzeItem.club} (Custom)</option>
+                              )}
+                            </select>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                {editingCategory.isCustomEdited && (
+                  <button
+                    type="button"
+                    id="btn-reset-placings-bracket"
+                    onClick={() => {
+                      handleResetCategory(editingCategory.category);
+                      setEditingCategory(null);
+                    }}
+                    className="px-3.5 py-2 text-red-600 hover:bg-red-50 border border-red-200 rounded-xl text-xs font-bold transition-all inline-flex items-center gap-1.5"
+                  >
+                    <RotateCcw size={14} />
+                    Reset to Bracket Calculation
+                  </button>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  id="btn-cancel-placings-modal"
+                  onClick={() => setEditingCategory(null)}
+                  className="px-4 py-2 border border-slate-300 hover:bg-slate-100 text-slate-700 font-bold rounded-xl text-sm transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  id="btn-save-placings-modal"
+                  onClick={handleSaveEditPlacings}
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-sm transition-all shadow-sm inline-flex items-center gap-1.5"
+                >
+                  <Check size={16} />
+                  Save Placings
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

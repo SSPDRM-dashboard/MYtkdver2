@@ -42,7 +42,8 @@ import {
   Upload,
   Image,
   ChevronDown,
-  ChevronRight
+  ChevronRight,
+  LayoutGrid
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { QRCodeSVG } from 'qrcode.react';
@@ -5480,6 +5481,7 @@ export default function App() {
               events={events}
               matchHistory={matchHistory}
               backupData={backupData}
+              isAdmin={user?.role === 'admin'}
             />
           )}
 
@@ -9484,10 +9486,7 @@ function StandbyView({
   const containerRef = React.useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = React.useState(false);
   const [currentPage, setCurrentPage] = React.useState(0);
-  const [ringsPerPage, setRingsPerPage] = React.useState<number>(() => {
-    const saved = localStorage.getItem('tkd_standby_rings_per_page');
-    return saved ? parseInt(saved, 10) : 4;
-  });
+  const [ringsPerPage, setRingsPerPage] = useSyncedState<number>('tkd_standby_rings_per_page', 4);
   
   const effectiveRings = showOnlyActiveRings ? rings.filter(r => r.currentBout && hasPlayers(r.currentBout)) : rings;
   const totalPages = Math.ceil(effectiveRings.length / ringsPerPage);
@@ -9546,7 +9545,7 @@ function StandbyView({
       />
       {/* Header */}
       <div className="relative flex flex-col md:flex-row md:items-center justify-between px-8 py-2 md:py-2.5 bg-[#1a2235]/50 border-b border-white/10 backdrop-blur-sm gap-4">
-        <div className="flex items-center gap-4 z-10">
+        <div className="flex items-center gap-4 z-10 shrink-0">
           <div className="w-12 h-12 bg-red-600 rounded-2xl flex items-center justify-center shadow-lg shadow-red-900/20">
             <Trophy size={24} className="text-white" />
           </div>
@@ -9555,7 +9554,7 @@ function StandbyView({
             <p className="text-[10px] font-black text-white uppercase tracking-[0.3em] mt-1">Live Tournament Standby Monitoring</p>
           </div>
         </div>
-        <div className="md:absolute md:left-1/2 md:-translate-x-1/2 md:w-full md:max-w-[45%] w-full z-0">
+        <div className="md:absolute md:left-1/2 md:-translate-x-1/2 md:w-full md:max-w-[45%] w-full z-10 pointer-events-auto">
           <EventNameGreenBox 
             currentEventId={currentEventId}
             events={events}
@@ -9564,61 +9563,7 @@ function StandbyView({
             onUpdateDisplayEventName={onUpdateDisplayEventName}
           />
         </div>
-        <div className="flex items-center gap-6 justify-end z-10">
-          {totalPages > 1 && (
-            <div className="flex items-center gap-2 bg-[#0d1526] border border-white/10 px-3 py-1.5 rounded-2xl">
-              <button
-                onClick={() => setCurrentPage(prev => (prev - 1 + totalPages) % totalPages)}
-                className="p-1 hover:bg-slate-800 text-white rounded transition-colors"
-                title="Previous Page"
-              >
-                <ChevronLeft size={16} />
-              </button>
-              <span className="text-[11px] font-black text-slate-400 uppercase tracking-widest px-1">
-                {currentPage + 1}/{totalPages}
-              </span>
-              <button
-                onClick={() => setCurrentPage(prev => (prev + 1) % totalPages)}
-                className="p-1 hover:bg-slate-800 text-white rounded transition-colors"
-                title="Next Page"
-              >
-                <ChevronRight size={16} />
-              </button>
-            </div>
-          )}
-          {isAdmin && (
-            <div className="flex items-center gap-2 bg-[#0d1526]/80 text-white rounded-2xl border border-white/10 px-3 py-1.5">
-              <span className="text-[11px] font-black uppercase text-slate-400 tracking-[0.15em] leading-none select-none">Show Layout:</span>
-              <select
-                value={ringsPerPage === 999 ? 'all' : ringsPerPage}
-                onChange={(e) => {
-                  const val = e.target.value === 'all' ? 999 : parseInt(e.target.value, 10);
-                  setRingsPerPage(val);
-                  localStorage.setItem('tkd_standby_rings_per_page', val.toString());
-                  setCurrentPage(0);
-                }}
-                className="bg-transparent text-white text-xs font-black outline-none border-none focus:ring-0 cursor-pointer pr-1"
-              >
-                {[1, 2, 3, 4, 5, 6, 8].map(n => (
-                  <option key={n} value={n} className="bg-[#1a2235] text-white font-bold">{n} Court{n > 1 ? 's' : ''}</option>
-                ))}
-                <option value="all" className="bg-[#1a2235] text-white font-bold">All Courts</option>
-              </select>
-            </div>
-          )}
-          {isAdmin && (
-            <AdminFontSizeControls
-              activeNameFontScale={effectiveNameScale}
-              setActiveNameFontScale={effectiveSetNameScale}
-              activeClubFontScale={effectiveClubScale}
-              setActiveClubFontScale={effectiveSetClubScale}
-              standbyNameFontScale={effectiveStandbyNameScale}
-              setStandbyNameFontScale={effectiveSetStandbyNameScale}
-              standbyClubFontScale={effectiveStandbyClubScale}
-              setStandbyClubFontScale={effectiveSetStandbyClubScale}
-              dark={true}
-            />
-          )}
+        <div className="flex items-center gap-4 justify-end z-10 shrink-0">
           <button 
             onClick={toggleFullScreen}
             className="p-3 bg-slate-900 text-white hover:bg-slate-800 rounded-2xl border border-slate-800 transition-all group"
@@ -9627,6 +9572,83 @@ function StandbyView({
           </button>
         </div>
       </div>
+
+      {/* Selection Controls Sub-bar */}
+      {(isAdmin || totalPages > 1) && (
+        <div className="flex flex-wrap items-center justify-between px-8 py-1.5 gap-4 flex-shrink-0 z-20">
+          {/* Green Place on Left: Admin button to set how many rings to show */}
+          <div>
+            {isAdmin ? (
+              <div className="flex items-center gap-2 bg-[#0d1526] text-white rounded-2xl border border-emerald-500/40 px-3.5 py-1.5 shadow-sm">
+                <LayoutGrid size={15} className="text-emerald-400" />
+                <span className="text-[11px] font-black uppercase text-emerald-400 tracking-[0.15em] leading-none select-none">
+                  Show Layout:
+                </span>
+                <select
+                  value={ringsPerPage === 999 ? 'all' : ringsPerPage}
+                  onChange={(e) => {
+                    const val = e.target.value === 'all' ? 999 : parseInt(e.target.value, 10);
+                    setRingsPerPage(val);
+                    setCurrentPage(0);
+                  }}
+                  className="bg-[#1a2235] text-white text-xs font-black outline-none border border-white/10 rounded-lg px-2.5 py-1 focus:ring-1 focus:ring-emerald-500 cursor-pointer"
+                >
+                  {[1, 2, 3, 4, 5, 6, 8].map(n => (
+                    <option key={n} value={n} className="bg-[#1a2235] text-white font-bold">{n} Court{n > 1 ? 's' : ''}</option>
+                  ))}
+                  <option value="all" className="bg-[#1a2235] text-white font-bold">All Courts</option>
+                </select>
+              </div>
+            ) : (
+              totalPages > 1 && (
+                <div className="flex items-center gap-2 px-1">
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                    Showing {displayedRings.length} of {effectiveRings.length} Courts
+                  </span>
+                </div>
+              )
+            )}
+          </div>
+
+          {/* Right Side: Page Switcher & LED Font Controls */}
+          <div className="flex items-center gap-4">
+            {totalPages > 1 && (
+              <div className="flex items-center gap-2 bg-[#0d1526] border border-white/10 px-3 py-1.5 rounded-2xl">
+                <button
+                  onClick={() => setCurrentPage(prev => (prev - 1 + totalPages) % totalPages)}
+                  className="p-1 hover:bg-slate-800 text-white rounded transition-colors"
+                  title="Previous Page"
+                >
+                  <ChevronLeft size={16} />
+                </button>
+                <span className="text-[11px] font-black text-slate-400 uppercase tracking-widest px-1">
+                  {currentPage + 1}/{totalPages}
+                </span>
+                <button
+                  onClick={() => setCurrentPage(prev => (prev + 1) % totalPages)}
+                  className="p-1 hover:bg-slate-800 text-white rounded transition-colors"
+                  title="Next Page"
+                >
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+            )}
+            {isAdmin && (
+              <AdminFontSizeControls
+                activeNameFontScale={effectiveNameScale}
+                setActiveNameFontScale={effectiveSetNameScale}
+                activeClubFontScale={effectiveClubScale}
+                setActiveClubFontScale={effectiveSetClubScale}
+                standbyNameFontScale={effectiveStandbyNameScale}
+                setStandbyNameFontScale={effectiveSetStandbyNameScale}
+                standbyClubFontScale={effectiveStandbyClubScale}
+                setStandbyClubFontScale={effectiveSetStandbyClubScale}
+                dark={true}
+              />
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="flex-1 p-4 space-y-4">
         {displayedRings.map((ring, i) => {
@@ -9963,10 +9985,7 @@ function SiteView({
   const containerRef = React.useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = React.useState(false);
   const [currentPage, setCurrentPage] = React.useState(0);
-  const [ringsPerPage, setRingsPerPage] = React.useState<number>(() => {
-    const saved = localStorage.getItem('tkd_site_rings_per_page');
-    return saved ? parseInt(saved, 10) : 4;
-  });
+  const [ringsPerPage, setRingsPerPage] = useSyncedState<number>('tkd_site_rings_per_page', 4);
   
   const effectiveRings = showOnlyActiveRings ? rings.filter(r => r.currentBout && hasPlayers(r.currentBout)) : rings;
   const totalPages = Math.ceil(effectiveRings.length / ringsPerPage);
@@ -10025,16 +10044,16 @@ function SiteView({
       />
       {/* Header */}
       <div className="relative flex flex-col md:flex-row md:items-center justify-between px-8 py-2 md:py-2.5 bg-[#1a2235]/50 border-b border-white/10 backdrop-blur-sm gap-4">
-        <div className="flex items-center gap-4 z-10">
+        <div className="flex items-center gap-4 z-10 shrink-0">
           <div className="w-12 h-12 bg-red-600 rounded-2xl flex items-center justify-center shadow-lg shadow-red-900/20">
             <Trophy size={24} className="text-white" />
           </div>
           <div>
-            <h2 className="text-2xl font-black text-white uppercase tracking-tighter italic leading-none">Site VIew</h2>
+            <h2 className="text-2xl font-black text-white uppercase tracking-tighter italic leading-none">Site View</h2>
             <p className="text-[10px] font-black text-white uppercase tracking-[0.3em] mt-1">Live Tournament Site Monitoring</p>
           </div>
         </div>
-        <div className="md:absolute md:left-1/2 md:-translate-x-1/2 md:w-full md:max-w-[45%] w-full z-0">
+        <div className="md:absolute md:left-1/2 md:-translate-x-1/2 md:w-full md:max-w-[45%] w-full z-10 pointer-events-auto">
           <EventNameGreenBox 
             currentEventId={currentEventId}
             events={events}
@@ -10043,61 +10062,7 @@ function SiteView({
             onUpdateDisplayEventName={onUpdateDisplayEventName}
           />
         </div>
-        <div className="flex items-center gap-6 justify-end z-10">
-          {totalPages > 1 && (
-            <div className="flex items-center gap-2 bg-[#0d1526] border border-white/10 px-3 py-1.5 rounded-2xl">
-              <button
-                onClick={() => setCurrentPage(prev => (prev - 1 + totalPages) % totalPages)}
-                className="p-1 hover:bg-slate-800 text-white rounded transition-colors"
-                title="Previous Page"
-              >
-                <ChevronLeft size={16} />
-              </button>
-              <span className="text-[11px] font-black text-slate-400 uppercase tracking-widest px-1">
-                {currentPage + 1}/{totalPages}
-              </span>
-              <button
-                onClick={() => setCurrentPage(prev => (prev + 1) % totalPages)}
-                className="p-1 hover:bg-slate-800 text-white rounded transition-colors"
-                title="Next Page"
-              >
-                <ChevronRight size={16} />
-              </button>
-            </div>
-          )}
-          {isAdmin && (
-            <div className="flex items-center gap-2 bg-[#0d1526]/80 text-white rounded-2xl border border-white/10 px-3 py-1.5">
-              <span className="text-[11px] font-black uppercase text-slate-400 tracking-[0.15em] leading-none select-none">Show Layout:</span>
-              <select
-                value={ringsPerPage === 999 ? 'all' : ringsPerPage}
-                onChange={(e) => {
-                  const val = e.target.value === 'all' ? 999 : parseInt(e.target.value, 10);
-                  setRingsPerPage(val);
-                  localStorage.setItem('tkd_site_rings_per_page', val.toString());
-                  setCurrentPage(0);
-                }}
-                className="bg-transparent text-white text-xs font-black outline-none border-none focus:ring-0 cursor-pointer pr-1"
-              >
-                {[1, 2, 3, 4, 5, 6, 8].map(n => (
-                  <option key={n} value={n} className="bg-[#1a2235] text-white font-bold">{n} Court{n > 1 ? 's' : ''}</option>
-                ))}
-                <option value="all" className="bg-[#1a2235] text-white font-bold">All Courts</option>
-              </select>
-            </div>
-          )}
-          {isAdmin && (
-            <AdminFontSizeControls
-              activeNameFontScale={effectiveNameScale}
-              setActiveNameFontScale={effectiveSetNameScale}
-              activeClubFontScale={effectiveClubScale}
-              setActiveClubFontScale={effectiveSetClubScale}
-              standbyNameFontScale={effectiveStandbyNameScale}
-              setStandbyNameFontScale={effectiveSetStandbyNameScale}
-              standbyClubFontScale={effectiveStandbyClubScale}
-              setStandbyClubFontScale={effectiveSetStandbyClubScale}
-              dark={true}
-            />
-          )}
+        <div className="flex items-center gap-4 justify-end z-10 shrink-0">
           <button 
             onClick={toggleFullScreen}
             className="p-3 bg-slate-900 text-white hover:bg-slate-800 rounded-2xl border border-slate-800 transition-all group"
@@ -10106,6 +10071,83 @@ function SiteView({
           </button>
         </div>
       </div>
+
+      {/* Selection Controls Sub-bar */}
+      {(isAdmin || totalPages > 1) && (
+        <div className="flex flex-wrap items-center justify-between px-8 py-1.5 gap-4 flex-shrink-0 z-20">
+          {/* Green Place on Left: Admin button to set how many rings to show */}
+          <div>
+            {isAdmin ? (
+              <div className="flex items-center gap-2 bg-[#0d1526] text-white rounded-2xl border border-emerald-500/40 px-3.5 py-1.5 shadow-sm">
+                <LayoutGrid size={15} className="text-emerald-400" />
+                <span className="text-[11px] font-black uppercase text-emerald-400 tracking-[0.15em] leading-none select-none">
+                  Show Layout:
+                </span>
+                <select
+                  value={ringsPerPage === 999 ? 'all' : ringsPerPage}
+                  onChange={(e) => {
+                    const val = e.target.value === 'all' ? 999 : parseInt(e.target.value, 10);
+                    setRingsPerPage(val);
+                    setCurrentPage(0);
+                  }}
+                  className="bg-[#1a2235] text-white text-xs font-black outline-none border border-white/10 rounded-lg px-2.5 py-1 focus:ring-1 focus:ring-emerald-500 cursor-pointer"
+                >
+                  {[1, 2, 3, 4, 5, 6, 8].map(n => (
+                    <option key={n} value={n} className="bg-[#1a2235] text-white font-bold">{n} Court{n > 1 ? 's' : ''}</option>
+                  ))}
+                  <option value="all" className="bg-[#1a2235] text-white font-bold">All Courts</option>
+                </select>
+              </div>
+            ) : (
+              totalPages > 1 && (
+                <div className="flex items-center gap-2 px-1">
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                    Showing {displayedRings.length} of {effectiveRings.length} Courts
+                  </span>
+                </div>
+              )
+            )}
+          </div>
+
+          {/* Right Side: Page Switcher & LED Font Controls */}
+          <div className="flex items-center gap-4">
+            {totalPages > 1 && (
+              <div className="flex items-center gap-2 bg-[#0d1526] border border-white/10 px-3 py-1.5 rounded-2xl">
+                <button
+                  onClick={() => setCurrentPage(prev => (prev - 1 + totalPages) % totalPages)}
+                  className="p-1 hover:bg-slate-800 text-white rounded transition-colors"
+                  title="Previous Page"
+                >
+                  <ChevronLeft size={16} />
+                </button>
+                <span className="text-[11px] font-black text-slate-400 uppercase tracking-widest px-1">
+                  {currentPage + 1}/{totalPages}
+                </span>
+                <button
+                  onClick={() => setCurrentPage(prev => (prev + 1) % totalPages)}
+                  className="p-1 hover:bg-slate-800 text-white rounded transition-colors"
+                  title="Next Page"
+                >
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+            )}
+            {isAdmin && (
+              <AdminFontSizeControls
+                activeNameFontScale={effectiveNameScale}
+                setActiveNameFontScale={effectiveSetNameScale}
+                activeClubFontScale={effectiveClubScale}
+                setActiveClubFontScale={effectiveSetClubScale}
+                standbyNameFontScale={effectiveStandbyNameScale}
+                setStandbyNameFontScale={effectiveSetStandbyNameScale}
+                standbyClubFontScale={effectiveStandbyClubScale}
+                setStandbyClubFontScale={effectiveSetStandbyClubScale}
+                dark={true}
+              />
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="flex-1 p-4 space-y-4">
         {displayedRings.map((ring, i) => {
@@ -10369,10 +10411,7 @@ function PointsView({
   const containerRef = React.useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = React.useState(false);
   const [currentPage, setCurrentPage] = React.useState(0);
-  const [ringsPerPage, setRingsPerPage] = React.useState<number>(() => {
-    const saved = localStorage.getItem('tkd_points_rings_per_page');
-    return saved ? parseInt(saved, 10) : 4;
-  });
+  const [ringsPerPage, setRingsPerPage] = useSyncedState<number>('tkd_points_rings_per_page', 4);
   
   const effectiveRings = showOnlyActiveRings ? rings.filter(r => r.currentBout && hasPlayers(r.currentBout)) : rings;
   const totalPages = Math.ceil(effectiveRings.length / ringsPerPage);
@@ -10431,7 +10470,7 @@ function PointsView({
       />
       {/* Header */}
       <div className="relative flex flex-col md:flex-row md:items-center justify-between px-8 py-2 md:py-2.5 bg-[#1a2235]/50 border-b border-white/10 backdrop-blur-sm gap-4">
-        <div className="flex items-center gap-4 z-10">
+        <div className="flex items-center gap-4 z-10 shrink-0">
           <div className="w-12 h-12 bg-red-600 rounded-2xl flex items-center justify-center shadow-lg shadow-red-900/20">
             <Trophy size={24} className="text-white" />
           </div>
@@ -10440,7 +10479,7 @@ function PointsView({
             <p className="text-[10px] font-black text-white uppercase tracking-[0.3em] mt-1">Live Tournament Points Monitoring</p>
           </div>
         </div>
-        <div className="md:absolute md:left-1/2 md:-translate-x-1/2 md:w-full md:max-w-[45%] w-full z-0">
+        <div className="md:absolute md:left-1/2 md:-translate-x-1/2 md:w-full md:max-w-[45%] w-full z-10 pointer-events-auto">
           <EventNameGreenBox 
             currentEventId={currentEventId}
             events={events}
@@ -10449,61 +10488,7 @@ function PointsView({
             onUpdateDisplayEventName={onUpdateDisplayEventName}
           />
         </div>
-        <div className="flex items-center gap-6 justify-end z-10">
-          {totalPages > 1 && (
-            <div className="flex items-center gap-2 bg-[#0d1526] border border-white/10 px-3 py-1.5 rounded-2xl">
-              <button
-                onClick={() => setCurrentPage(prev => (prev - 1 + totalPages) % totalPages)}
-                className="p-1 hover:bg-slate-800 text-white rounded transition-colors"
-                title="Previous Page"
-              >
-                <ChevronLeft size={16} />
-              </button>
-              <span className="text-[11px] font-black text-slate-400 uppercase tracking-widest px-1">
-                {currentPage + 1}/{totalPages}
-              </span>
-              <button
-                onClick={() => setCurrentPage(prev => (prev + 1) % totalPages)}
-                className="p-1 hover:bg-slate-800 text-white rounded transition-colors"
-                title="Next Page"
-              >
-                <ChevronRight size={16} />
-              </button>
-            </div>
-          )}
-          {isAdmin && (
-            <div className="flex items-center gap-2 bg-[#0d1526]/80 text-white rounded-2xl border border-white/10 px-3 py-1.5">
-              <span className="text-[11px] font-black uppercase text-slate-400 tracking-[0.15em] leading-none select-none">Show Layout:</span>
-              <select
-                value={ringsPerPage === 999 ? 'all' : ringsPerPage}
-                onChange={(e) => {
-                  const val = e.target.value === 'all' ? 999 : parseInt(e.target.value, 10);
-                  setRingsPerPage(val);
-                  localStorage.setItem('tkd_points_rings_per_page', val.toString());
-                  setCurrentPage(0);
-                }}
-                className="bg-transparent text-white text-xs font-black outline-none border-none focus:ring-0 cursor-pointer pr-1"
-              >
-                {[1, 2, 3, 4, 5, 6, 8].map(n => (
-                  <option key={n} value={n} className="bg-[#1a2235] text-white font-bold">{n} Ring{n > 1 ? 's' : ''}</option>
-                ))}
-                <option value="all" className="bg-[#1a2235] text-white font-bold">All Rings</option>
-              </select>
-            </div>
-          )}
-          {isAdmin && (
-            <AdminFontSizeControls
-              activeNameFontScale={effectiveNameScale}
-              setActiveNameFontScale={effectiveSetNameScale}
-              activeClubFontScale={effectiveClubScale}
-              setActiveClubFontScale={effectiveSetClubScale}
-              standbyNameFontScale={effectiveStandbyNameScale}
-              setStandbyNameFontScale={effectiveSetStandbyNameScale}
-              standbyClubFontScale={effectiveStandbyClubScale}
-              setStandbyClubFontScale={effectiveSetStandbyClubScale}
-              dark={true}
-            />
-          )}
+        <div className="flex items-center gap-4 justify-end z-10 shrink-0">
           <button 
             onClick={toggleFullScreen}
             className="p-3 bg-slate-900 text-white hover:bg-slate-800 rounded-2xl border border-slate-800 transition-all group"
@@ -10512,6 +10497,83 @@ function PointsView({
           </button>
         </div>
       </div>
+
+      {/* Selection Controls Sub-bar */}
+      {(isAdmin || totalPages > 1) && (
+        <div className="flex flex-wrap items-center justify-between px-8 py-1.5 gap-4 flex-shrink-0 z-20">
+          {/* Green Place on Left: Admin button to set how many rings to show */}
+          <div>
+            {isAdmin ? (
+              <div className="flex items-center gap-2 bg-[#0d1526] text-white rounded-2xl border border-emerald-500/40 px-3.5 py-1.5 shadow-sm">
+                <LayoutGrid size={15} className="text-emerald-400" />
+                <span className="text-[11px] font-black uppercase text-emerald-400 tracking-[0.15em] leading-none select-none">
+                  Show Layout:
+                </span>
+                <select
+                  value={ringsPerPage === 999 ? 'all' : ringsPerPage}
+                  onChange={(e) => {
+                    const val = e.target.value === 'all' ? 999 : parseInt(e.target.value, 10);
+                    setRingsPerPage(val);
+                    setCurrentPage(0);
+                  }}
+                  className="bg-[#1a2235] text-white text-xs font-black outline-none border border-white/10 rounded-lg px-2.5 py-1 focus:ring-1 focus:ring-emerald-500 cursor-pointer"
+                >
+                  {[1, 2, 3, 4, 5, 6, 8].map(n => (
+                    <option key={n} value={n} className="bg-[#1a2235] text-white font-bold">{n} Ring{n > 1 ? 's' : ''}</option>
+                  ))}
+                  <option value="all" className="bg-[#1a2235] text-white font-bold">All Rings</option>
+                </select>
+              </div>
+            ) : (
+              totalPages > 1 && (
+                <div className="flex items-center gap-2 px-1">
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                    Showing {displayedRings.length} of {effectiveRings.length} Rings
+                  </span>
+                </div>
+              )
+            )}
+          </div>
+
+          {/* Right Side: Page Switcher & LED Font Controls */}
+          <div className="flex items-center gap-4">
+            {totalPages > 1 && (
+              <div className="flex items-center gap-2 bg-[#0d1526] border border-white/10 px-3 py-1.5 rounded-2xl">
+                <button
+                  onClick={() => setCurrentPage(prev => (prev - 1 + totalPages) % totalPages)}
+                  className="p-1 hover:bg-slate-800 text-white rounded transition-colors"
+                  title="Previous Page"
+                >
+                  <ChevronLeft size={16} />
+                </button>
+                <span className="text-[11px] font-black text-slate-400 uppercase tracking-widest px-1">
+                  {currentPage + 1}/{totalPages}
+                </span>
+                <button
+                  onClick={() => setCurrentPage(prev => (prev + 1) % totalPages)}
+                  className="p-1 hover:bg-slate-800 text-white rounded transition-colors"
+                  title="Next Page"
+                >
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+            )}
+            {isAdmin && (
+              <AdminFontSizeControls
+                activeNameFontScale={effectiveNameScale}
+                setActiveNameFontScale={effectiveSetNameScale}
+                activeClubFontScale={effectiveClubScale}
+                setActiveClubFontScale={effectiveSetClubScale}
+                standbyNameFontScale={effectiveStandbyNameScale}
+                setStandbyNameFontScale={effectiveSetStandbyNameScale}
+                standbyClubFontScale={effectiveStandbyClubScale}
+                setStandbyClubFontScale={effectiveSetStandbyClubScale}
+                dark={true}
+              />
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="flex-1 p-4 space-y-4">
         {displayedRings.map((ring, i) => {
@@ -10862,10 +10924,7 @@ function OnsiteView({
   const containerRef = React.useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = React.useState(false);
   const [currentPage, setCurrentPage] = React.useState(0);
-  const [ringsPerPage, setRingsPerPage] = React.useState<number>(() => {
-    const saved = localStorage.getItem('tkd_onsite_rings_per_page');
-    return saved ? parseInt(saved, 10) : 3;
-  });
+  const [ringsPerPage, setRingsPerPage] = useSyncedState<number>('tkd_onsite_rings_per_page', 3);
 
   const effectiveRings = showOnlyActiveRings ? rings.filter(r => r.currentBout && hasPlayers(r.currentBout)) : rings;
   const totalPages = Math.ceil(effectiveRings.length / ringsPerPage);
@@ -10937,96 +10996,121 @@ function OnsiteView({
         onDelete={onDeleteTransfer} 
       />
       {!isFullscreen && (
-        <div className="relative flex flex-col md:flex-row md:items-center justify-between px-4 py-1.5 md:py-2 flex-shrink-0 gap-4">
-          <div className="flex items-center gap-4 z-10">
-            <div className="w-12 h-12 bg-red-600 rounded-2xl flex items-center justify-center shadow-lg shadow-red-900/20">
-              <Trophy size={24} className="text-white" />
-            </div>
-            <div>
-              <h2 className="text-2xl font-black text-white uppercase tracking-tighter italic leading-none">Onsite Tournament Overview</h2>
-              <p className="text-[10px] font-black text-white uppercase tracking-[0.3em] mt-1">Live Multi-Court Monitoring System</p>
-            </div>
-          </div>
-          <div className="md:absolute md:left-1/2 md:-translate-x-1/2 md:w-full md:max-w-[45%] w-full z-0">
-            <EventNameGreenBox 
-              currentEventId={currentEventId}
-              events={events}
-              isAdmin={isAdminOnly}
-              displayEventName={displayEventName}
-              onUpdateDisplayEventName={onUpdateDisplayEventName}
-            />
-          </div>
-          <div className="flex items-center gap-6 justify-end z-10">
-            {totalPages > 1 && (
-              <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-2xl">
-                <button
-                  onClick={() => setCurrentPage(prev => (prev - 1 + totalPages) % totalPages)}
-                  className="p-1 hover:bg-slate-800 text-white rounded transition-colors"
-                  title="Previous Page"
-                >
-                  <ChevronLeft size={16} />
-                </button>
-                <span className="text-[11px] font-black text-slate-400 uppercase tracking-widest px-1">
-                  {currentPage + 1}/{totalPages}
-                </span>
-                <button
-                  onClick={() => setCurrentPage(prev => (prev + 1) % totalPages)}
-                  className="p-1 hover:bg-slate-800 text-white rounded transition-colors"
-                  title="Next Page"
-                >
-                  <ChevronRight size={16} />
-                </button>
+        <>
+          <div className="relative flex flex-col md:flex-row md:items-center justify-between px-4 py-1.5 md:py-2 flex-shrink-0 gap-4">
+            <div className="flex items-center gap-4 z-10 shrink-0">
+              <div className="w-12 h-12 bg-red-600 rounded-2xl flex items-center justify-center shadow-lg shadow-red-900/20">
+                <Trophy size={24} className="text-white" />
               </div>
-            )}
-            {isAdmin && (
-              <div className="flex items-center gap-2 bg-slate-900 text-white rounded-2xl border border-slate-850 px-3 py-1.5">
-                <span className="text-[11px] font-black uppercase text-slate-400 tracking-[0.15em] leading-none select-none">Show Layout:</span>
-                <select
-                  value={ringsPerPage === 999 ? 'all' : ringsPerPage}
-                  onChange={(e) => {
-                    const val = e.target.value === 'all' ? 999 : parseInt(e.target.value, 10);
-                    setRingsPerPage(val);
-                    localStorage.setItem('tkd_onsite_rings_per_page', val.toString());
-                    setCurrentPage(0);
-                  }}
-                  className="bg-transparent text-white text-xs font-black outline-none border-none focus:ring-0 cursor-pointer pr-1"
-                >
-                  {[1, 2, 3, 4, 5, 6, 8].map(n => (
-                    <option key={n} value={n} className="bg-slate-900 text-white font-bold">{n} Court{n > 1 ? 's' : ''}</option>
-                  ))}
-                  <option value="all" className="bg-slate-900 text-white font-bold">All Courts</option>
-                </select>
+              <div>
+                <h2 className="text-2xl font-black text-white uppercase tracking-tighter italic leading-none">Onsite Tournament Overview</h2>
+                <p className="text-[10px] font-black text-white uppercase tracking-[0.3em] mt-1">Live Multi-Court Monitoring System</p>
               </div>
-            )}
-            {isAdmin && (
-              <AdminFontSizeControls
-                activeNameFontScale={effectiveNameScale}
-                setActiveNameFontScale={effectiveSetNameScale}
-                activeClubFontScale={effectiveClubScale}
-                setActiveClubFontScale={effectiveSetClubScale}
-                standbyNameFontScale={effectiveStandbyNameScale}
-                setStandbyNameFontScale={effectiveSetStandbyNameScale}
-                standbyClubFontScale={effectiveStandbyClubScale}
-                setStandbyClubFontScale={effectiveSetStandbyClubScale}
-                dark={true}
+            </div>
+            <div className="md:absolute md:left-1/2 md:-translate-x-1/2 md:w-full md:max-w-[45%] w-full z-10 pointer-events-auto">
+              <EventNameGreenBox 
+                currentEventId={currentEventId}
+                events={events}
+                isAdmin={isAdminOnly}
+                displayEventName={displayEventName}
+                onUpdateDisplayEventName={onUpdateDisplayEventName}
               />
-            )}
-            <div className="flex flex-col items-end">
-              <div className="flex items-center gap-2">
-                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-                <span className="text-xs font-black text-green-500 uppercase tracking-widest">System Live</span>
-              </div>
-              <p className="text-[9px] font-bold text-white uppercase tracking-widest mt-1">Real-time Data Sync</p>
             </div>
-            <button 
-              onClick={toggleFullScreen}
-              className="p-3 bg-slate-900 text-white hover:text-white hover:bg-slate-800 rounded-2xl border border-slate-800 transition-all group"
-              title="Enter Fullscreen"
-            >
-              <Maximize size={20} className="group-hover:scale-110 transition-transform" />
-            </button>
+            <div className="flex items-center gap-4 justify-end z-10 shrink-0">
+              <div className="flex flex-col items-end">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+                  <span className="text-xs font-black text-green-500 uppercase tracking-widest">System Live</span>
+                </div>
+                <p className="text-[9px] font-bold text-white uppercase tracking-widest mt-1">Real-time Data Sync</p>
+              </div>
+              <button 
+                onClick={toggleFullScreen}
+                className="p-3 bg-slate-900 text-white hover:text-white hover:bg-slate-800 rounded-2xl border border-slate-800 transition-all group"
+                title="Enter Fullscreen"
+              >
+                <Maximize size={20} className="group-hover:scale-110 transition-transform" />
+              </button>
+            </div>
           </div>
-        </div>
+
+          {/* Selection Controls Sub-bar */}
+          {(isAdmin || totalPages > 1) && (
+            <div className="flex flex-wrap items-center justify-between px-4 py-1.5 gap-4 flex-shrink-0 z-20">
+              {/* Green Place on Left: Admin button to set how many rings to show */}
+              <div>
+                {isAdmin ? (
+                  <div className="flex items-center gap-2 bg-[#0d1526] text-white rounded-2xl border border-emerald-500/40 px-3.5 py-1.5 shadow-sm">
+                    <LayoutGrid size={15} className="text-emerald-400" />
+                    <span className="text-[11px] font-black uppercase text-emerald-400 tracking-[0.15em] leading-none select-none">
+                      Show Layout:
+                    </span>
+                    <select
+                      value={ringsPerPage === 999 ? 'all' : ringsPerPage}
+                      onChange={(e) => {
+                        const val = e.target.value === 'all' ? 999 : parseInt(e.target.value, 10);
+                        setRingsPerPage(val);
+                        setCurrentPage(0);
+                      }}
+                      className="bg-[#1a2235] text-white text-xs font-black outline-none border border-white/10 rounded-lg px-2.5 py-1 focus:ring-1 focus:ring-emerald-500 cursor-pointer"
+                    >
+                      {[1, 2, 3, 4, 5, 6, 8].map(n => (
+                        <option key={n} value={n} className="bg-[#1a2235] text-white font-bold">{n} Court{n > 1 ? 's' : ''}</option>
+                      ))}
+                      <option value="all" className="bg-[#1a2235] text-white font-bold">All Courts</option>
+                    </select>
+                  </div>
+                ) : (
+                  totalPages > 1 && (
+                    <div className="flex items-center gap-2 px-1">
+                      <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                        Showing {displayedRings.length} of {effectiveRings.length} Courts
+                      </span>
+                    </div>
+                  )
+                )}
+              </div>
+
+              {/* Right Side: Page Switcher & LED Font Controls */}
+              <div className="flex items-center gap-4">
+                {totalPages > 1 && (
+                  <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-2xl">
+                    <button
+                      onClick={() => setCurrentPage(prev => (prev - 1 + totalPages) % totalPages)}
+                      className="p-1 hover:bg-slate-800 text-white rounded transition-colors"
+                      title="Previous Page"
+                    >
+                      <ChevronLeft size={16} />
+                    </button>
+                    <span className="text-[11px] font-black text-slate-400 uppercase tracking-widest px-1">
+                      {currentPage + 1}/{totalPages}
+                    </span>
+                    <button
+                      onClick={() => setCurrentPage(prev => (prev + 1) % totalPages)}
+                      className="p-1 hover:bg-slate-800 text-white rounded transition-colors"
+                      title="Next Page"
+                    >
+                      <ChevronRight size={16} />
+                    </button>
+                  </div>
+                )}
+                {isAdmin && (
+                  <AdminFontSizeControls
+                    activeNameFontScale={effectiveNameScale}
+                    setActiveNameFontScale={effectiveSetNameScale}
+                    activeClubFontScale={effectiveClubScale}
+                    setActiveClubFontScale={effectiveSetClubScale}
+                    standbyNameFontScale={effectiveStandbyNameScale}
+                    setStandbyNameFontScale={effectiveSetStandbyNameScale}
+                    standbyClubFontScale={effectiveStandbyClubScale}
+                    setStandbyClubFontScale={effectiveSetStandbyClubScale}
+                    dark={true}
+                  />
+                )}
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       {isFullscreen && (
@@ -11391,10 +11475,7 @@ function PublicDashboardView({
   const [logoClicks, setLogoClicks] = React.useState(0);
   const clickTimer = React.useRef<NodeJS.Timeout | null>(null);
   const [isQuotaExceeded, setIsQuotaExceeded] = React.useState(false);
-  const [courtsPerRow, setCourtsPerRow] = React.useState<number>(() => {
-    const saved = localStorage.getItem('tkd_public_courts_per_row');
-    return saved ? parseInt(saved, 10) : 4;
-  });
+  const [courtsPerRow, setCourtsPerRow] = useSyncedState<number>('tkd_public_courts_per_row', 4);
 
   React.useEffect(() => {
     const handleQuotaExceeded = () => {
@@ -11478,7 +11559,7 @@ function PublicDashboardView({
           </div>
         </div>
 
-        <div className="md:absolute md:left-1/2 md:-translate-x-1/2 md:w-full md:max-w-[45%] w-full z-0">
+        <div className="md:absolute md:left-1/2 md:-translate-x-1/2 md:w-full md:max-w-[45%] w-full z-10 pointer-events-auto">
           <EventNameGreenBox 
             currentEventId={currentEventId}
             events={events}
@@ -11488,40 +11569,48 @@ function PublicDashboardView({
           />
         </div>
 
-        <div className="flex items-center gap-4 shrink-0 justify-end z-10">
-          {isAdmin && (
-            <>
-              <AdminFontSizeControls
-                activeNameFontScale={effectiveNameScale}
-                setActiveNameFontScale={effectiveSetNameScale}
-                activeClubFontScale={effectiveClubScale}
-                setActiveClubFontScale={effectiveSetClubScale}
-                standbyNameFontScale={effectiveStandbyNameScale}
-                setStandbyNameFontScale={effectiveSetStandbyNameScale}
-                standbyClubFontScale={effectiveStandbyClubScale}
-                setStandbyClubFontScale={effectiveSetStandbyClubScale}
-                dark={true}
-              />
-              <div className="hidden sm:flex items-center gap-2 bg-slate-900/50 text-white rounded-xl border border-slate-700 px-3 py-1.5">
-                <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest select-none">Grid:</span>
-                <select
-                  value={courtsPerRow}
-                  onChange={(e) => {
-                    const val = parseInt(e.target.value, 10);
-                    setCourtsPerRow(val);
-                    localStorage.setItem('tkd_public_courts_per_row', val.toString());
-                  }}
-                  className="bg-transparent text-white text-xs font-black outline-none border-none focus:ring-0 cursor-pointer"
-                >
-                  {[1, 2, 3, 4, 5, 6, 8].map(n => (
-                    <option key={n} value={n} className="bg-slate-800 text-white">{n} Courts / Row</option>
-                  ))}
-                </select>
-              </div>
-            </>
-          )}
-        </div>
+        <div className="hidden sm:block w-24 shrink-0 z-10"></div>
       </header>
+
+      {/* Selection Controls Sub-bar */}
+      {isAdmin && (
+        <div className="flex flex-wrap items-center justify-between px-4 sm:px-8 py-1.5 gap-4 flex-shrink-0 z-20">
+          {/* Green Place on Left: Admin button to set how many rings/courts per row */}
+          <div>
+            <div className="flex items-center gap-2 bg-slate-900 text-white rounded-xl border border-emerald-500/40 px-3 py-1.5 shadow-sm">
+              <LayoutGrid size={15} className="text-emerald-400" />
+              <span className="text-[10px] font-black uppercase text-emerald-400 tracking-widest select-none">Grid Layout:</span>
+              <select
+                value={courtsPerRow}
+                onChange={(e) => {
+                  const val = parseInt(e.target.value, 10);
+                  setCourtsPerRow(val);
+                }}
+                className="bg-[#1a2235] text-white text-xs font-black outline-none border border-white/10 rounded-lg px-2 py-1 focus:ring-1 focus:ring-emerald-500 cursor-pointer"
+              >
+                {[1, 2, 3, 4, 5, 6, 8].map(n => (
+                  <option key={n} value={n} className="bg-slate-800 text-white">{n} Courts / Row</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Right Side: LED Font Controls */}
+          <div>
+            <AdminFontSizeControls
+              activeNameFontScale={effectiveNameScale}
+              setActiveNameFontScale={effectiveSetNameScale}
+              activeClubFontScale={effectiveClubScale}
+              setActiveClubFontScale={effectiveSetClubScale}
+              standbyNameFontScale={effectiveStandbyNameScale}
+              setStandbyNameFontScale={effectiveSetStandbyNameScale}
+              standbyClubFontScale={effectiveStandbyClubScale}
+              setStandbyClubFontScale={effectiveSetStandbyClubScale}
+              dark={true}
+            />
+          </div>
+        </div>
+      )}
 
       <div className="p-3 sm:p-6 md:p-8 space-y-6 md:space-y-8 max-w-[1600px] mx-auto flex-1 w-full">
         <PinnedTransferBanner 
