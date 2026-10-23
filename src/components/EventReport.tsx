@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { EventData, MatchHistoryItem, RingStatus, MatchData } from '../types';
 import { db } from '../firebase';
 import { collection, query, where, getDocs } from 'firebase/firestore';
@@ -627,7 +627,8 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
   const [discipline, setDiscipline] = useState<'kyorugi' | 'poomsae'>('kyorugi');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [matches, setMatches] = useState<RawMatch[]>([]);
+  const [rawSheetMatches, setRawSheetMatches] = useState<RawMatch[]>([]);
+  const isFetchingRef = useRef(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchCriteria, setSearchCriteria] = useState<'all' | 'name' | 'club' | 'category'>('all');
   // Category division filter: 'all' or specific division like 'Cadet', 'Junior', 'Senior', 'Super Cadet'
@@ -920,182 +921,15 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
   };
 
   const fetchMatches = async () => {
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
     setIsLoading(true);
     setError(null);
     try {
-      let combinedMatches: RawMatch[] = [];
-
       const targetEvents = includeAllEvents 
         ? events 
         : events.filter(e => e.id === currentEventId);
 
-      // 1. Try to load matches from local bracket record / backupData in the app first
-      let effectiveBackup: Record<string, { mappings: any[]; matches: any[] }> = { ...(backupData || {}) };
-      if (Object.keys(effectiveBackup).length === 0) {
-        try {
-          const savedBackup = localStorage.getItem('tkd_backup_data_v3');
-          if (savedBackup) {
-            effectiveBackup = JSON.parse(savedBackup);
-          }
-        } catch (_) {}
-      }
-
-      // If still empty and currentEventId is set, check Firestore backup_data collection
-      if (Object.keys(effectiveBackup).length === 0 && currentEventId) {
-        try {
-          const q = query(collection(db, 'backup_data'), where('eventId', '==', currentEventId));
-          const snap = await getDocs(q);
-          if (!snap.empty) {
-            snap.docs.forEach(docSnap => {
-              const d = docSnap.data();
-              const groupKey = `${currentEventId}_${d.ringNum || docSnap.id}`;
-              effectiveBackup[groupKey] = {
-                mappings: d.mappings || [],
-                matches: d.matches || []
-              };
-            });
-          }
-        } catch (err) {
-          console.warn("Could not query Firestore backup_data fallback:", err);
-        }
-      }
-
-      if (Object.keys(effectiveBackup).length > 0) {
-        const targetIds = includeAllEvents 
-          ? events.map(e => e.id)
-          : (currentEventId ? [currentEventId] : []);
-          
-        targetIds.forEach(evId => {
-          const evObj = events.find(e => e.id === evId);
-          const evName = evObj?.name || 'Tournament Event';
-          const evDate = evObj?.eventDate || '';
-
-          Object.keys(effectiveBackup).forEach(key => {
-            if (key.startsWith(`${evId}_`)) {
-              const dataRing = effectiveBackup[key];
-              if (dataRing && Array.isArray(dataRing.matches)) {
-                dataRing.matches.forEach((m: any) => {
-                  if (!m.category || m.category === 'SKIPPED' || m.category === '-') return;
-
-                  const hist = (matchHistory || []).find(h => 
-                    h.eventId === evId && 
-                    isBoutMatch(h.bout, m.bout)
-                  );
-                  const winnerName = (hist && hist.winner) ? hist.winner : (m.winner || '');
-                  const winnerClubName = (hist && hist.winnerClub) ? hist.winnerClub : (m.winnerClub || '');
-                  
-                  const exists = combinedMatches.some(ex => 
-                    ex.category.trim().toLowerCase() === m.category.trim().toLowerCase() && 
-                    isBoutMatch(ex.matchNoStr, m.bout)
-                  );
-                  
-                  if (!exists) {
-                    combinedMatches.push({
-                      date: evDate,
-                      event: evName,
-                      category: m.category,
-                      matchNoStr: m.bout.toString(),
-                      matchNo: getBoutNumber(m.bout.toString()),
-                      blueName: m.blue_name || '',
-                      blueClub: m.blue_club || '',
-                      redName: m.red_name || '',
-                      redClub: m.red_club || '',
-                      winner: winnerName,
-                      winnerClub: winnerClubName,
-                      r1Blue: hist && hist.points?.r1Blue ? parseFloat(hist.points.r1Blue) : (m.points?.r1Blue ? parseFloat(m.points.r1Blue) : undefined),
-                      r1Red: hist && hist.points?.r1Red ? parseFloat(hist.points.r1Red) : (m.points?.r1Red ? parseFloat(m.points.r1Red) : undefined)
-                    });
-                  }
-                });
-              }
-            }
-          });
-        });
-      }
-
-      // 2. Also check active rings and boutQueue
-      if (rings && rings.length > 0) {
-        rings.forEach(ring => {
-          const checkBout = (b: MatchData | null) => {
-            if (!b || !b.category || b.category === 'SKIPPED' || b.category === '-') return;
-            if (!includeAllEvents && currentEventId && b.eventId && b.eventId !== currentEventId) return;
-            const evObj = events.find(e => e.id === (b.eventId || currentEventId));
-            const evName = evObj?.name || 'Tournament Event';
-            const evDate = evObj?.eventDate || '';
-            const hist = (matchHistory || []).find(h => 
-              (h.eventId === (b.eventId || currentEventId)) && isBoutMatch(h.bout, b.bout)
-            );
-            const winnerName = (hist && hist.winner) ? hist.winner : '';
-            const winnerClub = (hist && hist.winnerClub) ? hist.winnerClub : '';
-            const exists = combinedMatches.some(ex => 
-              ex.category.trim().toLowerCase() === b.category.trim().toLowerCase() && 
-              isBoutMatch(ex.matchNoStr, b.bout)
-            );
-            if (!exists) {
-              combinedMatches.push({
-                date: evDate,
-                event: evName,
-                category: b.category,
-                matchNoStr: b.bout.toString(),
-                matchNo: getBoutNumber(b.bout.toString()),
-                blueName: b.blue_name || '',
-                blueClub: b.blue_club || '',
-                redName: b.red_name || '',
-                redClub: b.red_club || '',
-                winner: winnerName,
-                winnerClub: winnerClub,
-                r1Blue: hist && hist.points?.r1Blue ? parseFloat(hist.points.r1Blue) : (b.points?.r1Blue ? parseFloat(b.points.r1Blue) : undefined),
-                r1Red: hist && hist.points?.r1Red ? parseFloat(hist.points.r1Red) : (b.points?.r1Red ? parseFloat(b.points.r1Red) : undefined)
-              });
-            }
-          };
-          checkBout(ring.currentBout);
-          checkBout(ring.onDeck);
-          checkBout(ring.inTheHole);
-          if (Array.isArray(ring.suspendedBouts)) {
-            ring.suspendedBouts.forEach(checkBout);
-          }
-        });
-      }
-
-      if (boutQueue && boutQueue.length > 0) {
-        boutQueue.forEach(item => {
-          const b = item.data;
-          if (!b || !b.category || b.category === 'SKIPPED' || b.category === '-') return;
-          if (!includeAllEvents && currentEventId && b.eventId && b.eventId !== currentEventId) return;
-          const evObj = events.find(e => e.id === (b.eventId || currentEventId));
-          const evName = evObj?.name || 'Tournament Event';
-          const evDate = evObj?.eventDate || '';
-          const hist = (matchHistory || []).find(h => 
-            (h.eventId === (b.eventId || currentEventId)) && isBoutMatch(h.bout, b.bout)
-          );
-          const winnerName = (hist && hist.winner) ? hist.winner : '';
-          const winnerClub = (hist && hist.winnerClub) ? hist.winnerClub : '';
-          const exists = combinedMatches.some(ex => 
-            ex.category.trim().toLowerCase() === b.category.trim().toLowerCase() && 
-            isBoutMatch(ex.matchNoStr, b.bout)
-          );
-          if (!exists) {
-            combinedMatches.push({
-              date: evDate,
-              event: evName,
-              category: b.category,
-              matchNoStr: b.bout.toString(),
-              matchNo: getBoutNumber(b.bout.toString()),
-              blueName: b.blue_name || '',
-              blueClub: b.blue_club || '',
-              redName: b.red_name || '',
-              redClub: b.red_club || '',
-              winner: winnerName,
-              winnerClub: winnerClub,
-              r1Blue: hist && hist.points?.r1Blue ? parseFloat(hist.points.r1Blue) : (b.points?.r1Blue ? parseFloat(b.points.r1Blue) : undefined),
-              r1Red: hist && hist.points?.r1Red ? parseFloat(hist.points.r1Red) : (b.points?.r1Red ? parseFloat(b.points.r1Red) : undefined)
-            });
-          }
-        });
-      }
-
-      // 3. Fall back to or augment from Google Sheets
       const getValidUrl = (e?: EventData | null) => {
         const defaultUrl = 'https://docs.google.com/spreadsheets/d/14TrlxR_rk9S7WmdanXGLlE4Y-ry9TqY6_B6HYA0Uuus/edit?usp=sharing';
         if (!e) return defaultUrl;
@@ -1114,6 +948,8 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
             ringQuantity: 4,
             createdAt: new Date()
           }];
+
+      const parsedSheetMatches: RawMatch[] = [];
 
       for (const event of eventsToFetch) {
         let activeUrl = getValidUrl(event);
@@ -1170,7 +1006,6 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
                   if (redClubCol === -1) redClubCol = 8;
                 }
 
-                // Winner and Winner Club (strictly distinguishing between athlete name and club)
                 const winnerCol = headerRow.findIndex(h => /^winner(?:\s*name)?$/i.test(h) && !/club/i.test(h));
                 const winnerClubCol = headerRow.findIndex(h => /winner\s*club/i.test(h));
 
@@ -1186,7 +1021,6 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
 
                   const sheetEventName = eventCol !== -1 && row[eventCol] ? row[eventCol].trim() : '';
                   
-                  // Multi-event isolation matching check
                   if (!includeAllEvents && sheetEventName) {
                     const s = sheetEventName.toLowerCase();
                     const t = event.name.toLowerCase();
@@ -1194,7 +1028,6 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
                     const isDirectMatch = s === t || s === tId || t.includes(s) || s.includes(t);
                     
                     if (!isDirectMatch) {
-                      // Check if sheetEventName explicitly belongs to ANOTHER configured event
                       const isOtherEvent = events.some(other => 
                         other.id !== event.id && (
                           other.name.trim().toLowerCase() === s || 
@@ -1222,23 +1055,14 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
                   const rawDate = dateCol !== -1 && row[dateCol] ? row[dateCol].split(',')[0].trim() : '';
                   const matchDate = rawDate || event.eventDate || new Date().toISOString().split('T')[0];
 
-                  // Override winner from completed matchHistory if present
-                  const hist = (matchHistory || []).find(h => 
-                    (h.eventId === event.id || ((h as any).event_name && (h as any).event_name.trim().toLowerCase() === (sheetEventName || event.name).trim().toLowerCase())) && 
-                    isBoutMatch(h.bout, matchNoStr)
-                  );
+                  let finalWinner = parsedWinner;
+                  let finalWinnerClub = parsedWinnerClub;
 
-                  let finalWinner = hist ? hist.winner : parsedWinner;
-                  let finalWinnerClub = hist && hist.winnerClub ? hist.winnerClub : parsedWinnerClub;
-                  const finalR1Blue = hist && hist.points?.r1Blue ? parseFloat(hist.points.r1Blue) : r1Blue;
-                  const finalR1Red = hist && hist.points?.r1Red ? parseFloat(hist.points.r1Red) : r1Red;
-
-                  // Infer winner if score is available and no explicit winner string
-                  if (!finalWinner && finalR1Blue !== undefined && finalR1Red !== undefined && !isNaN(finalR1Blue) && !isNaN(finalR1Red)) {
-                    if (finalR1Blue > finalR1Red && isValidAthlete(rawBlue)) {
+                  if (!finalWinner && r1Blue !== undefined && r1Red !== undefined && !isNaN(r1Blue) && !isNaN(r1Red)) {
+                    if (r1Blue > r1Red && isValidAthlete(rawBlue)) {
                       finalWinner = rawBlue;
                       finalWinnerClub = blueClub;
-                    } else if (finalR1Red > finalR1Blue && isValidAthlete(rawRed)) {
+                    } else if (r1Red > r1Blue && isValidAthlete(rawRed)) {
                       finalWinner = rawRed;
                       finalWinnerClub = redClub;
                     }
@@ -1256,31 +1080,30 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
                     redClub: redClub,
                     winner: finalWinner ? finalWinner.trim() : '',
                     winnerClub: finalWinnerClub ? finalWinnerClub.trim() : '',
-                    r1Blue: finalR1Blue,
-                    r1Red: finalR1Red
+                    r1Blue,
+                    r1Red
                   };
 
-                  const existingIdx = combinedMatches.findIndex(m => 
+                  const existingIdx = parsedSheetMatches.findIndex(m => 
                     m.category.trim().toLowerCase() === rawCat.toLowerCase() && 
                     isBoutMatch(m.matchNoStr, matchNoStr)
                   );
 
                   if (existingIdx !== -1) {
-                    // Update existing match with any richer sheet/history data
-                    combinedMatches[existingIdx] = {
-                      ...combinedMatches[existingIdx],
-                      date: matchDate || combinedMatches[existingIdx].date,
-                      blueName: rawBlue || combinedMatches[existingIdx].blueName,
-                      blueClub: blueClub || combinedMatches[existingIdx].blueClub,
-                      redName: rawRed || combinedMatches[existingIdx].redName,
-                      redClub: redClub || combinedMatches[existingIdx].redClub,
-                      winner: finalWinner || combinedMatches[existingIdx].winner,
-                      winnerClub: finalWinnerClub || combinedMatches[existingIdx].winnerClub,
-                      r1Blue: finalR1Blue !== undefined ? finalR1Blue : combinedMatches[existingIdx].r1Blue,
-                      r1Red: finalR1Red !== undefined ? finalR1Red : combinedMatches[existingIdx].r1Red
+                    parsedSheetMatches[existingIdx] = {
+                      ...parsedSheetMatches[existingIdx],
+                      date: matchDate || parsedSheetMatches[existingIdx].date,
+                      blueName: rawBlue || parsedSheetMatches[existingIdx].blueName,
+                      blueClub: blueClub || parsedSheetMatches[existingIdx].blueClub,
+                      redName: rawRed || parsedSheetMatches[existingIdx].redName,
+                      redClub: redClub || parsedSheetMatches[existingIdx].redClub,
+                      winner: finalWinner || parsedSheetMatches[existingIdx].winner,
+                      winnerClub: finalWinnerClub || parsedSheetMatches[existingIdx].winnerClub,
+                      r1Blue: r1Blue !== undefined ? r1Blue : parsedSheetMatches[existingIdx].r1Blue,
+                      r1Red: r1Red !== undefined ? r1Red : parsedSheetMatches[existingIdx].r1Red
                     };
                   } else {
-                    combinedMatches.push(combinedItem);
+                    parsedSheetMatches.push(combinedItem);
                   }
                 }
                 resolve();
@@ -1297,47 +1120,227 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
         }
       }
 
-      // Final real-time sweep over all matches to retrieve any updated winners from matchHistory
-      combinedMatches = combinedMatches.map(m => {
-        const hist = (matchHistory || []).find(h => 
-          isBoutMatch(h.bout, m.matchNoStr) && (
-            !h.eventId || !currentEventId || h.eventId === currentEventId ||
-            (events.find(e => e.id === h.eventId)?.name.toLowerCase() === m.event.toLowerCase())
-          )
-        );
-        return {
-          ...m,
-          winner: (hist && hist.winner) ? hist.winner : m.winner,
-          winnerClub: (hist && hist.winnerClub) ? hist.winnerClub : m.winnerClub,
-          r1Blue: hist && hist.points?.r1Blue ? parseFloat(hist.points.r1Blue) : m.r1Blue,
-          r1Red: hist && hist.points?.r1Red ? parseFloat(hist.points.r1Red) : m.r1Red
-        };
-      });
-
-      setMatches(combinedMatches);
-
-      // Auto-adjust discipline tab if there are 0 matches in current discipline but matches exist in the other
-      const hasKyorugi = combinedMatches.some(m => !isPoomsaeCategory(m.category));
-      const hasPoomsae = combinedMatches.some(m => isPoomsaeCategory(m.category));
-      if (!hasKyorugi && hasPoomsae) {
-        setDiscipline('poomsae');
-      } else if (hasKyorugi && !hasPoomsae) {
-        setDiscipline('kyorugi');
-      }
-
-      if (combinedMatches.length === 0) {
-        setError("No matches parsed successfully. Please check the sheet structures or upload brackets using the AI Bracket Setup.");
-      }
+      setRawSheetMatches(parsedSheetMatches);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error occurred");
     } finally {
       setIsLoading(false);
+      isFetchingRef.current = false;
     }
   };
 
+  // Only trigger network Google Sheets fetch on initial load or when currentEventId / includeAllEvents changes
   useEffect(() => {
     fetchMatches();
-  }, [currentEventId, includeAllEvents, matchHistory, backupData, rings, boutQueue]);
+  }, [currentEventId, includeAllEvents]);
+
+  // Dynamically compute and memoize all tournament matches from local and remote sources without network polling
+  const matches = useMemo(() => {
+    let combinedMatches: RawMatch[] = [];
+
+    // 1. Try to load matches from local bracket record / backupData in the app first
+    let effectiveBackup: Record<string, { mappings: any[]; matches: any[] }> = { ...(backupData || {}) };
+    if (Object.keys(effectiveBackup).length === 0) {
+      try {
+        const savedBackup = localStorage.getItem('tkd_backup_data_v3');
+        if (savedBackup) {
+          effectiveBackup = JSON.parse(savedBackup);
+        }
+      } catch (_) {}
+    }
+
+    if (Object.keys(effectiveBackup).length > 0) {
+      const targetIds = includeAllEvents 
+        ? events.map(e => e.id)
+        : (currentEventId ? [currentEventId] : []);
+        
+      targetIds.forEach(evId => {
+        const evObj = events.find(e => e.id === evId);
+        const evName = evObj?.name || 'Tournament Event';
+        const evDate = evObj?.eventDate || '';
+
+        Object.keys(effectiveBackup).forEach(key => {
+          if (key.startsWith(`${evId}_`)) {
+            const dataRing = effectiveBackup[key];
+            if (dataRing && Array.isArray(dataRing.matches)) {
+              dataRing.matches.forEach((m: any) => {
+                if (!m.category || m.category === 'SKIPPED' || m.category === '-') return;
+
+                const hist = (matchHistory || []).find(h => 
+                  h.eventId === evId && 
+                  isBoutMatch(h.bout, m.bout)
+                );
+                const winnerName = (hist && hist.winner) ? hist.winner : (m.winner || '');
+                const winnerClubName = (hist && hist.winnerClub) ? hist.winnerClub : (m.winnerClub || '');
+                
+                const exists = combinedMatches.some(ex => 
+                  ex.category.trim().toLowerCase() === m.category.trim().toLowerCase() && 
+                  isBoutMatch(ex.matchNoStr, m.bout)
+                );
+                
+                if (!exists) {
+                  combinedMatches.push({
+                    date: evDate,
+                    event: evName,
+                    category: m.category,
+                    matchNoStr: m.bout.toString(),
+                    matchNo: getBoutNumber(m.bout.toString()),
+                    blueName: m.blue_name || '',
+                    blueClub: m.blue_club || '',
+                    redName: m.red_name || '',
+                    redClub: m.red_club || '',
+                    winner: winnerName,
+                    winnerClub: winnerClubName,
+                    r1Blue: hist && hist.points?.r1Blue ? parseFloat(hist.points.r1Blue) : (m.points?.r1Blue ? parseFloat(m.points.r1Blue) : undefined),
+                    r1Red: hist && hist.points?.r1Red ? parseFloat(hist.points.r1Red) : (m.points?.r1Red ? parseFloat(m.points.r1Red) : undefined)
+                  });
+                }
+              });
+            }
+          }
+        });
+      });
+    }
+
+    // 2. Also check active rings and boutQueue
+    if (rings && rings.length > 0) {
+      rings.forEach(ring => {
+        const checkBout = (b: MatchData | null) => {
+          if (!b || !b.category || b.category === 'SKIPPED' || b.category === '-') return;
+          if (!includeAllEvents && currentEventId && b.eventId && b.eventId !== currentEventId) return;
+          const evObj = events.find(e => e.id === (b.eventId || currentEventId));
+          const evName = evObj?.name || 'Tournament Event';
+          const evDate = evObj?.eventDate || '';
+          const hist = (matchHistory || []).find(h => 
+            (h.eventId === (b.eventId || currentEventId)) && isBoutMatch(h.bout, b.bout)
+          );
+          const winnerName = (hist && hist.winner) ? hist.winner : '';
+          const winnerClub = (hist && hist.winnerClub) ? hist.winnerClub : '';
+          const exists = combinedMatches.some(ex => 
+            ex.category.trim().toLowerCase() === b.category.trim().toLowerCase() && 
+            isBoutMatch(ex.matchNoStr, b.bout)
+          );
+          if (!exists) {
+            combinedMatches.push({
+              date: evDate,
+              event: evName,
+              category: b.category,
+              matchNoStr: b.bout.toString(),
+              matchNo: getBoutNumber(b.bout.toString()),
+              blueName: b.blue_name || '',
+              blueClub: b.blue_club || '',
+              redName: b.red_name || '',
+              redClub: b.red_club || '',
+              winner: winnerName,
+              winnerClub: winnerClub,
+              r1Blue: hist && hist.points?.r1Blue ? parseFloat(hist.points.r1Blue) : (b.points?.r1Blue ? parseFloat(b.points.r1Blue) : undefined),
+              r1Red: hist && hist.points?.r1Red ? parseFloat(hist.points.r1Red) : (b.points?.r1Red ? parseFloat(b.points.r1Red) : undefined)
+            });
+          }
+        };
+        checkBout(ring.currentBout);
+        checkBout(ring.onDeck);
+        checkBout(ring.inTheHole);
+        if (Array.isArray(ring.suspendedBouts)) {
+          ring.suspendedBouts.forEach(checkBout);
+        }
+      });
+    }
+
+    if (boutQueue && boutQueue.length > 0) {
+      boutQueue.forEach(item => {
+        const b = item.data;
+        if (!b || !b.category || b.category === 'SKIPPED' || b.category === '-') return;
+        if (!includeAllEvents && currentEventId && b.eventId && b.eventId !== currentEventId) return;
+        const evObj = events.find(e => e.id === (b.eventId || currentEventId));
+        const evName = evObj?.name || 'Tournament Event';
+        const evDate = evObj?.eventDate || '';
+        const hist = (matchHistory || []).find(h => 
+          (h.eventId === (b.eventId || currentEventId)) && isBoutMatch(h.bout, b.bout)
+        );
+        const winnerName = (hist && hist.winner) ? hist.winner : '';
+        const winnerClub = (hist && hist.winnerClub) ? hist.winnerClub : '';
+        const exists = combinedMatches.some(ex => 
+          ex.category.trim().toLowerCase() === b.category.trim().toLowerCase() && 
+          isBoutMatch(ex.matchNoStr, b.bout)
+        );
+        if (!exists) {
+          combinedMatches.push({
+            date: evDate,
+            event: evName,
+            category: b.category,
+            matchNoStr: b.bout.toString(),
+            matchNo: getBoutNumber(b.bout.toString()),
+            blueName: b.blue_name || '',
+            blueClub: b.blue_club || '',
+            redName: b.red_name || '',
+            redClub: b.red_club || '',
+            winner: winnerName,
+            winnerClub: winnerClub,
+            r1Blue: hist && hist.points?.r1Blue ? parseFloat(hist.points.r1Blue) : (b.points?.r1Blue ? parseFloat(b.points.r1Blue) : undefined),
+            r1Red: hist && hist.points?.r1Red ? parseFloat(hist.points.r1Red) : (b.points?.r1Red ? parseFloat(b.points.r1Red) : undefined)
+          });
+        }
+      });
+    }
+
+    // 3. Integrate rawSheetMatches
+    rawSheetMatches.forEach(sheetItem => {
+      const existingIdx = combinedMatches.findIndex(m => 
+        m.category.trim().toLowerCase() === sheetItem.category.trim().toLowerCase() && 
+        isBoutMatch(m.matchNoStr, sheetItem.matchNoStr)
+      );
+
+      if (existingIdx !== -1) {
+        combinedMatches[existingIdx] = {
+          ...combinedMatches[existingIdx],
+          date: sheetItem.date || combinedMatches[existingIdx].date,
+          blueName: sheetItem.blueName || combinedMatches[existingIdx].blueName,
+          blueClub: sheetItem.blueClub || combinedMatches[existingIdx].blueClub,
+          redName: sheetItem.redName || combinedMatches[existingIdx].redName,
+          redClub: sheetItem.redClub || combinedMatches[existingIdx].redClub,
+          winner: sheetItem.winner || combinedMatches[existingIdx].winner,
+          winnerClub: sheetItem.winnerClub || combinedMatches[existingIdx].winnerClub,
+          r1Blue: sheetItem.r1Blue !== undefined ? sheetItem.r1Blue : combinedMatches[existingIdx].r1Blue,
+          r1Red: sheetItem.r1Red !== undefined ? sheetItem.r1Red : combinedMatches[existingIdx].r1Red
+        };
+      } else {
+        combinedMatches.push(sheetItem);
+      }
+    });
+
+    // 4. Final real-time sweep over all matches to retrieve any updated winners from matchHistory
+    combinedMatches = combinedMatches.map(m => {
+      const hist = (matchHistory || []).find(h => 
+        isBoutMatch(h.bout, m.matchNoStr) && (
+          !h.eventId || !currentEventId || h.eventId === currentEventId ||
+          (events.find(e => e.id === h.eventId)?.name.toLowerCase() === m.event.toLowerCase())
+        )
+      );
+      return {
+        ...m,
+        winner: (hist && hist.winner) ? hist.winner : m.winner,
+        winnerClub: (hist && hist.winnerClub) ? hist.winnerClub : m.winnerClub,
+        r1Blue: hist && hist.points?.r1Blue ? parseFloat(hist.points.r1Blue) : m.r1Blue,
+        r1Red: hist && hist.points?.r1Red ? parseFloat(hist.points.r1Red) : m.r1Red
+      };
+    });
+
+    return combinedMatches;
+  }, [rawSheetMatches, backupData, rings, boutQueue, matchHistory, currentEventId, includeAllEvents, events]);
+
+  // Auto-adjust discipline tab once when matches are loaded
+  useEffect(() => {
+    if (matches.length > 0) {
+      const hasKyorugi = matches.some(m => !isPoomsaeCategory(m.category));
+      const hasPoomsae = matches.some(m => isPoomsaeCategory(m.category));
+      if (!hasKyorugi && hasPoomsae && discipline !== 'poomsae') {
+        setDiscipline('poomsae');
+      } else if (hasKyorugi && !hasPoomsae && discipline !== 'kyorugi') {
+        setDiscipline('kyorugi');
+      }
+    }
+  }, [matches, discipline]);
 
   const kyorugiMatches = useMemo(() => {
     return matches.filter(m => !isPoomsaeCategory(m.category));
