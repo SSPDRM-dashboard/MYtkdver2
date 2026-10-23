@@ -1,8 +1,32 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { EventData, MatchHistoryItem } from '../types';
-import { Download, RefreshCw, Trophy, Medal, Building2, Search, Upload, Trash2, FileSpreadsheet, X, Plus, Swords, Sparkles, Crown, Award, Filter, User, Edit2, RotateCcw, Check } from 'lucide-react';
+import { EventData, MatchHistoryItem, RingStatus, MatchData } from '../types';
+import { db } from '../firebase';
+import { collection, query, where, getDocs } from 'firebase/firestore';
+import { Download, RefreshCw, Trophy, Medal, Building2, Search, Upload, Trash2, FileSpreadsheet, X, Plus, Swords, Sparkles, Crown, Award, Filter, User, Edit2, RotateCcw, Check, Users, UserCheck, ChevronDown, ChevronUp, ChevronRight, Printer, ArrowUpDown, Shield } from 'lucide-react';
 import Papa from 'papaparse';
 import { getBoutNumber, isBoutMatch, cn, isPoomsaeCategory, isPlayoffBout } from '../lib/utils';
+
+export interface PlayerRosterEntry {
+  name: string;
+  normalizedName: string;
+  club: string;
+  categories: string[];
+  disciplines: ('Kyorugi' | 'Poomsae')[];
+  divisions: string[];
+  matchCount: number;
+  bouts: string[];
+}
+
+export interface ClubPlayerSummary {
+  club: string;
+  totalUniquePlayers: number;
+  totalEntries: number;
+  kyorugiPlayersCount: number;
+  poomsaePlayersCount: number;
+  bothDisciplinesCount: number;
+  divisionsBreakdown: Record<string, number>;
+  players: PlayerRosterEntry[];
+}
 
 interface EventReportProps {
   currentEventId: string | null;
@@ -10,9 +34,13 @@ interface EventReportProps {
   matchHistory?: MatchHistoryItem[];
   backupData?: Record<string, { mappings: any[], matches: any[] }>;
   isAdmin?: boolean;
+  rings?: RingStatus[];
+  boutQueue?: { id: string; data: MatchData }[];
+  athletes?: any[];
 }
 
 interface RawMatch {
+  date?: string;
   event: string;
   category: string;
   matchNoStr: string;
@@ -22,6 +50,7 @@ interface RawMatch {
   redName: string;
   redClub: string;
   winner: string;
+  winnerClub?: string;
   r1Blue?: number;
   r1Red?: number;
 }
@@ -75,11 +104,13 @@ export function isValidAthlete(name?: string | null): boolean {
 export function getCategoryDivision(category?: string | null): string {
   if (!category) return 'Other';
   const cat = category.toUpperCase().trim();
-  if (cat.includes('SUPER CADET') || cat.includes('SUPER-CADET') || cat.includes('SUPER_CADET')) return 'Super Cadet';
+  if (cat.includes('SUPER CADET') || cat.includes('SUPER-CADET') || cat.includes('SUPER_CADET') ||
+      cat.includes('U6') || cat.includes('U8') || cat.includes('U10') || cat.includes('U11') || cat.includes('U12') ||
+      cat.includes('YEARS OLD') || cat.includes('YEARS-OLD') || cat.includes('CHILDREN')) return 'Super Cadet';
   if (cat.includes('SUPER JUNIOR') || cat.includes('SUPER-JUNIOR') || cat.includes('SUPER_JUNIOR')) return 'Super Junior';
   if (cat.includes('CADET') || cat.includes('12 - 14') || cat.includes('12-14') || cat.includes('BELOW 33KG')) return 'Cadet';
   if (cat.includes('JUNIOR') || cat.includes('15 - 17') || cat.includes('15-17')) return 'Junior';
-  if (cat.includes('SENIOR') || cat.includes('OPEN') || cat.includes('18+') || cat.includes('18 - 35')) return 'Senior';
+  if (cat.includes('SENIOR') || cat.includes('OPEN') || cat.includes('18+') || cat.includes('18 - 35') || cat.includes('16-35') || cat.includes('16 - 35')) return 'Senior';
   if (cat.includes('NOVICE')) return 'Novice';
   if (cat.includes('VETERAN') || cat.includes('MASTER') || cat.includes('35+')) return 'Master / Veteran';
   return 'Other';
@@ -94,6 +125,20 @@ export function cleanAthleteName(name?: string | null): string {
     .replace(/[^a-z0-9]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+export function isBracketPlaceholder(name?: string | null): boolean {
+  if (!name) return true;
+  const trimmed = name.trim();
+  if (!trimmed) return true;
+  const lower = trimmed.toLowerCase();
+  if (['bye', '---', '--', '-', 'tbd', 'tba', 'none', 'n/a', 'na', 'null', 'undefined', 'no competitor', 'walkover', 'w/o', 'wo', 'winner blue', 'winner red', 'completed', 'unknown'].includes(lower)) {
+    return true;
+  }
+  if (/^(winner|loser|w|w\/o)\s*(of|\/o)?\s*(bout|match)?\s*[a-z0-9_-]+/i.test(trimmed)) return true;
+  if (/^(?:bout|match)\s*[a-z0-9_-]+$/i.test(trimmed)) return true;
+  if (/^[\[\(][a-z0-9_-]+[\]\)]$/i.test(trimmed)) return true;
+  return false;
 }
 
 export function namesMatch(a?: string | null, b?: string | null): boolean {
@@ -162,7 +207,7 @@ export function getMatchParticipants(m: RawMatch): {
   if (isBlueWin && !isRedWin) {
     return {
       winnerName: m.blueName,
-      winnerClub: m.blueClub,
+      winnerClub: m.blueClub || m.winnerClub || '',
       loserName: isValidAthlete(m.redName) ? m.redName : '',
       loserClub: isValidAthlete(m.redName) ? m.redClub : '',
       isCompleted: true
@@ -170,7 +215,7 @@ export function getMatchParticipants(m: RawMatch): {
   } else if (isRedWin && !isBlueWin) {
     return {
       winnerName: m.redName,
-      winnerClub: m.redClub,
+      winnerClub: m.redClub || m.winnerClub || '',
       loserName: isValidAthlete(m.blueName) ? m.blueName : '',
       loserClub: isValidAthlete(m.blueName) ? m.blueClub : '',
       isCompleted: true
@@ -179,7 +224,7 @@ export function getMatchParticipants(m: RawMatch): {
     if (namesMatch(winnerRaw, m.blueName)) {
       return {
         winnerName: m.blueName,
-        winnerClub: m.blueClub,
+        winnerClub: m.blueClub || m.winnerClub || '',
         loserName: isValidAthlete(m.redName) ? m.redName : '',
         loserClub: isValidAthlete(m.redName) ? m.redClub : '',
         isCompleted: true
@@ -187,7 +232,7 @@ export function getMatchParticipants(m: RawMatch): {
     } else if (namesMatch(winnerRaw, m.redName)) {
       return {
         winnerName: m.redName,
-        winnerClub: m.redClub,
+        winnerClub: m.redClub || m.winnerClub || '',
         loserName: isValidAthlete(m.blueName) ? m.blueName : '',
         loserClub: isValidAthlete(m.blueName) ? m.blueClub : '',
         isCompleted: true
@@ -197,7 +242,7 @@ export function getMatchParticipants(m: RawMatch): {
       const isBlueLoser = m.redName && namesMatch(m.redName, winnerRaw);
       return {
         winnerName: winnerRaw,
-        winnerClub: m.blueClub || m.redClub,
+        winnerClub: (isRedLoser ? m.blueClub : (isBlueLoser ? m.redClub : m.winnerClub)) || m.winnerClub || m.blueClub || m.redClub || '',
         loserName: isRedLoser ? m.redName : (isBlueLoser ? m.blueName : (m.redName || m.blueName)),
         loserClub: isRedLoser ? m.redClub : (isBlueLoser ? m.blueClub : (m.redClub || m.blueClub)),
         isCompleted: true
@@ -577,8 +622,8 @@ function computeClubStandings(results: CategoryResult[]) {
   return standingsArr;
 }
 
-export function EventReport({ currentEventId, events, matchHistory = [], backupData = {}, isAdmin }: EventReportProps) {
-  const [activeTab, setActiveTab] = useState<'winners' | 'by-rank' | 'summary' | 'total-overall'>('winners');
+export function EventReport({ currentEventId, events, matchHistory = [], backupData = {}, isAdmin, rings = [], boutQueue = [], athletes = [] }: EventReportProps) {
+  const [activeTab, setActiveTab] = useState<'winners' | 'by-rank' | 'summary' | 'total-overall' | 'players'>('winners');
   const [discipline, setDiscipline] = useState<'kyorugi' | 'poomsae'>('kyorugi');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -587,6 +632,14 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
   const [searchCriteria, setSearchCriteria] = useState<'all' | 'name' | 'club' | 'category'>('all');
   // Category division filter: 'all' or specific division like 'Cadet', 'Junior', 'Senior', 'Super Cadet'
   const [selectedDivision, setSelectedDivision] = useState<string>('all');
+  
+  // Player Summary specific state
+  const [playerSearchQuery, setPlayerSearchQuery] = useState('');
+  const [playerDisciplineFilter, setPlayerDisciplineFilter] = useState<'all' | 'kyorugi' | 'poomsae'>('all');
+  const [playerDivisionFilter, setPlayerDivisionFilter] = useState<string>('all');
+  const [playerSortBy, setPlayerSortBy] = useState<'players-desc' | 'players-asc' | 'entries-desc' | 'name-asc' | 'name-desc'>('players-desc');
+  const [expandedClubs, setExpandedClubs] = useState<Record<string, boolean>>({});
+  const [selectedClubModal, setSelectedClubModal] = useState<ClubPlayerSummary | null>(null);
   
   // Option A (Joint 3rd Place) vs Option B (3rd Place Playoff)
   const [placementOption, setPlacementOption] = useState<'a' | 'b'>('b');
@@ -872,41 +925,83 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
     try {
       let combinedMatches: RawMatch[] = [];
 
+      const targetEvents = includeAllEvents 
+        ? events 
+        : events.filter(e => e.id === currentEventId);
+
       // 1. Try to load matches from local bracket record / backupData in the app first
-      if (backupData && Object.keys(backupData).length > 0) {
+      let effectiveBackup: Record<string, { mappings: any[]; matches: any[] }> = { ...(backupData || {}) };
+      if (Object.keys(effectiveBackup).length === 0) {
+        try {
+          const savedBackup = localStorage.getItem('tkd_backup_data_v3');
+          if (savedBackup) {
+            effectiveBackup = JSON.parse(savedBackup);
+          }
+        } catch (_) {}
+      }
+
+      // If still empty and currentEventId is set, check Firestore backup_data collection
+      if (Object.keys(effectiveBackup).length === 0 && currentEventId) {
+        try {
+          const q = query(collection(db, 'backup_data'), where('eventId', '==', currentEventId));
+          const snap = await getDocs(q);
+          if (!snap.empty) {
+            snap.docs.forEach(docSnap => {
+              const d = docSnap.data();
+              const groupKey = `${currentEventId}_${d.ringNum || docSnap.id}`;
+              effectiveBackup[groupKey] = {
+                mappings: d.mappings || [],
+                matches: d.matches || []
+              };
+            });
+          }
+        } catch (err) {
+          console.warn("Could not query Firestore backup_data fallback:", err);
+        }
+      }
+
+      if (Object.keys(effectiveBackup).length > 0) {
         const targetIds = includeAllEvents 
           ? events.map(e => e.id)
           : (currentEventId ? [currentEventId] : []);
           
         targetIds.forEach(evId => {
-          const evName = events.find(e => e.id === evId)?.name || '';
-          Object.keys(backupData).forEach(key => {
+          const evObj = events.find(e => e.id === evId);
+          const evName = evObj?.name || 'Tournament Event';
+          const evDate = evObj?.eventDate || '';
+
+          Object.keys(effectiveBackup).forEach(key => {
             if (key.startsWith(`${evId}_`)) {
-              const dataRing = backupData[key];
+              const dataRing = effectiveBackup[key];
               if (dataRing && Array.isArray(dataRing.matches)) {
-                dataRing.matches.forEach(m => {
+                dataRing.matches.forEach((m: any) => {
+                  if (!m.category || m.category === 'SKIPPED' || m.category === '-') return;
+
                   const hist = (matchHistory || []).find(h => 
                     h.eventId === evId && 
                     isBoutMatch(h.bout, m.bout)
                   );
                   const winnerName = (hist && hist.winner) ? hist.winner : (m.winner || '');
+                  const winnerClubName = (hist && hist.winnerClub) ? hist.winnerClub : (m.winnerClub || '');
                   
                   const exists = combinedMatches.some(ex => 
-                    ex.category === m.category && 
+                    ex.category.trim().toLowerCase() === m.category.trim().toLowerCase() && 
                     isBoutMatch(ex.matchNoStr, m.bout)
                   );
                   
                   if (!exists) {
                     combinedMatches.push({
+                      date: evDate,
                       event: evName,
                       category: m.category,
                       matchNoStr: m.bout.toString(),
                       matchNo: getBoutNumber(m.bout.toString()),
-                      blueName: m.blue_name,
-                      blueClub: m.blue_club,
-                      redName: m.red_name,
-                      redClub: m.red_club,
+                      blueName: m.blue_name || '',
+                      blueClub: m.blue_club || '',
+                      redName: m.red_name || '',
+                      redClub: m.red_club || '',
                       winner: winnerName,
+                      winnerClub: winnerClubName,
                       r1Blue: hist && hist.points?.r1Blue ? parseFloat(hist.points.r1Blue) : (m.points?.r1Blue ? parseFloat(m.points.r1Blue) : undefined),
                       r1Red: hist && hist.points?.r1Red ? parseFloat(hist.points.r1Red) : (m.points?.r1Red ? parseFloat(m.points.r1Red) : undefined)
                     });
@@ -918,127 +1013,320 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
         });
       }
 
-      // 2. If no matches were loaded from internal bracket records, fall back to Google Sheets
-      if (combinedMatches.length === 0) {
-        const getValidUrl = (e: EventData) => {
-          const defaultUrl = 'https://docs.google.com/spreadsheets/d/14TrlxR_rk9S7WmdanXGLlE4Y-ry9TqY6_B6HYA0Uuus/edit?usp=sharing';
-          if (e.winnerSheetUrl && e.winnerSheetUrl.includes('docs.google.com/spreadsheets')) return e.winnerSheetUrl;
-          if (e.sheetUrl && e.sheetUrl.includes('docs.google.com/spreadsheets')) return e.sheetUrl;
-          return defaultUrl;
-        };
-
-        const targetEvents = includeAllEvents 
-          ? events.filter(e => getValidUrl(e) !== null)
-          : events.filter(e => e.id === currentEventId && getValidUrl(e) !== null);
-
-        if (targetEvents.length > 0) {
-          for (const event of targetEvents) {
-            let activeUrl = getValidUrl(event)!;
-            if (!activeUrl.includes('/export?')) {
-              activeUrl = activeUrl.replace(/\/edit.*$/, '') + '/export?format=csv';
-            }
-
-            const response = await fetch(activeUrl);
-            if (!response.ok) {
-               console.warn(`Failed to fetch data for event: ${event.name}`);
-               continue; // Skip if one fails, to at least get the others
-            }
-            const csvText = await response.text();
-            
-            await new Promise<void>((resolve) => {
-              Papa.parse(csvText, {
-                complete: (result) => {
-                  const rows = result.data as string[][];
-                  if (rows.length < 2) {
-                    resolve();
-                    return;
-                  }
-                  
-                  for (let i = 1; i < rows.length; i++) {
-                    const row = rows[i];
-                    if (row.length >= 10 && row[2] && row[3]) { 
-                      const sheetEventName = row[1] || '';
-                      if (sheetEventName.trim().toLowerCase() !== event.name.trim().toLowerCase()) {
-                         continue; 
-                      }
-
-                      const matchNoStr = row[3] || '';
-                      const winner = row[9] || '';
-                      const category = row[4] || '';
-                      const blueName = row[5] || '';
-                      const blueClub = row[6] || '';
-                      const redName = row[7] || '';
-                      const redClub = row[8] || '';
-                      const r1Blue = row.length > 10 && row[10] ? parseFloat(row[10]) : undefined;
-                      const r1Red = row.length > 11 && row[11] ? parseFloat(row[11]) : undefined;
-
-                      // Override winner if completed in matchHistory local app state
-                      const hist = (matchHistory || []).find(h => 
-                        h.eventId === event.id && 
-                        isBoutMatch(h.bout, matchNoStr)
-                      );
-                      const winnerName = hist ? hist.winner : winner;
-                      const finalR1Blue = hist && hist.points?.r1Blue ? parseFloat(hist.points.r1Blue) : r1Blue;
-                      const finalR1Red = hist && hist.points?.r1Red ? parseFloat(hist.points.r1Red) : r1Red;
-
-                      const combinedItem = {
-                        event: sheetEventName,
-                        category,
-                        matchNoStr,
-                        matchNo: getBoutNumber(matchNoStr),
-                        blueName: blueName.trim(),
-                        blueClub: blueClub.trim(),
-                        redName: redName.trim(),
-                        redClub: redClub.trim(),
-                        winner: winnerName.trim(),
-                        r1Blue: finalR1Blue,
-                        r1Red: finalR1Red
-                      };
-
-                      const existingIdx = combinedMatches.findIndex(m => 
-                        m.event.trim().toLowerCase() === sheetEventName.trim().toLowerCase() && 
-                        isBoutMatch(m.matchNoStr, matchNoStr)
-                      );
-                      if (existingIdx !== -1) {
-                        combinedMatches[existingIdx] = combinedItem;
-                      } else {
-                        combinedMatches.push(combinedItem);
-                      }
-                    }
-                  }
-                  resolve();
-                },
-                error: (err) => {
-                  console.warn(`Parse error on event ${event.name}: ${err.message}`);
-                  resolve();
-                },
-                skipEmptyLines: true
+      // 2. Also check active rings and boutQueue
+      if (rings && rings.length > 0) {
+        rings.forEach(ring => {
+          const checkBout = (b: MatchData | null) => {
+            if (!b || !b.category || b.category === 'SKIPPED' || b.category === '-') return;
+            if (!includeAllEvents && currentEventId && b.eventId && b.eventId !== currentEventId) return;
+            const evObj = events.find(e => e.id === (b.eventId || currentEventId));
+            const evName = evObj?.name || 'Tournament Event';
+            const evDate = evObj?.eventDate || '';
+            const hist = (matchHistory || []).find(h => 
+              (h.eventId === (b.eventId || currentEventId)) && isBoutMatch(h.bout, b.bout)
+            );
+            const winnerName = (hist && hist.winner) ? hist.winner : '';
+            const winnerClub = (hist && hist.winnerClub) ? hist.winnerClub : '';
+            const exists = combinedMatches.some(ex => 
+              ex.category.trim().toLowerCase() === b.category.trim().toLowerCase() && 
+              isBoutMatch(ex.matchNoStr, b.bout)
+            );
+            if (!exists) {
+              combinedMatches.push({
+                date: evDate,
+                event: evName,
+                category: b.category,
+                matchNoStr: b.bout.toString(),
+                matchNo: getBoutNumber(b.bout.toString()),
+                blueName: b.blue_name || '',
+                blueClub: b.blue_club || '',
+                redName: b.red_name || '',
+                redClub: b.red_club || '',
+                winner: winnerName,
+                winnerClub: winnerClub,
+                r1Blue: hist && hist.points?.r1Blue ? parseFloat(hist.points.r1Blue) : (b.points?.r1Blue ? parseFloat(b.points.r1Blue) : undefined),
+                r1Red: hist && hist.points?.r1Red ? parseFloat(hist.points.r1Red) : (b.points?.r1Red ? parseFloat(b.points.r1Red) : undefined)
               });
-            });
-          }
-        }
-      } else {
-        // If loaded from backupData, make sure we run a real-time sweep over all matches 
-        // to retrieve any freshly loaded or updated winners from the matchHistory
-        combinedMatches = combinedMatches.map(m => {
-          const matchingEventId = events.find(e => e.name === m.event)?.id || currentEventId;
-          const hist = (matchHistory || []).find(h => 
-            h.eventId === matchingEventId && 
-            isBoutMatch(h.bout, m.matchNoStr)
-          );
-          return {
-            ...m,
-            winner: (hist && hist.winner) ? hist.winner : m.winner,
-            r1Blue: hist && hist.points?.r1Blue ? parseFloat(hist.points.r1Blue) : m.r1Blue,
-            r1Red: hist && hist.points?.r1Red ? parseFloat(hist.points.r1Red) : m.r1Red
+            }
           };
+          checkBout(ring.currentBout);
+          checkBout(ring.onDeck);
+          checkBout(ring.inTheHole);
+          if (Array.isArray(ring.suspendedBouts)) {
+            ring.suspendedBouts.forEach(checkBout);
+          }
         });
       }
 
+      if (boutQueue && boutQueue.length > 0) {
+        boutQueue.forEach(item => {
+          const b = item.data;
+          if (!b || !b.category || b.category === 'SKIPPED' || b.category === '-') return;
+          if (!includeAllEvents && currentEventId && b.eventId && b.eventId !== currentEventId) return;
+          const evObj = events.find(e => e.id === (b.eventId || currentEventId));
+          const evName = evObj?.name || 'Tournament Event';
+          const evDate = evObj?.eventDate || '';
+          const hist = (matchHistory || []).find(h => 
+            (h.eventId === (b.eventId || currentEventId)) && isBoutMatch(h.bout, b.bout)
+          );
+          const winnerName = (hist && hist.winner) ? hist.winner : '';
+          const winnerClub = (hist && hist.winnerClub) ? hist.winnerClub : '';
+          const exists = combinedMatches.some(ex => 
+            ex.category.trim().toLowerCase() === b.category.trim().toLowerCase() && 
+            isBoutMatch(ex.matchNoStr, b.bout)
+          );
+          if (!exists) {
+            combinedMatches.push({
+              date: evDate,
+              event: evName,
+              category: b.category,
+              matchNoStr: b.bout.toString(),
+              matchNo: getBoutNumber(b.bout.toString()),
+              blueName: b.blue_name || '',
+              blueClub: b.blue_club || '',
+              redName: b.red_name || '',
+              redClub: b.red_club || '',
+              winner: winnerName,
+              winnerClub: winnerClub,
+              r1Blue: hist && hist.points?.r1Blue ? parseFloat(hist.points.r1Blue) : (b.points?.r1Blue ? parseFloat(b.points.r1Blue) : undefined),
+              r1Red: hist && hist.points?.r1Red ? parseFloat(hist.points.r1Red) : (b.points?.r1Red ? parseFloat(b.points.r1Red) : undefined)
+            });
+          }
+        });
+      }
+
+      // 3. Fall back to or augment from Google Sheets
+      const getValidUrl = (e?: EventData | null) => {
+        const defaultUrl = 'https://docs.google.com/spreadsheets/d/14TrlxR_rk9S7WmdanXGLlE4Y-ry9TqY6_B6HYA0Uuus/edit?usp=sharing';
+        if (!e) return defaultUrl;
+        if (e.winnerSheetUrl && e.winnerSheetUrl.includes('docs.google.com/spreadsheets')) return e.winnerSheetUrl;
+        if (e.sheetUrl && e.sheetUrl.includes('docs.google.com/spreadsheets')) return e.sheetUrl;
+        return defaultUrl;
+      };
+
+      const eventsToFetch: EventData[] = targetEvents.length > 0
+        ? targetEvents
+        : [{
+            id: currentEventId || 'default',
+            name: 'Tournament',
+            eventDate: new Date().toISOString().split('T')[0],
+            sheetUrl: 'https://docs.google.com/spreadsheets/d/14TrlxR_rk9S7WmdanXGLlE4Y-ry9TqY6_B6HYA0Uuus/edit?usp=sharing',
+            ringQuantity: 4,
+            createdAt: new Date()
+          }];
+
+      for (const event of eventsToFetch) {
+        let activeUrl = getValidUrl(event);
+        if (!activeUrl) continue;
+        if (!activeUrl.includes('/export?')) {
+          activeUrl = activeUrl.replace(/\/edit.*$/, '') + '/export?format=csv';
+        }
+
+        try {
+          const response = await fetch(activeUrl);
+          if (!response.ok) {
+            console.warn(`Failed to fetch sheet data for event: ${event.name}`);
+            continue;
+          }
+          const csvText = await response.text();
+
+          await new Promise<void>((resolve) => {
+            Papa.parse(csvText, {
+              complete: (result) => {
+                const rows = result.data as string[][];
+                if (rows.length < 2) {
+                  resolve();
+                  return;
+                }
+
+                // Dynamic Header Resolution
+                const headerRow = rows[0].map(h => (h || '').trim());
+                const findCol = (regex: RegExp, fallback: number = -1): number => {
+                  const idx = headerRow.findIndex(h => regex.test(h));
+                  return idx !== -1 ? idx : fallback;
+                };
+
+                const dateCol = findCol(/^(?:timestamp|date|time)/i, 0);
+                const eventCol = findCol(/^event/i, 1);
+                const ringCol = findCol(/^ring/i, 2);
+                const boutCol = findCol(/^(?:bout\b|bout\s*no|bout\s*#|match\b|match\s*no)/i, 3);
+                const catCol = findCol(/^(?:category|division|class)/i, 4);
+                const blueNameCol = findCol(/^blue\s*(?:player\s*)?name|^blue$/i, 5);
+                const redNameCol = findCol(/^red\s*(?:player\s*)?name|^red$/i, 7);
+
+                // Club detection: blue club is directly after blue name or matching club
+                let blueClubCol = -1;
+                if (blueNameCol !== -1 && blueNameCol + 1 < headerRow.length && /club|team|state/i.test(headerRow[blueNameCol + 1])) {
+                  blueClubCol = blueNameCol + 1;
+                } else {
+                  blueClubCol = findCol(/^blue\s*(?:club|team)|club/i, 6);
+                }
+
+                let redClubCol = -1;
+                if (redNameCol !== -1 && redNameCol + 1 < headerRow.length && /club|team|state/i.test(headerRow[redNameCol + 1])) {
+                  redClubCol = redNameCol + 1;
+                } else {
+                  redClubCol = headerRow.findIndex((h, idx) => idx > blueClubCol && /club|team/i.test(h));
+                  if (redClubCol === -1) redClubCol = 8;
+                }
+
+                // Winner and Winner Club (strictly distinguishing between athlete name and club)
+                const winnerCol = headerRow.findIndex(h => /^winner(?:\s*name)?$/i.test(h) && !/club/i.test(h));
+                const winnerClubCol = headerRow.findIndex(h => /winner\s*club/i.test(h));
+
+                const r1BlueCol = headerRow.findIndex(h => /blue\s*\(?r1\)?/i.test(h));
+                const r1RedCol = headerRow.findIndex(h => /red\s*\(?r1\)?/i.test(h));
+
+                for (let i = 1; i < rows.length; i++) {
+                  const row = rows[i];
+                  if (!row || row.length < 3) continue;
+
+                  const rawCat = catCol !== -1 && row[catCol] ? row[catCol].trim() : '';
+                  if (!rawCat || rawCat === '-' || rawCat.toUpperCase() === 'SKIPPED') continue;
+
+                  const sheetEventName = eventCol !== -1 && row[eventCol] ? row[eventCol].trim() : '';
+                  
+                  // Multi-event isolation matching check
+                  if (!includeAllEvents && sheetEventName) {
+                    const s = sheetEventName.toLowerCase();
+                    const t = event.name.toLowerCase();
+                    const tId = event.id.toLowerCase();
+                    const isDirectMatch = s === t || s === tId || t.includes(s) || s.includes(t);
+                    
+                    if (!isDirectMatch) {
+                      // Check if sheetEventName explicitly belongs to ANOTHER configured event
+                      const isOtherEvent = events.some(other => 
+                        other.id !== event.id && (
+                          other.name.trim().toLowerCase() === s || 
+                          other.name.trim().toLowerCase().includes(s)
+                        )
+                      );
+                      if (isOtherEvent) continue;
+                    }
+                  }
+
+                  const matchNoStr = boutCol !== -1 && row[boutCol] ? row[boutCol].trim() : '';
+                  if (!matchNoStr || matchNoStr === '-' || matchNoStr.toUpperCase() === 'SKIPPED') continue;
+
+                  const rawBlue = blueNameCol !== -1 && row[blueNameCol] ? row[blueNameCol].trim() : '';
+                  const rawRed = redNameCol !== -1 && row[redNameCol] ? row[redNameCol].trim() : '';
+                  const blueClub = blueClubCol !== -1 && row[blueClubCol] ? row[blueClubCol].trim() : '';
+                  const redClub = redClubCol !== -1 && row[redClubCol] ? row[redClubCol].trim() : '';
+
+                  const parsedWinner = winnerCol !== -1 && row[winnerCol] ? row[winnerCol].trim() : '';
+                  const parsedWinnerClub = winnerClubCol !== -1 && row[winnerClubCol] ? row[winnerClubCol].trim() : '';
+
+                  const r1Blue = r1BlueCol !== -1 && row[r1BlueCol] ? parseFloat(row[r1BlueCol]) : undefined;
+                  const r1Red = r1RedCol !== -1 && row[r1RedCol] ? parseFloat(row[r1RedCol]) : undefined;
+
+                  const rawDate = dateCol !== -1 && row[dateCol] ? row[dateCol].split(',')[0].trim() : '';
+                  const matchDate = rawDate || event.eventDate || new Date().toISOString().split('T')[0];
+
+                  // Override winner from completed matchHistory if present
+                  const hist = (matchHistory || []).find(h => 
+                    (h.eventId === event.id || ((h as any).event_name && (h as any).event_name.trim().toLowerCase() === (sheetEventName || event.name).trim().toLowerCase())) && 
+                    isBoutMatch(h.bout, matchNoStr)
+                  );
+
+                  let finalWinner = hist ? hist.winner : parsedWinner;
+                  let finalWinnerClub = hist && hist.winnerClub ? hist.winnerClub : parsedWinnerClub;
+                  const finalR1Blue = hist && hist.points?.r1Blue ? parseFloat(hist.points.r1Blue) : r1Blue;
+                  const finalR1Red = hist && hist.points?.r1Red ? parseFloat(hist.points.r1Red) : r1Red;
+
+                  // Infer winner if score is available and no explicit winner string
+                  if (!finalWinner && finalR1Blue !== undefined && finalR1Red !== undefined && !isNaN(finalR1Blue) && !isNaN(finalR1Red)) {
+                    if (finalR1Blue > finalR1Red && isValidAthlete(rawBlue)) {
+                      finalWinner = rawBlue;
+                      finalWinnerClub = blueClub;
+                    } else if (finalR1Red > finalR1Blue && isValidAthlete(rawRed)) {
+                      finalWinner = rawRed;
+                      finalWinnerClub = redClub;
+                    }
+                  }
+
+                  const combinedItem: RawMatch = {
+                    date: matchDate,
+                    event: sheetEventName || event.name,
+                    category: rawCat,
+                    matchNoStr,
+                    matchNo: getBoutNumber(matchNoStr),
+                    blueName: rawBlue,
+                    blueClub: blueClub,
+                    redName: rawRed,
+                    redClub: redClub,
+                    winner: finalWinner ? finalWinner.trim() : '',
+                    winnerClub: finalWinnerClub ? finalWinnerClub.trim() : '',
+                    r1Blue: finalR1Blue,
+                    r1Red: finalR1Red
+                  };
+
+                  const existingIdx = combinedMatches.findIndex(m => 
+                    m.category.trim().toLowerCase() === rawCat.toLowerCase() && 
+                    isBoutMatch(m.matchNoStr, matchNoStr)
+                  );
+
+                  if (existingIdx !== -1) {
+                    // Update existing match with any richer sheet/history data
+                    combinedMatches[existingIdx] = {
+                      ...combinedMatches[existingIdx],
+                      date: matchDate || combinedMatches[existingIdx].date,
+                      blueName: rawBlue || combinedMatches[existingIdx].blueName,
+                      blueClub: blueClub || combinedMatches[existingIdx].blueClub,
+                      redName: rawRed || combinedMatches[existingIdx].redName,
+                      redClub: redClub || combinedMatches[existingIdx].redClub,
+                      winner: finalWinner || combinedMatches[existingIdx].winner,
+                      winnerClub: finalWinnerClub || combinedMatches[existingIdx].winnerClub,
+                      r1Blue: finalR1Blue !== undefined ? finalR1Blue : combinedMatches[existingIdx].r1Blue,
+                      r1Red: finalR1Red !== undefined ? finalR1Red : combinedMatches[existingIdx].r1Red
+                    };
+                  } else {
+                    combinedMatches.push(combinedItem);
+                  }
+                }
+                resolve();
+              },
+              error: (err) => {
+                console.warn(`CSV Parse error on event ${event.name}:`, err);
+                resolve();
+              },
+              skipEmptyLines: true
+            });
+          });
+        } catch (fetchErr) {
+          console.warn(`Fetch error for event ${event.name}:`, fetchErr);
+        }
+      }
+
+      // Final real-time sweep over all matches to retrieve any updated winners from matchHistory
+      combinedMatches = combinedMatches.map(m => {
+        const hist = (matchHistory || []).find(h => 
+          isBoutMatch(h.bout, m.matchNoStr) && (
+            !h.eventId || !currentEventId || h.eventId === currentEventId ||
+            (events.find(e => e.id === h.eventId)?.name.toLowerCase() === m.event.toLowerCase())
+          )
+        );
+        return {
+          ...m,
+          winner: (hist && hist.winner) ? hist.winner : m.winner,
+          winnerClub: (hist && hist.winnerClub) ? hist.winnerClub : m.winnerClub,
+          r1Blue: hist && hist.points?.r1Blue ? parseFloat(hist.points.r1Blue) : m.r1Blue,
+          r1Red: hist && hist.points?.r1Red ? parseFloat(hist.points.r1Red) : m.r1Red
+        };
+      });
+
       setMatches(combinedMatches);
-      
+
+      // Auto-adjust discipline tab if there are 0 matches in current discipline but matches exist in the other
+      const hasKyorugi = combinedMatches.some(m => !isPoomsaeCategory(m.category));
+      const hasPoomsae = combinedMatches.some(m => isPoomsaeCategory(m.category));
+      if (!hasKyorugi && hasPoomsae) {
+        setDiscipline('poomsae');
+      } else if (hasKyorugi && !hasPoomsae) {
+        setDiscipline('kyorugi');
+      }
+
       if (combinedMatches.length === 0) {
-          setError("No matches parsed successfully. Please check the sheet structures or upload brackets using the AI Bracket Setup.");
+        setError("No matches parsed successfully. Please check the sheet structures or upload brackets using the AI Bracket Setup.");
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error occurred");
@@ -1049,7 +1337,7 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
 
   useEffect(() => {
     fetchMatches();
-  }, [currentEventId, includeAllEvents, matchHistory, backupData]);
+  }, [currentEventId, includeAllEvents, matchHistory, backupData, rings, boutQueue]);
 
   const kyorugiMatches = useMemo(() => {
     return matches.filter(m => !isPoomsaeCategory(m.category));
@@ -1110,6 +1398,363 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
 
     return Array.from(clubsSet).filter(Boolean).sort((a, b) => a.localeCompare(b));
   }, [matches, matchHistory, backupData, placingsOverrides]);
+
+  const currentEv = useMemo(() => events.find(e => e.id === currentEventId), [events, currentEventId]);
+
+  // Aggregate Unique Players per Club across the entire tournament
+  const {
+    clubSummaries,
+    totalUniquePlayers,
+    totalKyorugiPlayers,
+    totalPoomsaePlayers,
+    totalDualPlayers,
+    totalEntriesAllClubs,
+    allDivisionsList
+  } = useMemo(() => {
+    // 1. Build athlete -> club mapping to resolve missing clubs
+    const athleteClubMap = new Map<string, string>();
+    const registerAthleteClub = (athleteName?: string, clubName?: string) => {
+      if (!athleteName || !isValidAthlete(athleteName)) return;
+      if (isBracketPlaceholder(athleteName)) return;
+      if (!clubName || !isValidClub(clubName)) return;
+      const norm = cleanAthleteName(athleteName);
+      if (norm && !athleteClubMap.has(norm)) {
+        athleteClubMap.set(norm, clubName.trim());
+      }
+    };
+
+    // Pre-populate with registered athletes if available
+    (athletes || []).forEach((a: any) => {
+      if (a.name && a.club) registerAthleteClub(a.name, a.club);
+    });
+
+    try {
+      const savedAthletes = localStorage.getItem('tkd_athletes');
+      if (savedAthletes) {
+        JSON.parse(savedAthletes).forEach((a: any) => {
+          if (a.name && a.club) registerAthleteClub(a.name, a.club);
+        });
+      }
+    } catch {}
+
+    // Pre-populate from matchHistory and backupData
+    (matchHistory || []).forEach(h => {
+      registerAthleteClub(h.blue_name, h.blue_club);
+      registerAthleteClub(h.red_name, h.red_club);
+      if (h.winner && h.winnerClub) registerAthleteClub(h.winner, h.winnerClub);
+    });
+
+    if (backupData) {
+      Object.values(backupData).forEach(ringData => {
+        ringData.matches?.forEach((m: any) => {
+          registerAthleteClub(m.blue_name, m.blue_club);
+          registerAthleteClub(m.red_name, m.red_club);
+        });
+      });
+    }
+
+    // Populate from matches
+    matches.forEach(m => {
+      registerAthleteClub(m.blueName, m.blueClub);
+      registerAthleteClub(m.redName, m.redClub);
+      if (m.winner && m.winnerClub) registerAthleteClub(m.winner, m.winnerClub);
+    });
+
+    // 2. Track unique players per club: clubName -> Map<normPlayerName, PlayerRecord>
+    const clubMap = new Map<string, Map<string, {
+      name: string;
+      categories: Set<string>;
+      disciplines: Set<'Kyorugi' | 'Poomsae'>;
+      divisions: Set<string>;
+      bouts: Set<string>;
+    }>>();
+
+    const addParticipant = (rawName?: string, rawClub?: string, category?: string, matchBout?: string) => {
+      if (!rawName || !isValidAthlete(rawName) || isBracketPlaceholder(rawName)) return;
+      const normName = cleanAthleteName(rawName);
+      if (!normName) return;
+
+      let resolvedClub = rawClub && isValidClub(rawClub) ? rawClub.trim() : (athleteClubMap.get(normName) || '');
+      if (!resolvedClub || !isValidClub(resolvedClub)) {
+        resolvedClub = 'Unattached / Independent';
+      }
+
+      if (!clubMap.has(resolvedClub)) {
+        clubMap.set(resolvedClub, new Map());
+      }
+
+      const clubAthletes = clubMap.get(resolvedClub)!;
+      if (!clubAthletes.has(normName)) {
+        clubAthletes.set(normName, {
+          name: rawName.trim(),
+          categories: new Set(),
+          disciplines: new Set(),
+          divisions: new Set(),
+          bouts: new Set(),
+        });
+      }
+
+      const pRecord = clubAthletes.get(normName)!;
+      if (category && category.trim() && category.trim() !== '-') {
+        const cat = category.trim();
+        pRecord.categories.add(cat);
+        const isPoom = isPoomsaeCategory(cat);
+        pRecord.disciplines.add(isPoom ? 'Poomsae' : 'Kyorugi');
+        pRecord.divisions.add(getCategoryDivision(cat));
+      }
+      if (matchBout && matchBout.trim() && matchBout.trim() !== '-') {
+        pRecord.bouts.add(matchBout.trim());
+      }
+    };
+
+    // Process all matches in tournament
+    matches.forEach(m => {
+      addParticipant(m.blueName, m.blueClub, m.category, m.matchNoStr);
+      addParticipant(m.redName, m.redClub, m.category, m.matchNoStr);
+    });
+
+    // Also include pre-registered athletes if any weren't in matches yet
+    (athletes || []).forEach((a: any) => {
+      if (a.name && isValidAthlete(a.name) && !isBracketPlaceholder(a.name)) {
+        addParticipant(a.name, a.club, a.category, '');
+      }
+    });
+
+    try {
+      const savedAthletes = localStorage.getItem('tkd_athletes');
+      if (savedAthletes) {
+        JSON.parse(savedAthletes).forEach((a: any) => {
+          if (a.name && isValidAthlete(a.name) && !isBracketPlaceholder(a.name)) {
+            addParticipant(a.name, a.club, a.category, '');
+          }
+        });
+      }
+    } catch {}
+
+    // 3. Compute summaries for each club
+    const globalPlayerSet = new Set<string>();
+    const globalKyorugiPlayerSet = new Set<string>();
+    const globalPoomsaePlayerSet = new Set<string>();
+    const globalDualPlayerSet = new Set<string>();
+    const allDivisionsSet = new Set<string>();
+    let totalEntriesSum = 0;
+
+    const summaries: ClubPlayerSummary[] = [];
+
+    clubMap.forEach((athletesMap, clubName) => {
+      const roster: PlayerRosterEntry[] = [];
+      let kyorugiCount = 0;
+      let poomsaeCount = 0;
+      let bothCount = 0;
+      let clubTotalEntries = 0;
+      const divBreakdown: Record<string, number> = {};
+
+      athletesMap.forEach((data, normName) => {
+        const catArray = Array.from(data.categories);
+        const discArray = Array.from(data.disciplines);
+        const divArray = Array.from(data.divisions);
+        const boutArray = Array.from(data.bouts);
+
+        const hasKyorugi = discArray.includes('Kyorugi');
+        const hasPoomsae = discArray.includes('Poomsae');
+
+        if (hasKyorugi) kyorugiCount++;
+        if (hasPoomsae) poomsaeCount++;
+        if (hasKyorugi && hasPoomsae) {
+          bothCount++;
+          globalDualPlayerSet.add(`${clubName}___${normName}`);
+        }
+
+        const entriesCount = catArray.length > 0 ? catArray.length : 1;
+        clubTotalEntries += entriesCount;
+        totalEntriesSum += entriesCount;
+
+        divArray.forEach(div => {
+          divBreakdown[div] = (divBreakdown[div] || 0) + 1;
+          allDivisionsSet.add(div);
+        });
+
+        // Global sets for tournament metrics
+        globalPlayerSet.add(`${clubName}___${normName}`);
+        if (hasKyorugi) globalKyorugiPlayerSet.add(`${clubName}___${normName}`);
+        if (hasPoomsae) globalPoomsaePlayerSet.add(`${clubName}___${normName}`);
+
+        roster.push({
+          name: data.name,
+          normalizedName: normName,
+          club: clubName,
+          categories: catArray,
+          disciplines: discArray,
+          divisions: divArray,
+          matchCount: boutArray.length,
+          bouts: boutArray
+        });
+      });
+
+      // Sort roster alphabetically
+      roster.sort((a, b) => a.name.localeCompare(b.name));
+
+      summaries.push({
+        club: clubName,
+        totalUniquePlayers: roster.length,
+        totalEntries: clubTotalEntries,
+        kyorugiPlayersCount: kyorugiCount,
+        poomsaePlayersCount: poomsaeCount,
+        bothDisciplinesCount: bothCount,
+        divisionsBreakdown: divBreakdown,
+        players: roster
+      });
+    });
+
+    return {
+      clubSummaries: summaries,
+      totalUniquePlayers: globalPlayerSet.size,
+      totalKyorugiPlayers: globalKyorugiPlayerSet.size,
+      totalPoomsaePlayers: globalPoomsaePlayerSet.size,
+      totalDualPlayers: globalDualPlayerSet.size,
+      totalEntriesAllClubs: totalEntriesSum,
+      allDivisionsList: Array.from(allDivisionsSet).sort()
+    };
+  }, [matches, athletes, matchHistory, backupData]);
+
+  // Filtered and sorted summaries for the Player Summary table
+  const filteredAndSortedClubSummaries = useMemo(() => {
+    let result = clubSummaries.map(club => {
+      let players = club.players;
+      if (playerDisciplineFilter !== 'all') {
+        const targetDisc = playerDisciplineFilter === 'kyorugi' ? 'Kyorugi' : 'Poomsae';
+        players = players.filter(p => p.disciplines.includes(targetDisc));
+      }
+      if (playerDivisionFilter !== 'all') {
+        players = players.filter(p => p.divisions.includes(playerDivisionFilter));
+      }
+      return {
+        ...club,
+        filteredPlayers: players,
+        filteredPlayerCount: players.length
+      };
+    });
+
+    if (playerDisciplineFilter !== 'all' || playerDivisionFilter !== 'all') {
+      result = result.filter(c => c.filteredPlayerCount > 0);
+    }
+
+    if (playerSearchQuery.trim()) {
+      const q = playerSearchQuery.trim().toLowerCase();
+      result = result.filter(club => {
+        const matchClub = club.club.toLowerCase().includes(q);
+        const matchPlayer = club.filteredPlayers.some(p => p.name.toLowerCase().includes(q));
+        return matchClub || matchPlayer;
+      });
+    }
+
+    result.sort((a, b) => {
+      if (playerSortBy === 'players-desc') {
+        if (b.filteredPlayerCount !== a.filteredPlayerCount) {
+          return b.filteredPlayerCount - a.filteredPlayerCount;
+        }
+        return b.totalEntries - a.totalEntries;
+      }
+      if (playerSortBy === 'players-asc') {
+        return a.filteredPlayerCount - b.filteredPlayerCount;
+      }
+      if (playerSortBy === 'entries-desc') {
+        return b.totalEntries - a.totalEntries;
+      }
+      if (playerSortBy === 'name-asc') {
+        return a.club.localeCompare(b.club);
+      }
+      if (playerSortBy === 'name-desc') {
+        return b.club.localeCompare(a.club);
+      }
+      return 0;
+    });
+
+    return result;
+  }, [clubSummaries, playerDisciplineFilter, playerDivisionFilter, playerSearchQuery, playerSortBy]);
+
+  // Toggle club expanded state
+  const toggleClubExpanded = (clubName: string) => {
+    setExpandedClubs(prev => ({
+      ...prev,
+      [clubName]: !prev[clubName]
+    }));
+  };
+
+  const expandAllClubs = () => {
+    const next: Record<string, boolean> = {};
+    filteredAndSortedClubSummaries.forEach(c => { next[c.club] = true; });
+    setExpandedClubs(next);
+  };
+
+  const collapseAllClubs = () => {
+    setExpandedClubs({});
+  };
+
+  // CSV Exports for Player Summary
+  const downloadClubPlayerSummaryCSV = () => {
+    const csvRows = [
+      ['Rank', 'Club / State Name', 'Total Unique Players', 'Kyorugi Players', 'Poomsae Players', 'Dual Discipline Players', 'Total Category Entries', 'Divisions Breakdown']
+    ];
+
+    filteredAndSortedClubSummaries.forEach((club, index) => {
+      const divStr = Object.entries(club.divisionsBreakdown)
+        .map(([div, cnt]) => `${div}: ${cnt}`)
+        .join('; ');
+      csvRows.push([
+        (index + 1).toString(),
+        `"${club.club.replace(/"/g, '""')}"`,
+        club.filteredPlayerCount.toString(),
+        club.kyorugiPlayersCount.toString(),
+        club.poomsaePlayersCount.toString(),
+        club.bothDisciplinesCount.toString(),
+        club.totalEntries.toString(),
+        `"${divStr.replace(/"/g, '""')}"`
+      ]);
+    });
+
+    const csvContent = "data:text/csv;charset=utf-8," + csvRows.map(e => e.join(',')).join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `Tournament_Player_Summary_By_Club_${currentEv?.name ? currentEv.name.replace(/\s+/g, '_') : 'Event'}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const downloadFullRosterCSV = () => {
+    const csvRows = [
+      ['Club / State', 'Player Name', 'Disciplines', 'Categories Entered', 'Divisions', 'Total Bouts Scheduled', 'Bout Numbers']
+    ];
+
+    filteredAndSortedClubSummaries.forEach(club => {
+      club.filteredPlayers.forEach(p => {
+        csvRows.push([
+          `"${club.club.replace(/"/g, '""')}"`,
+          `"${p.name.replace(/"/g, '""')}"`,
+          `"${p.disciplines.join(', ')}"`,
+          `"${p.categories.join('; ').replace(/"/g, '""')}"`,
+          `"${p.divisions.join(', ')}"`,
+          p.matchCount.toString(),
+          `"${p.bouts.join(', ')}"`
+        ]);
+      });
+    });
+
+    const csvContent = "data:text/csv;charset=utf-8," + csvRows.map(e => e.join(',')).join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `Tournament_Athlete_Roster_By_Club_${currentEv?.name ? currentEv.name.replace(/\s+/g, '_') : 'Event'}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handlePrintSummary = () => {
+    window.print();
+  };
 
   const categoryResults = useMemo(() => {
     const rawResults = computeCategoryResults(activeMatches, placementOption);
@@ -1649,19 +2294,22 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
         <div className="flex items-center gap-2 w-full sm:w-auto">
           <button
             type="button"
-            onClick={() => setDiscipline('kyorugi')}
+            onClick={() => {
+              setDiscipline('kyorugi');
+              if (activeTab === 'players') setActiveTab('winners');
+            }}
             className={cn(
               "flex-1 sm:flex-none flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-xs font-black transition-all uppercase tracking-wider",
-              discipline === 'kyorugi'
+              discipline === 'kyorugi' && activeTab !== 'players'
                 ? "bg-blue-600 text-white shadow-md shadow-blue-500/20"
                 : "text-slate-600 hover:text-slate-900 hover:bg-white/60"
             )}
           >
-            <Swords size={16} className={discipline === 'kyorugi' ? "text-white" : "text-blue-500"} />
+            <Swords size={16} className={discipline === 'kyorugi' && activeTab !== 'players' ? "text-white" : "text-blue-500"} />
             <span>Kyorugi Report</span>
             <span className={cn(
               "px-2 py-0.5 text-xs rounded-full font-bold",
-              discipline === 'kyorugi' ? "bg-blue-700 text-white" : "bg-slate-200 text-slate-700"
+              discipline === 'kyorugi' && activeTab !== 'players' ? "bg-blue-700 text-white" : "bg-slate-200 text-slate-700"
             )}>
               {kyorugiCategoryCount}
             </span>
@@ -1669,37 +2317,66 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
 
           <button
             type="button"
-            onClick={() => setDiscipline('poomsae')}
+            onClick={() => {
+              setDiscipline('poomsae');
+              if (activeTab === 'players') setActiveTab('winners');
+            }}
             className={cn(
               "flex-1 sm:flex-none flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-xs font-black transition-all uppercase tracking-wider",
-              discipline === 'poomsae'
+              discipline === 'poomsae' && activeTab !== 'players'
                 ? "bg-amber-600 text-white shadow-md shadow-amber-500/20"
                 : "text-slate-600 hover:text-slate-900 hover:bg-white/60"
             )}
           >
-            <Sparkles size={16} className={discipline === 'poomsae' ? "text-white" : "text-amber-500"} />
+            <Sparkles size={16} className={discipline === 'poomsae' && activeTab !== 'players' ? "text-white" : "text-amber-500"} />
             <span>Poomsae Report</span>
             <span className={cn(
               "px-2 py-0.5 text-xs rounded-full font-bold",
-              discipline === 'poomsae' ? "bg-amber-700 text-white" : "bg-slate-200 text-slate-700"
+              discipline === 'poomsae' && activeTab !== 'players' ? "bg-amber-700 text-white" : "bg-slate-200 text-slate-700"
             )}>
               {poomsaeCategoryCount}
+            </span>
+          </button>
+
+          {/* BESIDE POOMSAE REPORT: PLAYER SUMMARY */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('players')}
+            className={cn(
+              "flex-1 sm:flex-none flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-xs font-black transition-all uppercase tracking-wider",
+              activeTab === 'players'
+                ? "bg-emerald-600 text-white shadow-md shadow-emerald-500/20"
+                : "text-slate-600 hover:text-slate-900 hover:bg-white/60"
+            )}
+          >
+            <Users size={16} className={activeTab === 'players' ? "text-white" : "text-emerald-500"} />
+            <span>Player Summary</span>
+            <span className={cn(
+              "px-2 py-0.5 text-xs rounded-full font-bold",
+              activeTab === 'players' ? "bg-emerald-700 text-white" : "bg-slate-200 text-slate-700"
+            )}>
+              {totalUniquePlayers}
             </span>
           </button>
         </div>
 
         <div className="text-xs font-semibold text-slate-500 px-3.5 py-1.5 bg-white/80 rounded-xl border border-slate-200/60 flex items-center gap-2">
-          <span className={cn("w-2.5 h-2.5 rounded-full animate-pulse", discipline === 'kyorugi' ? "bg-blue-500" : "bg-amber-500")} />
-          <span>Active Report: <strong className="text-slate-800 uppercase tracking-wide">{discipline === 'kyorugi' ? 'Kyorugi (Sparring)' : 'Poomsae (Pattern)'}</strong></span>
+          <span className={cn(
+            "w-2.5 h-2.5 rounded-full animate-pulse",
+            activeTab === 'players' ? "bg-emerald-500" : (discipline === 'kyorugi' ? "bg-blue-500" : "bg-amber-500")
+          )} />
+          <span>Active Report: <strong className="text-slate-800 uppercase tracking-wide">
+            {activeTab === 'players' ? 'Player Summary (Total Players by Club)' : (discipline === 'kyorugi' ? 'Kyorugi (Sparring)' : 'Poomsae (Pattern)')}
+          </strong></span>
         </div>
       </div>
 
       {/* TABS */}
-      <div className="flex gap-4 border-b border-slate-200 pb-px">
+      <div className="flex gap-2 sm:gap-4 border-b border-slate-200 pb-px overflow-x-auto">
         <button
           onClick={() => setActiveTab('winners')}
           className={cn(
-            "px-6 py-3 font-bold text-sm tracking-wide rounded-t-xl transition-all relative",
+            "px-5 py-3 font-bold text-sm tracking-wide rounded-t-xl transition-all relative shrink-0",
             activeTab === 'winners' 
               ? "text-blue-700 bg-white border border-b-0 border-slate-200" 
               : "text-slate-500 hover:text-slate-700 hover:bg-slate-50"
@@ -1711,7 +2388,7 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
         <button
           onClick={() => setActiveTab('by-rank')}
           className={cn(
-            "px-6 py-3 font-bold text-sm tracking-wide rounded-t-xl transition-all relative",
+            "px-5 py-3 font-bold text-sm tracking-wide rounded-t-xl transition-all relative shrink-0",
             activeTab === 'by-rank' 
               ? "text-blue-700 bg-white border border-b-0 border-slate-200" 
               : "text-slate-500 hover:text-slate-700 hover:bg-slate-50"
@@ -1723,7 +2400,7 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
         <button
           onClick={() => setActiveTab('summary')}
           className={cn(
-            "px-6 py-3 font-bold text-sm tracking-wide rounded-t-xl transition-all relative",
+            "px-5 py-3 font-bold text-sm tracking-wide rounded-t-xl transition-all relative shrink-0",
             activeTab === 'summary' 
               ? "text-blue-700 bg-white border border-b-0 border-slate-200" 
               : "text-slate-500 hover:text-slate-700 hover:bg-slate-50"
@@ -1735,7 +2412,7 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
         <button
           onClick={() => setActiveTab('total-overall')}
           className={cn(
-            "px-6 py-3 font-bold text-sm tracking-wide rounded-t-xl transition-all relative",
+            "px-5 py-3 font-bold text-sm tracking-wide rounded-t-xl transition-all relative shrink-0",
             activeTab === 'total-overall' 
               ? "text-blue-700 bg-white border border-b-0 border-slate-200" 
               : "text-slate-500 hover:text-slate-700 hover:bg-slate-50"
@@ -1743,6 +2420,25 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
         >
           Total Overall
           {activeTab === 'total-overall' && <div className="absolute -bottom-px left-0 right-0 h-px bg-white" />}
+        </button>
+        <button
+          onClick={() => setActiveTab('players')}
+          className={cn(
+            "px-5 py-3 font-bold text-sm tracking-wide rounded-t-xl transition-all relative shrink-0 flex items-center gap-2",
+            activeTab === 'players' 
+              ? "text-emerald-700 bg-white border border-b-0 border-slate-200" 
+              : "text-slate-500 hover:text-slate-700 hover:bg-slate-50"
+          )}
+        >
+          <Users size={16} className={activeTab === 'players' ? "text-emerald-600" : "text-slate-400"} />
+          <span>Player Summary (by Club)</span>
+          <span className={cn(
+            "px-2 py-0.5 text-xs rounded-full font-bold",
+            activeTab === 'players' ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-600"
+          )}>
+            {totalUniquePlayers}
+          </span>
+          {activeTab === 'players' && <div className="absolute -bottom-px left-0 right-0 h-px bg-white" />}
         </button>
       </div>
 
@@ -2686,7 +3382,624 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
             )}
           </div>
         )}
+
+        {activeTab === 'players' && (
+          <div className="p-6">
+            {/* Header with Title and Actions */}
+            <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-6">
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-emerald-100 text-emerald-700 rounded-2xl shadow-xs">
+                  <Users size={24} />
+                </div>
+                <div>
+                  <h2 className="text-xl font-black text-slate-800 tracking-tight flex items-center gap-2">
+                    <span>Tournament Player Summary by Club</span>
+                    <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                      {totalUniquePlayers} Athletes Registered
+                    </span>
+                  </h2>
+                  <p className="text-sm text-slate-500 mt-0.5">
+                    Aggregated total unique players and category entries per club/state across Kyorugi (Sparring) and Poomsae (Pattern).
+                  </p>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
+                <button
+                  type="button"
+                  onClick={downloadClubPlayerSummaryCSV}
+                  className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl flex items-center gap-2 text-xs transition-all shadow-sm"
+                  title="Export summary table of clubs and player counts"
+                >
+                  <Download size={15} />
+                  <span>Club Summary CSV</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={downloadFullRosterCSV}
+                  className="px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-700 font-bold rounded-xl flex items-center gap-2 text-xs transition-all border border-slate-200 shadow-2xs"
+                  title="Export complete list of all athletes with categories and bouts"
+                >
+                  <FileSpreadsheet size={15} className="text-emerald-600" />
+                  <span>Full Roster CSV</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handlePrintSummary}
+                  className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl flex items-center gap-1.5 text-xs transition-all"
+                  title="Print this report"
+                >
+                  <Printer size={15} />
+                  <span>Print</span>
+                </button>
+              </div>
+            </div>
+
+            {/* KPI STATS CARDS */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
+              <div className="bg-slate-50/80 p-3.5 rounded-2xl border border-slate-200/80">
+                <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                  <Building2 size={13} className="text-slate-400" />
+                  <span>Total Clubs</span>
+                </div>
+                <div className="text-2xl font-black text-slate-800 mt-1">
+                  {clubSummaries.length}
+                </div>
+                <div className="text-[11px] text-slate-400 mt-0.5">Participating teams</div>
+              </div>
+
+              <div className="bg-emerald-50/70 p-3.5 rounded-2xl border border-emerald-200/80">
+                <div className="text-[11px] font-bold text-emerald-700 uppercase tracking-wider flex items-center gap-1.5">
+                  <Users size={13} className="text-emerald-600" />
+                  <span>Total Players</span>
+                </div>
+                <div className="text-2xl font-black text-emerald-800 mt-1">
+                  {totalUniquePlayers}
+                </div>
+                <div className="text-[11px] text-emerald-600 font-medium mt-0.5">Unique athletes</div>
+              </div>
+
+              <div className="bg-blue-50/70 p-3.5 rounded-2xl border border-blue-200/80">
+                <div className="text-[11px] font-bold text-blue-700 uppercase tracking-wider flex items-center gap-1.5">
+                  <Swords size={13} className="text-blue-600" />
+                  <span>Kyorugi</span>
+                </div>
+                <div className="text-2xl font-black text-blue-800 mt-1">
+                  {totalKyorugiPlayers}
+                </div>
+                <div className="text-[11px] text-blue-600 font-medium mt-0.5">Sparring athletes</div>
+              </div>
+
+              <div className="bg-amber-50/70 p-3.5 rounded-2xl border border-amber-200/80">
+                <div className="text-[11px] font-bold text-amber-700 uppercase tracking-wider flex items-center gap-1.5">
+                  <Sparkles size={13} className="text-amber-600" />
+                  <span>Poomsae</span>
+                </div>
+                <div className="text-2xl font-black text-amber-800 mt-1">
+                  {totalPoomsaePlayers}
+                </div>
+                <div className="text-[11px] text-amber-600 font-medium mt-0.5">Pattern athletes</div>
+              </div>
+
+              <div className="bg-purple-50/70 p-3.5 rounded-2xl border border-purple-200/80">
+                <div className="text-[11px] font-bold text-purple-700 uppercase tracking-wider flex items-center gap-1.5">
+                  <UserCheck size={13} className="text-purple-600" />
+                  <span>Dual Discipline</span>
+                </div>
+                <div className="text-2xl font-black text-purple-800 mt-1">
+                  {totalDualPlayers}
+                </div>
+                <div className="text-[11px] text-purple-600 font-medium mt-0.5">Kyorugi + Poomsae</div>
+              </div>
+
+              <div className="bg-slate-50/80 p-3.5 rounded-2xl border border-slate-200/80">
+                <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                  <Shield size={13} className="text-slate-400" />
+                  <span>Avg Squad</span>
+                </div>
+                <div className="text-2xl font-black text-slate-800 mt-1">
+                  {clubSummaries.length > 0 ? (totalUniquePlayers / clubSummaries.length).toFixed(1) : '0'}
+                </div>
+                <div className="text-[11px] text-slate-400 mt-0.5">Athletes / club</div>
+              </div>
+            </div>
+
+            {/* FILTER AND SEARCH CONTROLS */}
+            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200/90 mb-6 space-y-3">
+              <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between">
+                {/* Search Bar */}
+                <div className="relative flex-1 max-w-md">
+                  <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    value={playerSearchQuery}
+                    onChange={(e) => setPlayerSearchQuery(e.target.value)}
+                    placeholder="Search club name or athlete name..."
+                    className="w-full pl-9 pr-8 py-2 bg-white border border-slate-200 rounded-xl text-xs font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all shadow-2xs"
+                  />
+                  {playerSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setPlayerSearchQuery('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5"
+                    >
+                      <X size={14} />
+                    </button>
+                  )}
+                </div>
+
+                {/* Quick Expand / Collapse All */}
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={expandAllClubs}
+                    className="px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 text-xs font-bold rounded-lg border border-slate-200 shadow-2xs transition-all flex items-center gap-1"
+                  >
+                    <ChevronDown size={14} />
+                    <span>Expand All Rosters</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={collapseAllClubs}
+                    className="px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 text-xs font-bold rounded-lg border border-slate-200 shadow-2xs transition-all flex items-center gap-1"
+                  >
+                    <ChevronUp size={14} />
+                    <span>Collapse All</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Second Row: Filters and Sorting */}
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-200/70">
+                {/* Discipline Filter */}
+                <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-slate-200 shadow-2xs">
+                  <button
+                    type="button"
+                    onClick={() => setPlayerDisciplineFilter('all')}
+                    className={cn(
+                      "px-3 py-1 rounded-lg text-xs font-bold transition-all",
+                      playerDisciplineFilter === 'all'
+                        ? "bg-slate-800 text-white shadow-2xs"
+                        : "text-slate-600 hover:text-slate-900"
+                    )}
+                  >
+                    All Disciplines ({totalUniquePlayers})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPlayerDisciplineFilter('kyorugi')}
+                    className={cn(
+                      "px-3 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1",
+                      playerDisciplineFilter === 'kyorugi'
+                        ? "bg-blue-600 text-white shadow-2xs"
+                        : "text-slate-600 hover:text-slate-900"
+                    )}
+                  >
+                    <Swords size={12} />
+                    <span>Kyorugi Only ({totalKyorugiPlayers})</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPlayerDisciplineFilter('poomsae')}
+                    className={cn(
+                      "px-3 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1",
+                      playerDisciplineFilter === 'poomsae'
+                        ? "bg-amber-600 text-white shadow-2xs"
+                        : "text-slate-600 hover:text-slate-900"
+                    )}
+                  >
+                    <Sparkles size={12} />
+                    <span>Poomsae Only ({totalPoomsaePlayers})</span>
+                  </button>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* Division Filter */}
+                  {allDivisionsList.length > 0 && (
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-bold text-slate-500">Division:</span>
+                      <select
+                        value={playerDivisionFilter}
+                        onChange={(e) => setPlayerDivisionFilter(e.target.value)}
+                        className="bg-white border border-slate-200 text-slate-700 font-bold text-xs rounded-xl px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 shadow-2xs"
+                      >
+                        <option value="all">All Divisions</option>
+                        {allDivisionsList.map(div => (
+                          <option key={div} value={div}>{div}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {/* Sort By Dropdown */}
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs font-bold text-slate-500 flex items-center gap-1">
+                      <ArrowUpDown size={12} />
+                      <span>Sort:</span>
+                    </span>
+                    <select
+                      value={playerSortBy}
+                      onChange={(e) => setPlayerSortBy(e.target.value as any)}
+                      className="bg-white border border-slate-200 text-slate-700 font-bold text-xs rounded-xl px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 shadow-2xs"
+                    >
+                      <option value="players-desc">Most Players First</option>
+                      <option value="players-asc">Least Players First</option>
+                      <option value="entries-desc">Most Category Entries</option>
+                      <option value="name-asc">Club Name (A to Z)</option>
+                      <option value="name-desc">Club Name (Z to A)</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* RESULTS COUNT & FILTER SUMMARY */}
+            <div className="flex items-center justify-between text-xs text-slate-500 mb-3 px-1">
+              <div>
+                Showing <strong className="text-slate-800">{filteredAndSortedClubSummaries.length}</strong> of <strong className="text-slate-800">{clubSummaries.length}</strong> clubs
+                {(playerDisciplineFilter !== 'all' || playerDivisionFilter !== 'all' || playerSearchQuery) && (
+                  <span className="ml-1 text-emerald-700 font-semibold">(filtered)</span>
+                )}
+              </div>
+              {(playerDisciplineFilter !== 'all' || playerDivisionFilter !== 'all' || playerSearchQuery) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPlayerSearchQuery('');
+                    setPlayerDisciplineFilter('all');
+                    setPlayerDivisionFilter('all');
+                  }}
+                  className="text-emerald-700 hover:text-emerald-900 font-bold hover:underline"
+                >
+                  Reset all filters
+                </button>
+              )}
+            </div>
+
+            {/* CLUBS PLAYER SUMMARY TABLE */}
+            {filteredAndSortedClubSummaries.length > 0 ? (
+              <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-2xs bg-white">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm border-collapse">
+                    <thead>
+                      <tr className="bg-slate-50/90 border-b border-slate-200 text-slate-600 font-black text-xs uppercase tracking-wider">
+                        <th className="py-3.5 px-4 w-12 text-center">#</th>
+                        <th className="py-3.5 px-4">Club / State Name</th>
+                        <th className="py-3.5 px-4 text-center">Total Players</th>
+                        <th className="py-3.5 px-4 text-center">Kyorugi</th>
+                        <th className="py-3.5 px-4 text-center">Poomsae</th>
+                        <th className="py-3.5 px-4 text-center">Dual</th>
+                        <th className="py-3.5 px-4 text-center">Entries</th>
+                        <th className="py-3.5 px-4">Divisions Breakdown</th>
+                        <th className="py-3.5 px-4 text-right">Roster</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {filteredAndSortedClubSummaries.map((club, index) => {
+                        const isExpanded = !!expandedClubs[club.club];
+                        return (
+                          <React.Fragment key={club.club}>
+                            <tr
+                              className={cn(
+                                "transition-colors cursor-pointer group",
+                                isExpanded ? "bg-emerald-50/30" : "hover:bg-slate-50/80"
+                              )}
+                              onClick={() => toggleClubExpanded(club.club)}
+                            >
+                              <td className="py-3.5 px-4 text-center font-bold text-slate-400">
+                                <span className={cn(
+                                  "inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-black",
+                                  index === 0 ? "bg-amber-100 text-amber-800" :
+                                  index === 1 ? "bg-slate-200 text-slate-800" :
+                                  index === 2 ? "bg-amber-50 text-amber-900 border border-amber-300" :
+                                  "text-slate-500"
+                                )}>
+                                  {index + 1}
+                                </span>
+                              </td>
+
+                              <td className="py-3.5 px-4">
+                                <div className="flex items-center gap-2.5">
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      toggleClubExpanded(club.club);
+                                    }}
+                                    className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 rounded-md transition-colors"
+                                  >
+                                    {isExpanded ? <ChevronDown size={16} className="text-emerald-600" /> : <ChevronRight size={16} />}
+                                  </button>
+                                  <div className="p-1.5 bg-slate-100 text-slate-600 rounded-lg group-hover:bg-emerald-100 group-hover:text-emerald-700 transition-colors">
+                                    <Building2 size={16} />
+                                  </div>
+                                  <div>
+                                    <span className="font-extrabold text-slate-900 text-sm group-hover:text-emerald-800 transition-colors">
+                                      {club.club}
+                                    </span>
+                                    <div className="text-[11px] text-slate-400">
+                                      {club.filteredPlayerCount} {club.filteredPlayerCount === 1 ? 'athlete' : 'athletes'}
+                                    </div>
+                                  </div>
+                                </div>
+                              </td>
+
+                              <td className="py-3.5 px-4 text-center">
+                                <span className="inline-flex items-center px-3 py-1 rounded-xl font-black text-sm bg-emerald-100 text-emerald-800 border border-emerald-200/80">
+                                  {club.filteredPlayerCount}
+                                </span>
+                              </td>
+
+                              <td className="py-3.5 px-4 text-center">
+                                <span className={cn(
+                                  "inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg text-xs font-bold",
+                                  club.kyorugiPlayersCount > 0 ? "bg-blue-50 text-blue-700 border border-blue-200" : "text-slate-300"
+                                )}>
+                                  <Swords size={11} className={club.kyorugiPlayersCount > 0 ? "text-blue-500" : "opacity-30"} />
+                                  <span>{club.kyorugiPlayersCount}</span>
+                                </span>
+                              </td>
+
+                              <td className="py-3.5 px-4 text-center">
+                                <span className={cn(
+                                  "inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg text-xs font-bold",
+                                  club.poomsaePlayersCount > 0 ? "bg-amber-50 text-amber-700 border border-amber-200" : "text-slate-300"
+                                )}>
+                                  <Sparkles size={11} className={club.poomsaePlayersCount > 0 ? "text-amber-500" : "opacity-30"} />
+                                  <span>{club.poomsaePlayersCount}</span>
+                                </span>
+                              </td>
+
+                              <td className="py-3.5 px-4 text-center">
+                                {club.bothDisciplinesCount > 0 ? (
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-xs font-bold bg-purple-50 text-purple-700 border border-purple-200">
+                                    {club.bothDisciplinesCount}
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-300 text-xs">-</span>
+                                )}
+                              </td>
+
+                              <td className="py-3.5 px-4 text-center font-bold text-slate-700">
+                                <span className="px-2 py-0.5 rounded-lg bg-slate-100 text-slate-700 text-xs">
+                                  {club.totalEntries}
+                                </span>
+                              </td>
+
+                              <td className="py-3.5 px-4">
+                                <div className="flex flex-wrap gap-1 max-w-xs">
+                                  {Object.entries(club.divisionsBreakdown).map(([div, cnt]) => (
+                                    <span
+                                      key={div}
+                                      className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded-md text-[10px] font-bold border border-slate-200"
+                                    >
+                                      {div}: <span className="text-slate-900 font-black">{cnt}</span>
+                                    </span>
+                                  ))}
+                                </div>
+                              </td>
+
+                              <td className="py-3.5 px-4 text-right">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedClubModal(club);
+                                  }}
+                                  className="px-2.5 py-1 text-xs font-bold bg-white hover:bg-emerald-50 text-emerald-700 hover:text-emerald-800 rounded-lg border border-slate-200 hover:border-emerald-300 transition-colors shadow-2xs"
+                                >
+                                  View Roster
+                                </button>
+                              </td>
+                            </tr>
+
+                            {/* EXPANDABLE CLUB ROSTER ROW */}
+                            {isExpanded && (
+                              <tr className="bg-slate-50/70">
+                                <td colSpan={9} className="py-4 px-6 border-y border-slate-200/80">
+                                  <div className="bg-white rounded-xl p-4 border border-slate-200 shadow-2xs">
+                                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 mb-3 pb-2 border-b border-slate-100">
+                                      <div className="flex items-center gap-2">
+                                        <Users size={16} className="text-emerald-600" />
+                                        <h4 className="text-xs font-black uppercase text-slate-700 tracking-wider">
+                                          Athlete Roster — {club.club} ({club.filteredPlayers.length} {club.filteredPlayers.length === 1 ? 'Player' : 'Players'})
+                                        </h4>
+                                      </div>
+                                      <div className="text-xs text-slate-400">
+                                        Click "View Roster" for focused athlete cards or print preview
+                                      </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                                      {club.filteredPlayers.map((player, pIdx) => (
+                                        <div
+                                          key={`${player.normalizedName}_${pIdx}`}
+                                          className="p-3 bg-slate-50/80 hover:bg-white rounded-xl border border-slate-200/70 hover:border-emerald-300 transition-all flex flex-col justify-between"
+                                        >
+                                          <div className="flex items-start justify-between gap-2">
+                                            <div className="flex items-center gap-2">
+                                              <span className="text-[11px] font-bold text-slate-400 w-5">
+                                                #{pIdx + 1}
+                                              </span>
+                                              <span className="font-extrabold text-slate-800 text-xs">
+                                                {player.name}
+                                              </span>
+                                            </div>
+
+                                            <div className="flex items-center gap-1 shrink-0">
+                                              {player.disciplines.includes('Kyorugi') && (
+                                                <span className="px-1.5 py-0.5 rounded text-[10px] font-black bg-blue-100 text-blue-800">
+                                                  K
+                                                </span>
+                                              )}
+                                              {player.disciplines.includes('Poomsae') && (
+                                                <span className="px-1.5 py-0.5 rounded text-[10px] font-black bg-amber-100 text-amber-800">
+                                                  P
+                                                </span>
+                                              )}
+                                            </div>
+                                          </div>
+
+                                          <div className="mt-2 pt-2 border-t border-slate-200/50 space-y-1">
+                                            <div className="text-[11px] text-slate-600 font-medium">
+                                              {player.categories.length > 0 ? (
+                                                player.categories.map((c, i) => (
+                                                  <span key={i} className="inline-block mr-1 mb-0.5 px-1.5 py-0.5 bg-white text-slate-700 rounded border border-slate-200 text-[10px] font-semibold">
+                                                    {c}
+                                                  </span>
+                                                ))
+                                              ) : (
+                                                <span className="text-slate-400 text-[10px]">Registered Squad</span>
+                                              )}
+                                            </div>
+
+                                            {player.bouts.length > 0 && (
+                                              <div className="text-[10px] text-slate-400 flex items-center gap-1 pt-0.5">
+                                                <span className="font-bold text-slate-500">Bouts:</span>
+                                                <span className="font-semibold text-slate-600">{player.bouts.join(', ')}</span>
+                                              </div>
+                                            )}
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-12 px-4 text-center mt-4 bg-slate-50 rounded-2xl border border-slate-200 border-dashed">
+                <Users size={44} className="text-slate-300 stroke-[1.5] mb-2" />
+                <h4 className="text-slate-700 font-bold mb-1">No clubs or players match your filter</h4>
+                <p className="text-xs text-slate-500 max-w-md mb-4">
+                  Try clearing your search query or adjusting the discipline/division filters to view more clubs.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPlayerSearchQuery('');
+                    setPlayerDisciplineFilter('all');
+                    setPlayerDivisionFilter('all');
+                  }}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-sm transition-all"
+                >
+                  Reset All Filters
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
+
+      {/* CLUB FULL ROSTER DETAIL MODAL */}
+      {selectedClubModal && (
+        <div id="club-roster-modal-overlay" className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div id="club-roster-modal-container" className="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
+            {/* Modal Header */}
+            <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-emerald-100 text-emerald-700 rounded-xl">
+                  <Building2 size={22} />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-800 flex items-center gap-2">
+                    <span>{selectedClubModal.club}</span>
+                    <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                      {selectedClubModal.players.length} Athletes
+                    </span>
+                  </h3>
+                  <div className="flex items-center gap-2 text-xs text-slate-500 mt-0.5">
+                    <span>Kyorugi: <strong className="text-blue-700">{selectedClubModal.kyorugiPlayersCount}</strong></span>
+                    <span>•</span>
+                    <span>Poomsae: <strong className="text-amber-700">{selectedClubModal.poomsaePlayersCount}</strong></span>
+                    <span>•</span>
+                    <span>Total Entries: <strong className="text-slate-800">{selectedClubModal.totalEntries}</strong></span>
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedClubModal(null)}
+                className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-200 rounded-xl transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Modal Body: Roster Table */}
+            <div className="p-6 overflow-y-auto flex-1">
+              <div className="border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-slate-100 text-slate-700 font-bold uppercase tracking-wider border-b border-slate-200">
+                      <th className="py-2.5 px-3 w-10 text-center">#</th>
+                      <th className="py-2.5 px-3">Athlete Name</th>
+                      <th className="py-2.5 px-3">Discipline</th>
+                      <th className="py-2.5 px-3">Category / Event</th>
+                      <th className="py-2.5 px-3">Division</th>
+                      <th className="py-2.5 px-3 text-center">Bouts</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {selectedClubModal.players.map((p, idx) => (
+                      <tr key={idx} className="hover:bg-slate-50/80">
+                        <td className="py-2.5 px-3 text-center text-slate-400 font-bold">{idx + 1}</td>
+                        <td className="py-2.5 px-3 font-extrabold text-slate-900">{p.name}</td>
+                        <td className="py-2.5 px-3">
+                          <div className="flex items-center gap-1">
+                            {p.disciplines.map(d => (
+                              <span
+                                key={d}
+                                className={cn(
+                                  "px-2 py-0.5 rounded text-[10px] font-bold",
+                                  d === 'Kyorugi' ? "bg-blue-100 text-blue-800" : "bg-amber-100 text-amber-800"
+                                )}
+                              >
+                                {d}
+                              </span>
+                            ))}
+                          </div>
+                        </td>
+                        <td className="py-2.5 px-3 font-medium text-slate-700">
+                          {p.categories.join('; ') || 'General Roster'}
+                        </td>
+                        <td className="py-2.5 px-3 text-slate-600 font-semibold">
+                          {p.divisions.join(', ') || '-'}
+                        </td>
+                        <td className="py-2.5 px-3 text-center font-bold text-slate-700">
+                          {p.bouts.length > 0 ? p.bouts.join(', ') : '-'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-6 py-3.5 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
+              <span className="text-xs text-slate-400">
+                Official Roster Record for {selectedClubModal.club}
+              </span>
+              <button
+                type="button"
+                onClick={() => setSelectedClubModal(null)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs rounded-xl transition-all shadow-sm"
+              >
+                Close Roster
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ADMIN PLACINGS EDIT MODAL */}
       {editingCategory && (

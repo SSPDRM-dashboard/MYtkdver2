@@ -758,6 +758,55 @@ export default function App() {
     };
   }, [currentEventId]);
 
+  useEffect(() => {
+    if (!currentEventId || isFirestoreQuotaExceeded) return;
+    const q = query(collection(db, 'backup_data'), where('eventId', '==', currentEventId));
+    let unsub = () => {};
+
+    const handleGlobalQuota = () => {
+      unsub();
+    };
+    window.addEventListener('firestore-quota-exceeded', handleGlobalQuota);
+
+    if (isFirestoreQuotaExceeded) return;
+    try {
+      unsub = onSnapshot(q, (snapshot) => {
+        if (snapshot.empty) return;
+        setBackupData(prev => {
+          const next = { ...(prev || {}) };
+          snapshot.docs.forEach(docSnap => {
+            const data = docSnap.data();
+            const groupKey = `${currentEventId}_${data.ringNum}`;
+            next[groupKey] = {
+              mappings: data.mappings || [],
+              matches: data.matches || []
+            };
+          });
+          try {
+            localStorage.setItem('tkd_backup_data_v3', JSON.stringify(next));
+          } catch (_) {}
+          return next;
+        });
+      }, (error) => {
+        if (error.code === 'resource-exhausted' || error.message?.toLowerCase().includes('quota')) {
+          handleGlobalQuotaTrigger();
+          unsub();
+        } else if (error.code !== 'permission-denied') {
+          console.error("Firestore backup_data Error:", error);
+        }
+      });
+    } catch (e: any) {
+      if (e.code === 'resource-exhausted' || e.message?.toLowerCase().includes('quota')) {
+        handleGlobalQuotaTrigger();
+      }
+    }
+
+    return () => {
+      unsub();
+      window.removeEventListener('firestore-quota-exceeded', handleGlobalQuota);
+    };
+  }, [currentEventId]);
+
 
 
   // Automated queue pruning to prevent completed bouts from lingering in the queue
@@ -4691,13 +4740,17 @@ export default function App() {
                       {nonDeletedRings.map((ringObj) => {
                         const ringNum = ringObj.ringNumber;
                         const groupKey = `${currentEventId}_${ringNum}`;
-                        const hasBackup = backupData && backupData[groupKey] && backupData[groupKey].mappings && backupData[groupKey].mappings.length > 0;
+                        const ringBackup = backupData && backupData[groupKey];
+                        const backupMappingsCount = ringBackup?.mappings?.length || 0;
+                        const backupMatchesCount = ringBackup?.matches?.length || 0;
+                        const hasBackup = backupMappingsCount > 0 || backupMatchesCount > 0;
                         
                         return (
                           <button
                             key={ringNum}
                             type="button"
                             disabled={isSyncing}
+                            title={hasBackup ? `Ring ${ringNamingMode === 'alphabet' ? String.fromCharCode(64 + ringNum) : ringNum}: ${backupMatchesCount} bouts, ${backupMappingsCount} mappings available` : undefined}
                             onClick={async () => {
                               if (!currentEventId) return;
                               setIsSyncing(true);
@@ -4710,16 +4763,22 @@ export default function App() {
                                     matches: data.matches || []
                                   };
                                   // Cache in local state to show indicator and avoid refetching
-                                  setBackupData(prev => ({
-                                    ...(prev || {}),
-                                    [groupKey]: toLoad
-                                  }));
+                                  setBackupData(prev => {
+                                    const next = {
+                                      ...(prev || {}),
+                                      [groupKey]: toLoad
+                                    };
+                                    try {
+                                      localStorage.setItem('tkd_backup_data_v3', JSON.stringify(next));
+                                    } catch (_) {}
+                                    return next;
+                                  });
                                   setBackupToLoad(toLoad);
                                   setActiveTab('ai-setup');
                                 } else {
                                   const toLoad = backupData[groupKey] || { mappings: [], matches: [] };
-                                  if (toLoad.mappings.length === 0) {
-                                    alert("No backup mappings found for this ring on the cloud or locally.");
+                                  if ((!toLoad.mappings || toLoad.mappings.length === 0) && (!toLoad.matches || toLoad.matches.length === 0)) {
+                                    alert("No backup data found for this ring on the cloud or locally.");
                                     return;
                                   }
                                   setBackupToLoad(toLoad);
@@ -4728,8 +4787,8 @@ export default function App() {
                               } catch (err) {
                                 console.error("Error fetching backup from Firestore:", err);
                                 const toLoad = backupData[groupKey] || { mappings: [], matches: [] };
-                                if (toLoad.mappings.length === 0) {
-                                  alert("No backup mappings found for this ring. Error: " + (err instanceof Error ? err.message : String(err)));
+                                if ((!toLoad.mappings || toLoad.mappings.length === 0) && (!toLoad.matches || toLoad.matches.length === 0)) {
+                                  alert("No backup data found for this ring. Error: " + (err instanceof Error ? err.message : String(err)));
                                   return;
                                 }
                                 setBackupToLoad(toLoad);
@@ -4748,7 +4807,10 @@ export default function App() {
                             <span className="text-[9px] opacity-75 font-bold leading-none uppercase">Ring</span>
                             <span className="text-base font-black leading-tight mt-0.5">{ringNamingMode === 'alphabet' ? String.fromCharCode(64 + ringNum) : ringNum}</span>
                             {hasBackup && (
-                              <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-amber-500 border border-white" title="Backup Available" />
+                              <span className="absolute top-1.5 right-1.5 flex h-2 w-2">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                                <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500 border border-white"></span>
+                              </span>
                             )}
                           </button>
                         );
@@ -5462,6 +5524,7 @@ export default function App() {
               isSyncingMatches={isImportingBouts}
               boutNumberingMode={boutNumberingMode}
               matchHistory={matchHistory}
+              parentMappings={mappings}
             />
           )}
 
@@ -5482,6 +5545,9 @@ export default function App() {
               matchHistory={matchHistory}
               backupData={backupData}
               isAdmin={user?.role === 'admin'}
+              rings={rings}
+              boutQueue={boutQueue}
+              athletes={athletes}
             />
           )}
 
@@ -5506,6 +5572,9 @@ export default function App() {
               setBackupData={setBackupData}
               backupToLoad={backupToLoad}
               clearBackupToLoad={() => setBackupToLoad(null)}
+              setMappings={setMappings}
+              onSelectRing={(r) => setDashboardSelectedRing(r)}
+              namingMode={ringNamingMode}
             />
           )}
 

@@ -16,6 +16,7 @@ interface AdminMappingProps {
   isSyncingMatches?: boolean;
   boutNumberingMode?: 'numeric' | 'alphanumeric';
   matchHistory: MatchHistoryItem[];
+  parentMappings?: BoutMapping[];
 }
 
 export function AdminMapping({ 
@@ -26,7 +27,8 @@ export function AdminMapping({
   onSyncMatches, 
   isSyncingMatches,
   boutNumberingMode = 'alphanumeric',
-  matchHistory
+  matchHistory,
+  parentMappings
 }: AdminMappingProps) {
   const [mappings, setMappings] = useState<BoutMapping[]>([]);
   const [selectedEventId, setSelectedEventId] = useState<string>(currentEventId || '');
@@ -292,7 +294,11 @@ export function AdminMapping({
     }
   };
 
-  const sortedMappings = [...mappings].sort((a, b) => {
+  const displayMappings = mappings.length > 0 
+    ? mappings 
+    : (parentMappings ? parentMappings.filter(m => m.eventId === selectedEventId) : []);
+
+  const sortedMappings = [...displayMappings].sort((a, b) => {
     const parseBout = (bout: string | number) => {
       let s = (bout || '').toString().replace(/\s+/g, '').toUpperCase();
       s = s.replace(/^([A-H])O+(\d+)([A-Z]*)$/, '$10$2$3');

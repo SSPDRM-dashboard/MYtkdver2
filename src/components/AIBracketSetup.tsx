@@ -16,7 +16,8 @@ import {
   Send,
   Sparkles,
   Zap,
-  Key
+  Key,
+  LayoutGrid
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { MatchData, BoutMapping, EventData, RingStatus } from '../types';
@@ -202,6 +203,9 @@ interface AIBracketSetupProps {
   setBackupData: React.Dispatch<React.SetStateAction<Record<string, { mappings: BoutMapping[], matches: MatchData[] }>>>;
   backupToLoad?: { mappings: Partial<BoutMapping>[], matches: MatchData[] } | null;
   clearBackupToLoad?: () => void;
+  setMappings?: React.Dispatch<React.SetStateAction<BoutMapping[]>>;
+  onSelectRing?: (ringNum: number) => void;
+  namingMode?: 'number' | 'alphabet';
 }
 
 export function AIBracketSetup({ 
@@ -215,12 +219,28 @@ export function AIBracketSetup({
   boutNumberingMode,
   setBackupData,
   backupToLoad,
-  clearBackupToLoad
+  clearBackupToLoad,
+  setMappings,
+  onSelectRing,
+  namingMode = 'number'
 }: AIBracketSetupProps) {
   const [file, setFile] = useState<File | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [bulkTargetRing, setBulkTargetRing] = useState<number | 'auto'>('auto');
+  const availableRings = rings.filter(r => !r.isDeleted && r.ringNumber <= 12);
+
+  const handleBulkRingChange = (targetRing: number | 'auto') => {
+    setBulkTargetRing(targetRing);
+    if (!previewData || targetRing === 'auto') return;
+
+    const newMatches = previewData.matches.map(m => ({
+      ...m,
+      ring: targetRing
+    }));
+    setPreviewData({ ...previewData, matches: newMatches });
+  };
   const [previewData, setPreviewData] = useState<{
     matches: MatchData[];
     mappings: Partial<BoutMapping>[];
@@ -271,16 +291,22 @@ export function AIBracketSetup({
 
   // Handle backup file loading
   React.useEffect(() => {
-    if (backupToLoad && (backupToLoad.mappings.length > 0 || backupToLoad.matches.length > 0)) {
+    if (backupToLoad && ((backupToLoad.mappings && backupToLoad.mappings.length > 0) || (backupToLoad.matches && backupToLoad.matches.length > 0))) {
       setPreviewData({
         matches: backupToLoad.matches || [],
         mappings: backupToLoad.mappings || [],
         fileName: 'Recovered Bracket Logic',
         fileType: 'backup'
       });
-      setActivePreviewTab('mappings');
+      setActivePreviewTab(backupToLoad.mappings && backupToLoad.mappings.length > 0 ? 'mappings' : 'matches');
+      
+      const recoveredRing = backupToLoad.matches?.[0]?.ring;
+      if (recoveredRing && recoveredRing >= 1 && recoveredRing <= 12) {
+        setBulkTargetRing(recoveredRing);
+      }
+
       if (clearBackupToLoad) {
-        // Clear it on a slight delay so it doesn't trigger Immediate parent re-renders that clash
+        // Clear it on a slight delay so it doesn't trigger immediate parent re-renders that clash
         setTimeout(() => clearBackupToLoad(), 100);
       }
     }
@@ -393,7 +419,7 @@ export function AIBracketSetup({
     }
   };
 
-  const handleMatchEdit = (index: number, field: keyof MatchData, value: string) => {
+  const handleMatchEdit = (index: number, field: keyof MatchData, value: any) => {
     if (!previewData) return;
     const newMatches = [...previewData.matches];
     newMatches[index] = { ...newMatches[index], [field]: value };
@@ -597,21 +623,36 @@ export function AIBracketSetup({
         const bout = (m.bout || '').toString().toUpperCase();
         const prefix = bout.charAt(0);
         const boutNum = parseInt(bout.replace(/[^0-9]/g, ''));
-        let inferredRing = m.ring;
+        let inferredRing = bulkTargetRing !== 'auto' ? Number(bulkTargetRing) : m.ring;
         
-        // Numeric range logic (1000s = Ring 1, 2000s = Ring 2, etc.)
-        if (!isNaN(boutNum) && boutNum >= 1000) {
-          inferredRing = Math.floor(boutNum / 1000);
-        } 
-        // Letter prefix logic
-        else if (prefix === 'A') inferredRing = 1;
-        else if (prefix === 'B') inferredRing = 2;
-        else if (prefix === 'C') inferredRing = 3;
-        else if (prefix === 'D') inferredRing = 4;
-        else if (prefix === 'E') inferredRing = 5;
-        else if (prefix === 'F') inferredRing = 6;
-        else if (prefix === 'G') inferredRing = 7;
-        else if (prefix === 'H') inferredRing = 8;
+        if (bulkTargetRing === 'auto') {
+          // Numeric range logic (1000s = Ring 1, 2000s = Ring 2, etc.)
+          if (!isNaN(boutNum) && boutNum >= 1000) {
+            const calcRing = Math.floor(boutNum / 1000);
+            if (calcRing <= 12) {
+              inferredRing = calcRing;
+            } else {
+              inferredRing = 1;
+            }
+          } 
+          // Letter prefix logic
+          else if (prefix === 'A') inferredRing = 1;
+          else if (prefix === 'B') inferredRing = 2;
+          else if (prefix === 'C') inferredRing = 3;
+          else if (prefix === 'D') inferredRing = 4;
+          else if (prefix === 'E') inferredRing = 5;
+          else if (prefix === 'F') inferredRing = 6;
+          else if (prefix === 'G') inferredRing = 7;
+          else if (prefix === 'H') inferredRing = 8;
+          else if (prefix === 'I') inferredRing = 9;
+          else if (prefix === 'J') inferredRing = 10;
+          else if (prefix === 'K') inferredRing = 11;
+          else if (prefix === 'L') inferredRing = 12;
+        }
+
+        if (!inferredRing || inferredRing > 12 || inferredRing < 1) {
+          inferredRing = 1;
+        }
 
         let finalCategory = (m.category || '').toString().toUpperCase();
         if (isPoomsaeMode && !finalCategory.includes('INDIVIDUAL POOMSAE')) {
@@ -725,10 +766,12 @@ export function AIBracketSetup({
     try {
       // Helper to get ring from bout prefix or number
       const getRingFromBout = (bout: string | number) => {
+        if (bulkTargetRing !== 'auto') return Number(bulkTargetRing);
         const boutStr = (bout || '').toString();
         const boutNum = parseInt(boutStr.replace(/[^0-9]/g, ''));
         if (!isNaN(boutNum) && boutNum >= 1000) {
-          return Math.floor(boutNum / 1000);
+          const calcRing = Math.floor(boutNum / 1000);
+          if (calcRing <= 12) return calcRing;
         }
 
         const prefix = boutStr.charAt(0).toUpperCase();
@@ -740,6 +783,10 @@ export function AIBracketSetup({
         if (prefix === 'F') return 6;
         if (prefix === 'G') return 7;
         if (prefix === 'H') return 8;
+        if (prefix === 'I') return 9;
+        if (prefix === 'J') return 10;
+        if (prefix === 'K') return 11;
+        if (prefix === 'L') return 12;
         return 1;
       };
 
@@ -792,13 +839,24 @@ export function AIBracketSetup({
 
       // Save local backup mapping per ring (Moved higher so it won't be blocked by Firestore network errors)
       const mappingsByRing: Record<string, BoutMapping[]> = {};
+      const matchesByRing: Record<string, MatchData[]> = {};
+
+      processedMatches.forEach(m => {
+        const ringNum = m.ring || (bulkTargetRing !== 'auto' ? Number(bulkTargetRing) : 1);
+        const sRing = ringNum.toString();
+        if (!matchesByRing[sRing]) matchesByRing[sRing] = [];
+        matchesByRing[sRing].push(m);
+      });
+
       previewData.mappings.forEach(m => {
         const sourceStr = (m.sourceBout || '').toString();
         
         const matchingMatch = processedMatches.find((match: MatchData) => 
           isBoutMatch(match.bout, m.sourceBout) || isBoutMatch(match.bout, m.nextBout)
         );
-        const ringNum = matchingMatch ? matchingMatch.ring : getRingFromBout(sourceStr);
+        const ringNum = matchingMatch 
+          ? matchingMatch.ring 
+          : (bulkTargetRing !== 'auto' ? Number(bulkTargetRing) : getRingFromBout(sourceStr));
         const sRing = ringNum.toString();
         
         if (!mappingsByRing[sRing]) mappingsByRing[sRing] = [];
@@ -814,22 +872,26 @@ export function AIBracketSetup({
         });
       });
 
-      const matchesByRing: Record<string, MatchData[]> = {};
-      processedMatches.forEach(m => {
-        const sRing = m.ring.toString();
-        if (!matchesByRing[sRing]) matchesByRing[sRing] = [];
-        matchesByRing[sRing].push(m);
-      });
+      // If bulkTargetRing is specified, ensure all extracted mappings are also recorded for that ring
+      if (bulkTargetRing !== 'auto') {
+        const sRing = bulkTargetRing.toString();
+        if (!mappingsByRing[sRing] || mappingsByRing[sRing].length === 0) {
+          mappingsByRing[sRing] = previewData.mappings.map(m => ({
+            ...m,
+            sourceBout: normalizeBoutNumber(m.sourceBout || ''),
+            nextBout: normalizeBoutNumber(m.nextBout || ''),
+            eventId: currentEventId,
+            eventName: currentEvent.name,
+            categoryName: (m.categoryName || "Auto-Extracted from File").toUpperCase().trim()
+          }));
+        }
+      }
+
+      const allRings = new Set([...Object.keys(mappingsByRing), ...Object.keys(matchesByRing)]);
       
       setBackupData(prev => {
-        const next: Record<string, any> = {};
-        Object.keys(prev || {}).forEach(k => {
-          if (k.startsWith(`${currentEventId}_`)) {
-            next[k] = prev[k];
-          }
-        });
+        const next: Record<string, any> = { ...(prev || {}) };
 
-        const allRings = new Set([...Object.keys(mappingsByRing), ...Object.keys(matchesByRing)]);
         allRings.forEach(sRing => {
            const key = `${currentEventId}_${sRing}`;
            next[key] = {
@@ -837,19 +899,27 @@ export function AIBracketSetup({
              matches: matchesByRing[sRing] || []
            };
         });
+
+        try {
+          localStorage.setItem('tkd_backup_data_v3', JSON.stringify(next));
+        } catch (e) {
+          console.warn("Could not write tkd_backup_data_v3 to localStorage:", e);
+        }
+
         return next;
       });
 
       // Also persist backup data per ring to Firestore backup_data collection
       if (!isFirestoreQuotaExceeded) {
-        const allRings = new Set([...Object.keys(mappingsByRing), ...Object.keys(matchesByRing)]);
         const backupPromises = Array.from(allRings).map(sRing => {
           const key = `${currentEventId}_${sRing}`;
+          const cleanMappings = JSON.parse(JSON.stringify(mappingsByRing[sRing] || []));
+          const cleanMatches = JSON.parse(JSON.stringify(matchesByRing[sRing] || []));
           return setDoc(doc(db, 'backup_data', key), {
             eventId: currentEventId,
             ringNum: Number(sRing),
-            mappings: sanitizeForFirestore(mappingsByRing[sRing] || []),
-            matches: sanitizeForFirestore(matchesByRing[sRing] || []),
+            mappings: sanitizeForFirestore(cleanMappings),
+            matches: sanitizeForFirestore(cleanMatches),
             updatedAt: serverTimestamp()
           }).catch(err => console.error(`Error saving backup_data for key ${key}:`, err));
         });
@@ -861,11 +931,13 @@ export function AIBracketSetup({
         const matchingMatch = processedMatches.find((match: MatchData) => 
           isBoutMatch(match.bout, m.sourceBout) || isBoutMatch(match.bout, m.nextBout)
         );
+        const ringNum = matchingMatch ? matchingMatch.ring : getRingFromBout(m.sourceBout || '');
         const resolvedCategory = (m.categoryName || (matchingMatch ? matchingMatch.category : "Auto-Extracted from File")).toUpperCase().trim();
 
         if (isFirestoreQuotaExceeded) return Promise.resolve();
         return addDoc(collection(db, 'event_logic'), {
           ...m,
+          ring: ringNum,
           sourceBout: normalizeBoutNumber(m.sourceBout || ''),
           nextBout: normalizeBoutNumber(m.nextBout || ''),
           eventId: currentEventId,
@@ -1048,7 +1120,39 @@ export function AIBracketSetup({
 
       await Promise.all(mappingPromises).catch(err => console.error("Error with mapping promises:", err));
 
-      alert(`Bracket mappings and ${previewData.matches.length} matches successfully applied!\n\nCheck the Active Advancement Logic panel and the Match Queue.`);
+      if (setMappings) {
+        setMappings(prev => {
+          const newMappings = previewData.mappings.map((m, idx) => {
+            const matchingMatch = processedMatches.find((match: MatchData) => 
+              isBoutMatch(match.bout, m.sourceBout) || isBoutMatch(match.bout, m.nextBout)
+            );
+            const ringNum = matchingMatch ? matchingMatch.ring : getRingFromBout(m.sourceBout || '');
+            const resolvedCategory = (m.categoryName || (matchingMatch ? matchingMatch.category : "Auto-Extracted from File")).toUpperCase().trim();
+            return {
+              id: `local_${Date.now()}_${idx}`,
+              ...m,
+              ring: ringNum,
+              sourceBout: normalizeBoutNumber(m.sourceBout || ''),
+              nextBout: normalizeBoutNumber(m.nextBout || ''),
+              slot: m.slot || 'Chung',
+              eventId: currentEventId,
+              eventName: currentEvent.name,
+              categoryName: resolvedCategory
+            } as BoutMapping;
+          });
+          return [...prev.filter(pm => pm.eventId !== currentEventId), ...newMappings];
+        });
+      }
+
+      const assignedRingNumber = bulkTargetRing !== 'auto' 
+        ? Number(bulkTargetRing) 
+        : (processedMatches[0]?.ring || 1);
+
+      if (onSelectRing) {
+        onSelectRing(assignedRingNumber);
+      }
+
+      alert(`Bracket mappings and ${previewData.matches.length} matches successfully applied to Ring ${assignedRingNumber}!\n\nCheck the Active Advancement Logic panel and the Ring ${assignedRingNumber} Match Queue.`);
       if (onSuccess) onSuccess();
       setPreviewData(null);
       setFile(null);
@@ -1457,7 +1561,48 @@ export function AIBracketSetup({
               </div>
             </div>
 
-            <div className="p-8">
+            <div className="p-8 space-y-8">
+              {/* Target Court / Ring Assignment Card */}
+              <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 p-5 rounded-3xl border border-indigo-500/30 text-white flex flex-col md:flex-row items-center justify-between gap-4 shadow-xl">
+                <div className="flex items-center gap-3.5">
+                  <div className="w-12 h-12 rounded-2xl bg-indigo-600 flex items-center justify-center text-white shadow-lg shadow-indigo-600/30 shrink-0">
+                    <LayoutGrid size={24} />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h4 className="font-black text-sm uppercase tracking-wider text-white">Target Court / Ring Assignment</h4>
+                      <span className="bg-indigo-500/30 text-indigo-300 text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider border border-indigo-400/30">
+                        Admin Selection
+                      </span>
+                    </div>
+                    <p className="text-xs text-indigo-200 mt-0.5">
+                      Select which ring to put this boutchart into (assigns matches to Dashboard, Court Queue & Advancement Logic).
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-3 w-full md:w-auto justify-end">
+                  <span className="text-xs font-black text-indigo-300 uppercase tracking-widest">
+                    Assign All Bouts To:
+                  </span>
+                  <select
+                    value={bulkTargetRing}
+                    onChange={(e) => {
+                      const val = e.target.value === 'auto' ? 'auto' : Number(e.target.value);
+                      handleBulkRingChange(val);
+                    }}
+                    className="bg-slate-800 text-white font-black text-xs md:text-sm px-4 py-2.5 rounded-xl border border-indigo-400/50 outline-none focus:ring-2 focus:ring-indigo-400 cursor-pointer shadow-md"
+                  >
+                    <option value="auto">Auto-detect from Bout Numbers</option>
+                    {availableRings.map(r => (
+                      <option key={r.ringNumber} value={r.ringNumber} className="bg-slate-900 text-white font-bold">
+                        Ring {r.ringNumber} {namingMode === 'alphabet' ? `(Court ${String.fromCharCode(64 + r.ringNumber)})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
               {activePreviewTab === 'matches' ? (
                 <div className="space-y-6">
                   <div className="flex items-center justify-between">
@@ -1491,6 +1636,7 @@ export function AIBracketSetup({
                     <table className="w-full text-left border-collapse">
                       <thead>
                         <tr className="bg-slate-50 border-b border-slate-100">
+                          <th className="px-4 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Ring</th>
                           <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Bout #</th>
                           <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Category</th>
                           <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">{isPoomsaeMode ? 'Performer' : 'Blue Player'}</th>
@@ -1500,6 +1646,19 @@ export function AIBracketSetup({
                       <tbody className="divide-y divide-slate-50">
                         {previewData.matches.map((m, i) => (
                           <tr key={i} className="hover:bg-slate-50 transition-colors">
+                            <td className="px-4 py-4">
+                              <select
+                                value={m.ring || 1}
+                                onChange={(e) => handleMatchEdit(i, 'ring', Number(e.target.value))}
+                                className="bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-black px-2.5 py-1 rounded-lg border border-slate-200 outline-none cursor-pointer"
+                              >
+                                {availableRings.map(r => (
+                                  <option key={r.ringNumber} value={r.ringNumber}>
+                                    Ring {r.ringNumber} {namingMode === 'alphabet' ? `(${String.fromCharCode(64 + r.ringNumber)})` : ''}
+                                  </option>
+                                ))}
+                              </select>
+                            </td>
                             <td className="px-6 py-4">
                               <input 
                                 type="text" 
@@ -1615,9 +1774,11 @@ export function AIBracketSetup({
                     const ringTotals = new Map<number, number>();
                     
                     const getRingFromBout = (bout: string) => {
+                      if (bulkTargetRing !== 'auto') return Number(bulkTargetRing);
                       const boutNum = parseInt(bout.replace(/[^0-9]/g, ''));
                       if (!isNaN(boutNum) && boutNum >= 1000) {
-                        return Math.floor(boutNum / 1000);
+                        const calcRing = Math.floor(boutNum / 1000);
+                        if (calcRing <= 12) return calcRing;
                       }
                       const prefix = bout.charAt(0).toUpperCase();
                       if (prefix === 'A') return 1;
@@ -1628,6 +1789,10 @@ export function AIBracketSetup({
                       if (prefix === 'F') return 6;
                       if (prefix === 'G') return 7;
                       if (prefix === 'H') return 8;
+                      if (prefix === 'I') return 9;
+                      if (prefix === 'J') return 10;
+                      if (prefix === 'K') return 11;
+                      if (prefix === 'L') return 12;
                       return 1;
                     };
 
@@ -1650,8 +1815,8 @@ export function AIBracketSetup({
                       const matchingSource = previewData.matches.find((match: MatchData) => isBoutMatch(match.bout, m.sourceBout));
                       const matchingNext = previewData.matches.find((match: MatchData) => isBoutMatch(match.bout, m.nextBout));
 
-                      const sRing = matchingSource ? Number(matchingSource.ring || getRingFromBout(sourceStr)) : getRingFromBout(sourceStr);
-                      const nRing = matchingNext ? Number(matchingNext.ring || getRingFromBout(nextStr)) : getRingFromBout(nextStr);
+                      const sRing = matchingSource ? Number(matchingSource.ring) : getRingFromBout(sourceStr);
+                      const nRing = matchingNext ? Number(matchingNext.ring) : getRingFromBout(nextStr);
 
                       if (sourceNum > (ringTotals.get(sRing) || 0)) ringTotals.set(sRing, sourceNum);
                       if (nextNum > (ringTotals.get(nRing) || 0)) ringTotals.set(nRing, nextNum);
