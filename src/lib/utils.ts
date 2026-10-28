@@ -1,5 +1,7 @@
 import { ClassValue, clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { AdminBoutOverride } from '../types';
+
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -322,6 +324,34 @@ export function getEventWebAppUrl(event?: { sheetUrl?: string, winnerSheetUrl?: 
   }
   
   return fallbackUrl;
+}
+
+export function findBoutOverride(
+  overrides: Record<string, AdminBoutOverride> | undefined,
+  bout: string | number | undefined | null,
+  eventId?: string | null
+): AdminBoutOverride | undefined {
+  if (!overrides || bout === undefined || bout === null) return undefined;
+  const evId = eventId || 'default';
+  const boutNorm = normalizeBoutNumber(bout);
+  
+  // 1. Direct composite key lookup
+  const exactKey = `${evId}_${boutNorm}`;
+  if (overrides[exactKey]) return overrides[exactKey];
+  
+  // 2. Direct lookup by raw bout string
+  const rawKey = `${evId}_${bout}`;
+  if (overrides[rawKey]) return overrides[rawKey];
+  
+  // 3. Fallback scan matching eventId & isBoutMatch
+  const list = Object.values(overrides);
+  for (let i = 0; i < list.length; i++) {
+    const ov = list[i];
+    if (ov && (!eventId || !ov.eventId || ov.eventId === eventId) && isBoutMatch(ov.bout, bout)) {
+      return ov;
+    }
+  }
+  return undefined;
 }
 
 

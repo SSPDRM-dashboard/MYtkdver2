@@ -47,7 +47,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { QRCodeSVG } from 'qrcode.react';
-import { MatchData, RingStatus, EventData, BoutMapping, MatchHistoryItem } from './types';
+import { MatchData, RingStatus, EventData, BoutMapping, MatchHistoryItem, AdminBoutOverride } from './types';
 import { TASheet } from './components/TASheet';
 import { InspectionLogs } from './components/InspectionLogs';
 import { RingSummary } from './components/RingSummary';
@@ -58,14 +58,17 @@ import { SearchWinner } from './components/SearchWinner';
 import { EventReport } from './components/EventReport';
 import { BoutChart } from './components/BoutChart';
 import { AdminFontSizeControls } from './components/AdminFontSizeControls';
+import { PlayerLogoBadge } from './components/PlayerLogoBadge';
+import { TeamLogosManagerModal } from './components/TeamLogosManagerModal';
 import { 
   syncToGoogleSheets as rawSyncToGoogleSheets, 
   updateWinnerInGoogleSheets as rawUpdateWinnerInGoogleSheets, 
   updateBoutDetailsInGoogleSheets as rawUpdateBoutDetailsInGoogleSheets, 
-  updatePointsInGoogleSheets as rawUpdatePointsInGoogleSheets, 
+  updatePointsInGoogleSheets as rawUpdatePointsInGoogleSheets,
+  updateTransferInGoogleSheets as rawUpdateTransferInGoogleSheets,
   testSync 
 } from './services/googleSheets';
-import { cn, normalizeBoutNumber, normalizeBoutWithRing, getBoutNumber, formatBoutNumber, isBoutMatch, parseRingNumber, extractWinnerOfBout, getEventSpreadsheetUrl, getEventWebAppUrl } from './lib/utils';
+import { cn, normalizeBoutNumber, normalizeBoutWithRing, getBoutNumber, formatBoutNumber, isBoutMatch, parseRingNumber, extractWinnerOfBout, getEventSpreadsheetUrl, getEventWebAppUrl, findBoutOverride } from './lib/utils';
 import { collection, addDoc, onSnapshot, query, orderBy, limit, serverTimestamp, doc, setDoc, deleteDoc, getDoc, getDocFromServer, where, getDocs } from 'firebase/firestore';
 import { db, disableFirestoreNetwork } from './firebase';
 import Papa from 'papaparse';
@@ -151,7 +154,7 @@ function useLocalState<T>(key: string, initialValue: T) {
   return [state, setLocalState] as const;
 }
 
-function useSyncedState<T>(key: string, initialValue: T) {
+export function useSyncedState<T>(key: string, initialValue: T) {
   const [state, setState] = useState<T>(() => {
     const saved = localStorage.getItem(key);
     if (saved !== null) {
@@ -273,6 +276,57 @@ function useSyncedState<T>(key: string, initialValue: T) {
             } else {
               remoteValue = mergedRings;
             }
+          }
+
+          // Enforce persistent admin overrides on incoming remote snapshots for tkd_rings and tkd_bout_queue
+          if ((key === 'tkd_rings' || key === 'tkd_bout_queue') && Array.isArray(remoteValue)) {
+            try {
+              const savedOverrides = JSON.parse(localStorage.getItem('tkd_admin_bout_overrides') || '{}');
+              if (Object.keys(savedOverrides).length > 0) {
+                if (key === 'tkd_bout_queue') {
+                  remoteValue = (remoteValue as any[]).map((item: any) => {
+                    if (!item?.data) return item;
+                    const ov = findBoutOverride(savedOverrides, item.data.bout, item.data.eventId);
+                    if (ov && ov.isTransferred && ov.transferredToRing) {
+                      return {
+                        ...item,
+                        data: {
+                          ...item.data,
+                          ring: ov.transferredToRing,
+                          transferredToRing: ov.transferredToRing,
+                          isTransferred: true,
+                          originalRing: ov.originalRing || item.data.originalRing || item.data.ring
+                        }
+                      };
+                    }
+                    return item;
+                  });
+                } else if (key === 'tkd_rings') {
+                  remoteValue = (remoteValue as any[]).map((ring: any) => {
+                    const purgeIfTransferredElsewhere = (bout: any) => {
+                      if (!bout) return null;
+                      const ov = findBoutOverride(savedOverrides, bout.bout, bout.eventId);
+                      if (ov && ov.isTransferred && ov.transferredToRing && ring.ringNumber !== ov.transferredToRing) {
+                        return null;
+                      }
+                      return bout;
+                    };
+                    return {
+                      ...ring,
+                      currentBout: purgeIfTransferredElsewhere(ring.currentBout),
+                      onDeck: purgeIfTransferredElsewhere(ring.onDeck),
+                      inTheHole: purgeIfTransferredElsewhere(ring.inTheHole),
+                      suspendedBouts: Array.isArray(ring.suspendedBouts)
+                        ? ring.suspendedBouts.filter((b: any) => {
+                            const ov = findBoutOverride(savedOverrides, b.bout, b.eventId);
+                            return !(ov && ov.isTransferred && ov.transferredToRing && ring.ringNumber !== ov.transferredToRing);
+                          })
+                        : ring.suspendedBouts
+                    };
+                  });
+                }
+              }
+            } catch (_) {}
           }
 
           const remoteValueStr = JSON.stringify(remoteValue);
@@ -638,21 +692,24 @@ export default function App() {
   const [autoPullRings, setAutoPullRings] = useSyncedState<Record<number, boolean>>('tkd_autopull', {});
   const [isAutoUpdateNames, setIsAutoUpdateNames] = useSyncedState<boolean>('tkd_auto_update_names', true);
   const [boutQueue, setBoutQueue] = useSyncedState<{id: string, data: MatchData}[]>('tkd_bout_queue', []);
+  const [adminBoutOverrides, setAdminBoutOverrides] = useSyncedState<Record<string, AdminBoutOverride>>('tkd_admin_bout_overrides', {});
   const [matchHistory, setMatchHistory] = useState<MatchHistoryItem[]>([]);
   
   // Track the absolute newest data to avoid stale closures in event listeners
   const latestDataRef = useRef({
     matchHistory,
     currentEventId,
-    events
+    events,
+    adminBoutOverrides
   });
   useEffect(() => {
     latestDataRef.current = {
       matchHistory,
       currentEventId,
-      events
+      events,
+      adminBoutOverrides
     };
-  }, [matchHistory, currentEventId, events]);
+  }, [matchHistory, currentEventId, events, adminBoutOverrides]);
   const [mappings, setMappings] = useState<BoutMapping[]>([]);
   const [athletes, setAthletes] = useState([
     { name: "Ahmad bin Ibrahim", ic: "080512-14-5567", club: "KST", category: "Junior Male -45kg", status: "Verified" as const },
@@ -872,9 +929,49 @@ export default function App() {
       const processBout = (bout: MatchData) => {
         let updated = false;
         
-        const { matchHistory, currentEventId, events } = latestDataRef.current;
+        const { matchHistory, currentEventId, events, adminBoutOverrides } = latestDataRef.current;
         const currentEvt = events.find(e => e.id === currentEventId);
         const currentEvtName = (currentEvt ? currentEvt.name : '').trim().toLowerCase();
+
+        // Check if an active Admin Override exists for this bout (composite key or fuzzy match)
+        const override = findBoutOverride(adminBoutOverrides, bout.bout, currentEventId);
+
+        if (override) {
+          // If this bout was transferred, lock and enforce the transferred ring
+          if (override.isTransferred && override.transferredToRing && bout.ring !== override.transferredToRing) {
+            bout.ring = override.transferredToRing;
+            bout.isTransferred = true;
+            bout.transferredToRing = override.transferredToRing;
+            if (override.originalRing) bout.originalRing = override.originalRing;
+            updated = true;
+          }
+
+          // If this bout was manually edited by admin, strictly enforce the admin's edits
+          if (override.isManuallyEdited) {
+            if (override.blue_name !== undefined && bout.blue_name !== override.blue_name) {
+              bout.blue_name = override.blue_name;
+              updated = true;
+            }
+            if (override.blue_club !== undefined && bout.blue_club !== override.blue_club) {
+              bout.blue_club = override.blue_club;
+              updated = true;
+            }
+            if (override.red_name !== undefined && bout.red_name !== override.red_name) {
+              bout.red_name = override.red_name;
+              updated = true;
+            }
+            if (override.red_club !== undefined && bout.red_club !== override.red_club) {
+              bout.red_club = override.red_club;
+              updated = true;
+            }
+            if (override.category !== undefined && bout.category !== override.category) {
+              bout.category = override.category;
+              updated = true;
+            }
+            bout.isManuallyEdited = true;
+            return updated; // Strictly return early and lock against automated Google Sheets or bracket overrides!
+          }
+        }
 
         const normalizeStr = (s: string | null | undefined) => s ? s.toLowerCase().replace(/[^a-z0-9]/g, '').trim() : '';
 
@@ -998,8 +1095,15 @@ export default function App() {
           let ringChanged = false;
           let r = { ...ring };
           ['currentBout', 'onDeck', 'inTheHole'].forEach(slot => {
-            if (r[slot as keyof typeof r]) {
-              const bout = { ...(r[slot as keyof typeof r] as MatchData) };
+            const currentSlotBout = r[slot as keyof typeof r] as MatchData | null;
+            if (currentSlotBout) {
+              const ov = findBoutOverride(latestDataRef.current.adminBoutOverrides, currentSlotBout.bout, currentEventId);
+              if (ov && ov.isTransferred && ov.transferredToRing && ov.transferredToRing !== ring.ringNumber) {
+                (r as any)[slot] = null;
+                ringChanged = true;
+                return;
+              }
+              const bout = { ...currentSlotBout };
               if (processBout(bout)) {
                 (r as any)[slot] = bout;
                 ringChanged = true;
@@ -1285,8 +1389,7 @@ export default function App() {
   const [showEditResultModal, setShowEditResultModal] = useState(false);
   const [showEditBoutDetailsModal, setShowEditBoutDetailsModal] = useState(false);
   const [showAddRingModal, setShowAddRingModal] = useState(false);
-  const [missingBoutPrompt, setMissingBoutPrompt] = useState<{ ringNumber: number; expectedBout: number; totalBouts: number } | null>(null);
-  const [finalBoutCheck, setFinalBoutCheck] = useState<{ ringNumber: number; remainingCount: number } | null>(null);
+
   const [ringNamingMode, setRingNamingMode] = useSyncedState<'number' | 'alphabet'>('tkd_ring_naming_mode', 'number');
   const [boutNumberingMode, setBoutNumberingMode] = useSyncedState<'numeric' | 'alphanumeric'>('tkd_bout_numbering_mode', 'alphanumeric');
   const [categories, setCategories] = useSyncedState<string[]>('tkd_categories', ["Junior Male -45kg", "Junior Female -42kg", "Senior Male -54kg", "INDIVIDUAL POOMSAE"]);
@@ -1391,9 +1494,27 @@ export default function App() {
   const [standbyNameFontScale, setStandbyNameFontScale] = useSyncedState<number>('tkd_standby_name_font_scale', 100);
   const [standbyClubFontScale, setStandbyClubFontScale] = useSyncedState<number>('tkd_standby_club_font_scale', 100);
   const [backupData, setBackupData] = useLocalState<Record<string, { mappings: BoutMapping[], matches: MatchData[] }>>('tkd_backup_data_v3', {});
-  const [backupToLoad, setBackupToLoad] = useState<{ mappings: Partial<BoutMapping>[], matches: MatchData[] } | null>(null);
+  const [teamLogos, setTeamLogos] = useSyncedState<Record<string, string>>('tkd_team_logos', {});
+  const [showPlayerLogos, setShowPlayerLogos] = useSyncedState<boolean>('tkd_show_player_logos', true);
+  const [isTeamLogosModalOpen, setIsTeamLogosModalOpen] = useState(false);
   const [isQuotaExceeded, setIsQuotaExceeded] = useState(false);
   const [showRebootModal, setShowRebootModal] = useState(false);
+  const [backupToLoad, setBackupToLoad] = useState<{ mappings: BoutMapping[]; matches: MatchData[] } | null>(null);
+
+  const handleSaveTeamLogo = (key: string, url: string) => {
+    setTeamLogos(prev => ({
+      ...(prev || {}),
+      [key]: url
+    }));
+  };
+
+  const handleDeleteTeamLogo = (key: string) => {
+    setTeamLogos(prev => {
+      const next = { ...(prev || {}) };
+      delete next[key];
+      return next;
+    });
+  };
 
   useEffect(() => {
     const handleQuotaExceeded = () => {
@@ -1442,6 +1563,28 @@ export default function App() {
 
   // Persistence & Cross-tab Sync handled by useSyncedState
 
+  const allExistingClubs = React.useMemo(() => {
+    const clubsSet = new Set<string>();
+    rings.forEach(r => {
+      if (r.currentBout?.blue_club) clubsSet.add(r.currentBout.blue_club);
+      if (r.currentBout?.red_club) clubsSet.add(r.currentBout.red_club);
+      if (r.onDeck?.blue_club) clubsSet.add(r.onDeck.blue_club);
+      if (r.onDeck?.red_club) clubsSet.add(r.onDeck.red_club);
+      if (r.inTheHole?.blue_club) clubsSet.add(r.inTheHole.blue_club);
+      if (r.inTheHole?.red_club) clubsSet.add(r.inTheHole.red_club);
+    });
+    boutQueue.forEach(q => {
+      if (q.data.blue_club) clubsSet.add(q.data.blue_club);
+      if (q.data.red_club) clubsSet.add(q.data.red_club);
+    });
+    matchHistory.forEach(h => {
+      if (h.winnerClub) clubsSet.add(h.winnerClub);
+      if (h.blue_club) clubsSet.add(h.blue_club);
+      if (h.red_club) clubsSet.add(h.red_club);
+    });
+    return Array.from(clubsSet).filter(c => c && c.trim() && c.trim() !== '---');
+  }, [rings, boutQueue, matchHistory]);
+
   const getRingName = (num: number) => {
     if (ringNamingMode === 'number') return num.toString();
     return String.fromCharCode(64 + num); // 1 -> A, 2 -> B, etc.
@@ -1468,12 +1611,28 @@ export default function App() {
     const completedHistory = matchHistory.filter(h => h.eventId === currentEventId && h.winner && h.winner !== '-' && h.winner.trim() !== '');
 
     return boutQueue
+      .map(item => {
+        const ov = findBoutOverride(adminBoutOverrides, item.data.bout, item.data.eventId || currentEventId);
+        if (ov && ov.isTransferred && ov.transferredToRing && (item.data.ring !== ov.transferredToRing || !item.data.isTransferred)) {
+          return {
+            ...item,
+            data: {
+              ...item.data,
+              ring: ov.transferredToRing,
+              transferredToRing: ov.transferredToRing,
+              isTransferred: true,
+              originalRing: ov.originalRing || item.data.originalRing || item.data.ring
+            }
+          };
+        }
+        return item;
+      })
       .filter(item => {
         const matchesEvent = (!item.data.eventId && !currentEventId) || item.data.eventId === currentEventId;
         const itemRing = parseRingNumber(item.data.ring);
         const matchesRing = ringNum === undefined || itemRing === parseRingNumber(ringNum);
         const matchesUserRing = user?.role === 'admin' || itemRing === parseRingNumber(user?.assignedRing);
-        const normalizedBout = normalizeBoutWithRing(item.data.bout, itemRing);
+        const normalizedBout = normalizeBoutWithRing(item.data.bout, itemRing, item.data.originalRing);
         const isCompleted = completedHistory.some(h => isBoutMatch(h.bout, normalizedBout));
         return matchesEvent && matchesRing && matchesUserRing && !isCompleted;
       })
@@ -1906,10 +2065,27 @@ export default function App() {
                   const winnerClub = (row.length >= 17 && row[16]) ? row[16]?.trim() : ''; // Column Q for 18-col sheets
 
                   if (matchNo && category && winner && winner !== '-' && winner !== '') {
-                    const blue_name = row[5]?.trim() || '';
-                    const blue_club = row[6]?.trim() || '';
-                    const red_name = row[7]?.trim() || '';
-                    const red_club = row[8]?.trim() || '';
+                    let blue_name = row[5]?.trim() || '';
+                    let blue_club = row[6]?.trim() || '';
+                    let red_name = row[7]?.trim() || '';
+                    let red_club = row[8]?.trim() || '';
+                    let effectiveCategory = category;
+                    let effectiveRingNo = ringNo;
+
+                    const override = findBoutOverride(latestDataRef.current.adminBoutOverrides, rawMatchNo || matchNo, currentEventId);
+
+                    if (override) {
+                      if (override.isManuallyEdited) {
+                        if (override.blue_name !== undefined) blue_name = override.blue_name;
+                        if (override.blue_club !== undefined) blue_club = override.blue_club;
+                        if (override.red_name !== undefined) red_name = override.red_name;
+                        if (override.red_club !== undefined) red_club = override.red_club;
+                        if (override.category !== undefined) effectiveCategory = override.category;
+                      }
+                      if (override.isTransferred && override.transferredToRing) {
+                        effectiveRingNo = override.transferredToRing;
+                      }
+                    }
                     
                     const normWinner = winner.trim().toLowerCase();
                     const normBlue = blue_name.toLowerCase();
@@ -1924,7 +2100,7 @@ export default function App() {
                     const historyId = `${currentEventId}_${matchNo}`;
                     const historyItem = {
                       bout: matchNo,
-                      category: category,
+                      category: effectiveCategory,
                       winner: winner,
                       winnerClub: winnerClub,
                       winnerSide: winnerSide,
@@ -1933,7 +2109,7 @@ export default function App() {
                       red_name: red_name,
                       red_club: red_club,
                       eventId: currentEventId,
-                      ring: ringNo,
+                      ring: effectiveRingNo,
                       syncedAt: new Date().toISOString()
                     };
                     
@@ -2057,13 +2233,35 @@ export default function App() {
                     const normBlue = blueName.toLowerCase();
                     const normRed = redName.toLowerCase();
 
+                    const override = findBoutOverride(latestDataRef.current.adminBoutOverrides, matchNo, currentEventId);
+
+                    let effectiveBlueName = blueName;
+                    let effectiveBlueClub = blueClub;
+                    let effectiveRedName = redName;
+                    let effectiveRedClub = redClub;
+                    let effectiveCategory = category;
+                    let effectiveRingNo = ringNo;
+
+                    if (override) {
+                      if (override.isManuallyEdited) {
+                        if (override.blue_name !== undefined) effectiveBlueName = override.blue_name;
+                        if (override.blue_club !== undefined) effectiveBlueClub = override.blue_club;
+                        if (override.red_name !== undefined) effectiveRedName = override.red_name;
+                        if (override.red_club !== undefined) effectiveRedClub = override.red_club;
+                        if (override.category !== undefined) effectiveCategory = override.category;
+                      }
+                      if (override.isTransferred && override.transferredToRing) {
+                        effectiveRingNo = override.transferredToRing;
+                      }
+                    }
+
                     let winnerClub = winnerClubFromSheet;
                     let winnerSide: 'Blue' | 'Red' | undefined = undefined;
-                    if (normWinner === normBlue || normBlue.includes(normWinner)) {
-                      if (!winnerClub) winnerClub = blueClub;
+                    if (normWinner === effectiveBlueName.toLowerCase() || effectiveBlueName.toLowerCase().includes(normWinner)) {
+                      if (!winnerClub) winnerClub = effectiveBlueClub;
                       winnerSide = 'Blue';
-                    } else if (normWinner === normRed || normRed.includes(normWinner)) {
-                      if (!winnerClub) winnerClub = redClub;
+                    } else if (normWinner === effectiveRedName.toLowerCase() || effectiveRedName.toLowerCase().includes(normWinner)) {
+                      if (!winnerClub) winnerClub = effectiveRedClub;
                       winnerSide = 'Red';
                     }
 
@@ -2072,21 +2270,24 @@ export default function App() {
                     const isDifferent = !existingItem || 
                                         existingItem.winner !== winnerTrimmed || 
                                         existingItem.winnerClub !== winnerClub ||
-                                        existingItem.winnerSide !== winnerSide;
+                                        existingItem.winnerSide !== winnerSide ||
+                                        existingItem.blue_name !== effectiveBlueName ||
+                                        existingItem.red_name !== effectiveRedName ||
+                                        existingItem.ring !== effectiveRingNo;
 
                     if (isDifferent && !isFirestoreQuotaExceeded) {
                       const historyItem = {
                         id: historyId,
                         bout: normalizedMatchNo,
-                        category: category,
+                        category: effectiveCategory,
                         winner: winnerTrimmed,
                         winnerClub: winnerClub,
-                        ring: ringNo,
+                        ring: effectiveRingNo,
                         ...(winnerSide && { winnerSide }),
-                        blue_name: blueName,
-                        blue_club: blueClub,
-                        red_name: redName,
-                        red_club: redClub,
+                        blue_name: effectiveBlueName,
+                        blue_club: effectiveBlueClub,
+                        red_name: effectiveRedName,
+                        red_club: effectiveRedClub,
                         eventId: currentEventId,
                         syncedAt: serverTimestamp()
                       };
@@ -2187,36 +2388,198 @@ export default function App() {
     });
   };
 
-  const transferBoutFromRingSlot = (ringNumber: number, slot: 'onDeck' | 'inTheHole', targetRing: number) => {
-    const ring = rings.find(r => r.ringNumber === ringNumber);
-    const match = ring ? ring[slot] : null;
-    if (!match) return;
+  const handleTransferBout = (
+    match: MatchData,
+    fromRing: number,
+    targetRing: number,
+    queueItemId?: string,
+    slot?: 'onDeck' | 'inTheHole'
+  ) => {
+    if (!match || fromRing === targetRing) return;
 
+    const eventObj = events.find(e => e.id === (match.eventId || currentEventId));
+    const evName = eventObj?.name || getCurrentEventName();
+    const evDate = eventObj?.eventDate || '';
+    const evId = match.eventId || currentEventId || 'default';
+    const boutNorm = normalizeBoutNumber(match.bout);
+    const overrideKey = `${evId}_${boutNorm}`;
+
+    // 1. Remove from all ring slots in rings if present in other rings
     setRings(prev => {
-      const updated = prev.map(r => r.ringNumber === ringNumber ? {
-        ...r,
-        [slot]: null
-      } : r);
+      const updated = prev.map(r => {
+        if (r.ringNumber === targetRing) return r;
+        let ringChanged = false;
+        const newRing = { ...r };
+        if (r.currentBout && isBoutMatch(r.currentBout.bout, match.bout)) {
+          newRing.currentBout = null;
+          ringChanged = true;
+        }
+        if (r.onDeck && isBoutMatch(r.onDeck.bout, match.bout)) {
+          newRing.onDeck = null;
+          ringChanged = true;
+        }
+        if (r.inTheHole && isBoutMatch(r.inTheHole.bout, match.bout)) {
+          newRing.inTheHole = null;
+          ringChanged = true;
+        }
+        if (Array.isArray(r.suspendedBouts) && r.suspendedBouts.some(b => isBoutMatch(b.bout, match.bout))) {
+          newRing.suspendedBouts = r.suspendedBouts.filter(b => !isBoutMatch(b.bout, match.bout));
+          ringChanged = true;
+        }
+        return ringChanged ? newRing : r;
+      });
       localStorage.setItem('tkd_rings', JSON.stringify(updated));
       return updated;
     });
 
-    const updatedMatch = {
+    // 2. Update / Add to queue for targetRing
+    const updatedMatch: MatchData = {
       ...match,
       ring: targetRing,
-      originalRing: match.originalRing || ringNumber
+      originalRing: match.originalRing || fromRing,
+      isTransferred: true,
+      transferredToRing: targetRing
     };
 
     setBoutQueue(prev => {
-      const updated = [...prev, {
-        id: Math.random().toString(36).substr(2, 9),
-        data: updatedMatch
-      }];
+      let found = false;
+      const mapped = prev.map(q => {
+        if (isBoutMatch(q.data.bout, match.bout) && (!q.data.eventId || q.data.eventId === evId)) {
+          found = true;
+          return {
+            ...q,
+            data: updatedMatch
+          };
+        }
+        return q;
+      });
+
+      let updated = mapped;
+      if (!found) {
+        updated = [...mapped, {
+          id: queueItemId || `transfer_${evId}_${boutNorm}_${Date.now()}`,
+          data: updatedMatch
+        }];
+      }
       localStorage.setItem('tkd_bout_queue', JSON.stringify(updated));
       return updated;
     });
 
-    addToSyncLog("Transfer Bout Ring", "success", `Transferred Bout ${match.bout} from Ring ${getRingName(ringNumber)} to Ring ${getRingName(targetRing)}`);
+    // 3. Register persistent override so background sync can never revert this transfer
+    const newOverride: AdminBoutOverride = {
+      id: overrideKey,
+      eventId: evId,
+      eventName: evName,
+      eventDate: evDate,
+      bout: boutNorm,
+      ring: targetRing,
+      originalRing: match.originalRing || fromRing,
+      transferredToRing: targetRing,
+      isTransferred: true,
+      updatedAt: Date.now()
+    };
+
+    setAdminBoutOverrides(prev => {
+      const updated = {
+        ...prev,
+        [overrideKey]: newOverride,
+        [`${evId}_${String(match.bout).trim()}`]: newOverride
+      };
+      localStorage.setItem('tkd_admin_bout_overrides', JSON.stringify(updated));
+      return updated;
+    });
+
+    // 4. Update backupData across rings
+    setBackupData(prev => {
+      const next = { ...prev };
+      const sourceKey = `${evId}_${fromRing}`;
+      const targetKey = `${evId}_${targetRing}`;
+
+      let movedMatch: MatchData | null = null;
+      if (next[sourceKey] && Array.isArray(next[sourceKey].matches)) {
+        const filtered = next[sourceKey].matches.filter(m => {
+          if (isBoutMatch(m.bout, match.bout)) {
+            movedMatch = {
+              ...m,
+              ring: targetRing,
+              originalRing: m.originalRing || fromRing,
+              isTransferred: true,
+              transferredToRing: targetRing
+            };
+            return false;
+          }
+          return true;
+        });
+        next[sourceKey] = { ...next[sourceKey], matches: filtered };
+      }
+
+      if (movedMatch) {
+        if (!next[targetKey]) next[targetKey] = { mappings: [], matches: [] };
+        const targetMatches = [...(next[targetKey].matches || [])];
+        if (!targetMatches.some(m => isBoutMatch(m.bout, match.bout))) {
+          targetMatches.push(movedMatch);
+        }
+        next[targetKey] = { ...next[targetKey], matches: targetMatches };
+      }
+
+      localStorage.setItem('tkd_backup_data_v3', JSON.stringify(next));
+
+      // Also persist to Firestore backup_data if available
+      if (!isFirestoreQuotaExceeded) {
+        if (next[sourceKey]) {
+          setDoc(doc(db, 'backup_data', sourceKey), {
+            eventId: evId,
+            ringNum: fromRing,
+            mappings: next[sourceKey].mappings || [],
+            matches: next[sourceKey].matches || [],
+            updatedAt: serverTimestamp()
+          }, { merge: true }).catch(() => {});
+        }
+        if (next[targetKey]) {
+          setDoc(doc(db, 'backup_data', targetKey), {
+            eventId: evId,
+            ringNum: targetRing,
+            mappings: next[targetKey].mappings || [],
+            matches: next[targetKey].matches || [],
+            updatedAt: serverTimestamp()
+          }, { merge: true }).catch(() => {});
+        }
+      }
+
+      return next;
+    });
+
+    // 5. Update matchHistory if this bout was completed or in history
+    setMatchHistory(prev => prev.map(h => 
+      isBoutMatch(h.bout, match.bout) && (!h.eventId || h.eventId === evId)
+        ? { ...h, ring: targetRing }
+        : h
+    ));
+
+    // 6. Sync transfer to Google Sheets using fromRing to match row in sheet
+    let activeUrl = googleSheetUrl;
+    if (!activeUrl && currentEventId) {
+      const ev = events.find(e => e.id === currentEventId);
+      if (ev && ev.sheetUrl) activeUrl = ev.sheetUrl;
+    }
+    if (activeUrl) {
+      rawUpdateTransferInGoogleSheets(
+        activeUrl,
+        fromRing,
+        match.bout,
+        `Transferred from Ring ${getRingName(fromRing)} to Ring ${getRingName(targetRing)}`,
+        evName
+      ).catch(err => console.warn("Google Sheet transfer sync failed:", err));
+    }
+
+    addToSyncLog("Transfer Bout Ring", "success", `Transferred Bout ${match.bout} from Ring ${getRingName(fromRing)} to Ring ${getRingName(targetRing)}`);
+  };
+
+  const transferBoutFromRingSlot = (ringNumber: number, slot: 'onDeck' | 'inTheHole', targetRing: number) => {
+    const ring = rings.find(r => r.ringNumber === ringNumber);
+    const match = ring ? ring[slot] : null;
+    if (!match) return;
+    handleTransferBout(match, ringNumber, targetRing, undefined, slot);
   };
 
   const pullRingSlotToActive = (ringNumber: number, slot: 'onDeck' | 'inTheHole') => {
@@ -2260,61 +2623,6 @@ export default function App() {
     handleBoutUpdate(ringNumber, itemData);
   };
 
-  const handleMissingBoutReason = async (ringNumber: number, boutNumber: number, reason: string) => {
-    const userRole = sessionStorage.getItem('user_role');
-    const assignedRing = sessionStorage.getItem('assigned_ring');
-    const targetRingLetter = String.fromCharCode(64 + ringNumber);
-    // Court Clerk has same authority as admin (unrestricted ring access)
-    if (false && userRole === 'court_clerk' && assignedRing !== targetRingLetter) {
-        alert("You are not authorized to modify this ring.");
-        return;
-    }
-
-    // Close prompt immediately for responsiveness
-    setMissingBoutPrompt(null);
-
-    if (googleSheetUrl) {
-      setIsSyncing(true);
-      const dummyMatch: MatchData = {
-        ring: ringNumber,
-        bout: boutNumber,
-        category: "Skipped",
-        blue_name: "-",
-        blue_club: "-",
-        red_name: "-",
-        red_club: "-",
-        privacy_mode: false,
-        eventId: currentEventId || null
-      };
-      
-      // Sync in background
-      Promise.all([
-        syncToGoogleSheets(googleSheetUrl, dummyMatch, getCurrentEventName(), reason),
-        updateWinnerInGoogleSheets(googleSheetUrl, ringNumber, boutNumber, reason, getCurrentEventName(), 'N/A')
-      ]).finally(() => setIsSyncing(false));
-    }
-
-    const ring = rings.find(r => r.ringNumber === ringNumber);
-    const nextExpectedBout = boutNumber + 1;
-
-    // Update the ring's nextBoutNumber
-    setRings(prev => {
-      const updated = prev.map(r => r.ringNumber === ringNumber ? { ...r, nextBoutNumber: nextExpectedBout } : r);
-      localStorage.setItem('tkd_rings', JSON.stringify(updated));
-      return updated;
-    });
-
-    if (ring && ring.totalBouts && nextExpectedBout <= ring.totalBouts) {
-      const sortedQueueForRing = getFilteredQueue(ringNumber);
-      if (sortedQueueForRing.length > 0) {
-        pullBout(sortedQueueForRing[0].id);
-      }
-    }
-    
-    // Always close the prompt after recording a reason.
-    // If there's no next bout in the queue, the ring will just become inactive.
-    setMissingBoutPrompt(null);
-  };
 
   const handleUpdateBoutNumberFromBracket = async (oldBoutId: string, newBoutId: string) => {
     // Determine the ring number from newBoutId if possible, or keep the old one?
@@ -2552,19 +2860,6 @@ export default function App() {
     });
   };
 
-  const handleMissingBoutManual = async (ringNumber: number, data: MatchData) => {
-    const userRole = sessionStorage.getItem('user_role');
-    const assignedRing = sessionStorage.getItem('assigned_ring');
-    const targetRingLetter = String.fromCharCode(64 + ringNumber);
-    // Court Clerk has same authority as admin (unrestricted ring access)
-    if (false && userRole === 'court_clerk' && assignedRing !== targetRingLetter) {
-        alert("You are not authorized to modify this ring.");
-        return;
-    }
-
-    setMissingBoutPrompt(null);
-    handleBoutUpdate(ringNumber, data);
-  };
 
   useEffect(() => {
     // Advancement logic: Pull winners to next bouts based on mappings
@@ -3080,11 +3375,6 @@ export default function App() {
       return !isCompleted;
     });
     
-    // Check if we need to prompt for final bouts
-    // If we have a next bout, and after pulling it, the queue for this ring will be < 3
-    if (nextBoutIndex !== -1 && !ring?.isFinalBouts && ringQueue.length < 4) {
-      setFinalBoutCheck({ ringNumber, remainingCount: ringQueue.length - 1 });
-    }
 
     // Auto-advance ring: Move onDeck to current, inTheHole to onDeck
     let pulledFromQueue = false;
@@ -3136,11 +3426,7 @@ export default function App() {
       syncToGoogleSheets(activeUrl, dataToSync, getCurrentEventName());
     }
 
-    // If queue is empty but we haven't reached total bouts, show the missing bout prompt
-    if (ring && ring.totalBouts && !ring.onDeck && !ring.inTheHole && ringQueue.length === (pulledFromQueue ? 1 : 0) && getBoutNumber(ring.currentBout?.bout || 0) < ring.totalBouts) {
-      setMissingBoutPrompt({ ringNumber, expectedBout: getBoutNumber(ring.currentBout?.bout || 0) + 1, totalBouts: ring.totalBouts });
     }
-  };
 
 
   const handleRestoreMatch = async (matchToRestore: MatchHistoryItem) => {
@@ -3782,10 +4068,7 @@ export default function App() {
         syncToGoogleSheets(activeUrl, dataToSync, getCurrentEventName());
       }
     } else if (ring && ring.totalBouts) {
-      const expectedBout = ring.nextBoutNumber || 1;
-      if (expectedBout <= ring.totalBouts) {
-        setMissingBoutPrompt({ ringNumber, expectedBout, totalBouts: ring.totalBouts });
-      }
+      return;
     } else {
       const defaultMatch: MatchData = {
         ring: ringNumber,
@@ -4690,6 +4973,15 @@ export default function App() {
                     <span className="hidden md:inline">Edit Details</span>
                     <span className="md:hidden">Details</span>
                   </button>
+                  <button 
+                    onClick={() => setIsTeamLogosModalOpen(true)}
+                    className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 md:px-5 py-2 md:py-2.5 bg-emerald-600 text-white rounded-xl text-[10px] md:text-sm font-black uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-200"
+                    title="Manage and Synchronize Team/Player Logos & Flags"
+                  >
+                    <Image size={16} />
+                    <span className="hidden md:inline">Logos & Flags</span>
+                    <span className="md:hidden">Logos</span>
+                  </button>
                   {user?.role !== 'ta' && (
                     <>
                       <button 
@@ -4931,18 +5223,24 @@ export default function App() {
                     
                     if (selectedRingObj) {
                       if (selectedRingObj.onDeck && selectedRingObj.onDeck.eventId === currentEventId) {
-                        upcomingBouts.push({
-                          id: `ondeck-${selectedRingObj.onDeck.bout}`,
-                          type: 'onDeck',
-                          data: selectedRingObj.onDeck
-                        });
+                        const ov = findBoutOverride(adminBoutOverrides, selectedRingObj.onDeck.bout, currentEventId);
+                        if (!(ov && ov.isTransferred && ov.transferredToRing && ov.transferredToRing !== selectedRingObj.ringNumber)) {
+                          upcomingBouts.push({
+                            id: `ondeck-${selectedRingObj.onDeck.bout}`,
+                            type: 'onDeck',
+                            data: { ...selectedRingObj.onDeck, ring: selectedRingObj.ringNumber }
+                          });
+                        }
                       }
                       if (selectedRingObj.inTheHole && selectedRingObj.inTheHole.eventId === currentEventId) {
-                        upcomingBouts.push({
-                          id: `inhole-${selectedRingObj.inTheHole.bout}`,
-                          type: 'inTheHole',
-                          data: selectedRingObj.inTheHole
-                        });
+                        const ov = findBoutOverride(adminBoutOverrides, selectedRingObj.inTheHole.bout, currentEventId);
+                        if (!(ov && ov.isTransferred && ov.transferredToRing && ov.transferredToRing !== selectedRingObj.ringNumber)) {
+                          upcomingBouts.push({
+                            id: `inhole-${selectedRingObj.inTheHole.bout}`,
+                            type: 'inTheHole',
+                            data: { ...selectedRingObj.inTheHole, ring: selectedRingObj.ringNumber }
+                          });
+                        }
                       }
                     }
                     
@@ -5025,8 +5323,7 @@ export default function App() {
                                                   } else if (item.type === 'inTheHole') {
                                                     transferBoutFromRingSlot(selectedRingObj.ringNumber, 'inTheHole', targetRing);
                                                   } else {
-                                                    setBoutQueue(prev => prev.map(q => q.id === item.id ? { ...q, data: { ...q.data, ring: targetRing, originalRing: q.data.originalRing || q.data.ring } } : q));
-                                                    addToSyncLog("Transfer Bout Ring", "success", `Transferred Bout ${item.data.bout} from Ring ${item.data.ring} to Ring ${targetRing}`);
+                                                    handleTransferBout(item.data, item.data.ring, targetRing, item.id);
                                                   }
                                                 }
                                               }}
@@ -5302,24 +5599,31 @@ export default function App() {
                     {(() => {
                       const userUpcomingBouts: { id: string; type: 'onDeck' | 'inTheHole' | 'normal'; data: MatchData }[] = [];
                       
-                      currentRings.filter(r => r.ringNumber === Number(user?.assignedRing)).forEach(ringObj => {
+                      const userAssignedRingNum = parseRingNumber(user?.assignedRing);
+                      currentRings.filter(r => r.ringNumber === userAssignedRingNum).forEach(ringObj => {
                         if (ringObj.onDeck && ringObj.onDeck.eventId === currentEventId) {
-                          userUpcomingBouts.push({
-                            id: `ondeck-${ringObj.ringNumber}-${ringObj.onDeck.bout}`,
-                            type: 'onDeck',
-                            data: ringObj.onDeck
-                          });
+                          const ov = findBoutOverride(adminBoutOverrides, ringObj.onDeck.bout, currentEventId);
+                          if (!(ov && ov.isTransferred && ov.transferredToRing && ov.transferredToRing !== ringObj.ringNumber)) {
+                            userUpcomingBouts.push({
+                              id: `ondeck-${ringObj.ringNumber}-${ringObj.onDeck.bout}`,
+                              type: 'onDeck',
+                              data: { ...ringObj.onDeck, ring: ringObj.ringNumber }
+                            });
+                          }
                         }
                         if (ringObj.inTheHole && ringObj.inTheHole.eventId === currentEventId) {
-                          userUpcomingBouts.push({
-                            id: `inhole-${ringObj.ringNumber}-${ringObj.inTheHole.bout}`,
-                            type: 'inTheHole',
-                            data: ringObj.inTheHole
-                          });
+                          const ov = findBoutOverride(adminBoutOverrides, ringObj.inTheHole.bout, currentEventId);
+                          if (!(ov && ov.isTransferred && ov.transferredToRing && ov.transferredToRing !== ringObj.ringNumber)) {
+                            userUpcomingBouts.push({
+                              id: `inhole-${ringObj.ringNumber}-${ringObj.inTheHole.bout}`,
+                              type: 'inTheHole',
+                              data: { ...ringObj.inTheHole, ring: ringObj.ringNumber }
+                            });
+                          }
                         }
                       });
 
-                      getFilteredQueue().forEach(item => {
+                      getFilteredQueue(userAssignedRingNum).forEach(item => {
                         userUpcomingBouts.push({
                           id: item.id,
                           type: 'normal',
@@ -5407,8 +5711,7 @@ export default function App() {
                                                     } else if (item.type === 'inTheHole') {
                                                       transferBoutFromRingSlot(item.data.ring, 'inTheHole', targetRing);
                                                     } else {
-                                                      setBoutQueue(prev => prev.map(q => q.id === item.id ? { ...q, data: { ...q.data, ring: targetRing, originalRing: q.data.originalRing || q.data.ring } } : q));
-                                                      addToSyncLog("Transfer Bout Ring", "success", `Transferred Bout ${item.data.bout} from Ring ${item.data.ring} to Ring ${targetRing}`);
+                                                      handleTransferBout(item.data, item.data.ring, targetRing, item.id);
                                                     }
                                                   }
                                                 }}
@@ -5951,6 +6254,32 @@ export default function App() {
                     </div>
                     <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-between">
                       <div>
+                        <p className="text-sm font-bold text-slate-700">Competitor Flags & Team Logos</p>
+                        <p className="text-[10px] text-slate-500">Show or hide player state/national flags and team logos across all views</p>
+                      </div>
+                      <div className="flex bg-slate-200 p-1 rounded-lg">
+                        <button 
+                          onClick={() => setShowPlayerLogos(true)}
+                          className={cn(
+                            "px-3 py-1 text-[10px] font-bold rounded-md transition-all",
+                            showPlayerLogos ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"
+                          )}
+                        >
+                          Show
+                        </button>
+                        <button 
+                          onClick={() => setShowPlayerLogos(false)}
+                          className={cn(
+                            "px-3 py-1 text-[10px] font-bold rounded-md transition-all",
+                            !showPlayerLogos ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"
+                          )}
+                        >
+                          Hide
+                        </button>
+                      </div>
+                    </div>
+                    <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-between">
+                      <div>
                         <p className="text-sm font-bold text-slate-700">Ring View Inspection Warning</p>
                         <p className="text-[10px] text-slate-500">Show pop-up warning in ring controls if competitor has not passed inspection</p>
                       </div>
@@ -6201,25 +6530,6 @@ export default function App() {
         />
       )}
 
-      {finalBoutCheck && (
-        <FinalBoutCheckModal 
-          ringNumber={finalBoutCheck.ringNumber}
-          remainingCount={finalBoutCheck.remainingCount}
-          onConfirmFinal={() => {
-            setRings(prev => {
-              const updated = prev.map(r => r.ringNumber === finalBoutCheck.ringNumber ? { ...r, isFinalBouts: true } : r);
-              localStorage.setItem('tkd_rings', JSON.stringify(updated));
-              return updated;
-            });
-            setFinalBoutCheck(null);
-          }}
-          onAddBout={() => {
-            setNewBoutInitialRing(finalBoutCheck.ringNumber);
-            setFinalBoutCheck(null);
-            setShowNewBoutModal(true);
-          }}
-        />
-      )}
 
       {showEditResultModal && (
         <EditResultModal
@@ -6411,6 +6721,33 @@ export default function App() {
               setBoutQueue(prev => [...prev, queueItem]);
               console.log("Adding non-existent bout to queue from EditBoutDetailsModal:", queueItem);
 
+              const eventObj = events.find(e => e.id === currentEventId);
+              const evName = eventObj?.name || getCurrentEventName();
+              const evDate = eventObj?.eventDate || '';
+              const evId = currentEventId || 'default';
+              const boutNorm = normalizeBoutNumber(targetNormalizedBout);
+              const overrideKey = `${evId}_${boutNorm}`;
+
+              setAdminBoutOverrides(prev => ({
+                ...prev,
+                [overrideKey]: {
+                  ...(prev[overrideKey] || {}),
+                  id: overrideKey,
+                  eventId: evId,
+                  eventName: evName,
+                  eventDate: evDate,
+                  bout: boutNorm,
+                  ring: ringNumber,
+                  blue_name: newMatchData.blue_name,
+                  blue_club: newMatchData.blue_club,
+                  red_name: newMatchData.red_name,
+                  red_club: newMatchData.red_club,
+                  category: newMatchData.category,
+                  isManuallyEdited: true,
+                  updatedAt: Date.now()
+                }
+              }));
+
               // Sync to Google Sheets as a new bout
               if (googleSheetUrl) {
                 setIsSyncing(true);
@@ -6418,36 +6755,130 @@ export default function App() {
                   .finally(() => setIsSyncing(false));
               }
             } else {
-              // Update in rings (all slots: current, onDeck, inTheHole)
-              setRings(prev => prev.map(r => {
-                if (r.ringNumber === ringNumber) {
-                  let changed = false;
-                  const newRing = { ...r };
+              // Record persistent override so background sync can never overwrite this edit
+              const eventObj = events.find(e => e.id === currentEventId);
+              const evName = eventObj?.name || getCurrentEventName();
+              const evDate = eventObj?.eventDate || '';
+              const evId = currentEventId || 'default';
+              const boutNorm = normalizeBoutNumber(boutNumber);
+              const overrideKey = `${evId}_${boutNorm}`;
 
-                  if (r.currentBout && isBoutMatch(r.currentBout.bout, boutNumber)) {
-                    newRing.currentBout = { ...r.currentBout, ...updates };
-                    changed = true;
-                  }
-                  if (r.onDeck && isBoutMatch(r.onDeck.bout, boutNumber)) {
-                    newRing.onDeck = { ...r.onDeck, ...updates };
-                    changed = true;
-                  }
-                  if (r.inTheHole && isBoutMatch(r.inTheHole.bout, boutNumber)) {
-                    newRing.inTheHole = { ...r.inTheHole, ...updates };
-                    changed = true;
-                  }
+              setAdminBoutOverrides(prev => {
+                const existingOv = prev[overrideKey] || findBoutOverride(prev, boutNumber, evId);
+                const effectiveRing = (existingOv && existingOv.isTransferred && existingOv.transferredToRing) 
+                  ? existingOv.transferredToRing 
+                  : ringNumber;
 
-                  return changed ? newRing : r;
+                return {
+                  ...prev,
+                  [overrideKey]: {
+                    ...(existingOv || {}),
+                    id: overrideKey,
+                    eventId: evId,
+                    eventName: evName,
+                    eventDate: evDate,
+                    bout: boutNorm,
+                    ring: effectiveRing,
+                    ...(existingOv?.isTransferred && {
+                      isTransferred: true,
+                      transferredToRing: effectiveRing,
+                      originalRing: existingOv.originalRing
+                    }),
+                    blue_name: updates.blue_name?.toUpperCase() || '',
+                    blue_club: updates.blue_club?.toUpperCase() || '',
+                    red_name: updates.red_name?.toUpperCase() || '',
+                    red_club: updates.red_club?.toUpperCase() || '',
+                    category: updates.category?.toUpperCase() || '',
+                    isManuallyEdited: true,
+                    updatedAt: Date.now()
+                  }
+                };
+              });
+
+              // Update in backupData across all rings
+              setBackupData(prev => {
+                const next = { ...prev };
+                let updatedBackup = false;
+                Object.keys(next).forEach(groupKey => {
+                  if (groupKey.startsWith(`${evId}_`)) {
+                    const ringData = next[groupKey];
+                    if (ringData && Array.isArray(ringData.matches)) {
+                      const newMatches = ringData.matches.map(m => {
+                        if (isBoutMatch(m.bout, boutNumber)) {
+                          updatedBackup = true;
+                          return {
+                            ...m,
+                            blue_name: updates.blue_name?.toUpperCase() || m.blue_name,
+                            blue_club: updates.blue_club?.toUpperCase() || m.blue_club,
+                            red_name: updates.red_name?.toUpperCase() || m.red_name,
+                            red_club: updates.red_club?.toUpperCase() || m.red_club,
+                            category: updates.category?.toUpperCase() || m.category,
+                            isManuallyEdited: true
+                          };
+                        }
+                        return m;
+                      });
+                      if (updatedBackup) {
+                        next[groupKey] = { ...ringData, matches: newMatches };
+                      }
+                    }
+                  }
+                });
+                if (updatedBackup) {
+                  localStorage.setItem('tkd_backup_data_v3', JSON.stringify(next));
+                  if (!isFirestoreQuotaExceeded) {
+                    Object.keys(next).forEach(groupKey => {
+                      if (groupKey.startsWith(`${evId}_`)) {
+                        setDoc(doc(db, 'backup_data', groupKey), {
+                          eventId: evId,
+                          mappings: next[groupKey].mappings || [],
+                          matches: next[groupKey].matches || [],
+                          updatedAt: serverTimestamp()
+                        }, { merge: true }).catch(() => {});
+                      }
+                    });
+                  }
                 }
-                return r;
+                return next;
+              });
+
+              // Update in rings (all rings and all slots: current, onDeck, inTheHole, suspendedBouts)
+              setRings(prev => prev.map(r => {
+                let changed = false;
+                const newRing = { ...r };
+
+                if (r.currentBout && isBoutMatch(r.currentBout.bout, boutNumber)) {
+                  newRing.currentBout = { ...r.currentBout, ...updates, isManuallyEdited: true };
+                  changed = true;
+                }
+                if (r.onDeck && isBoutMatch(r.onDeck.bout, boutNumber)) {
+                  newRing.onDeck = { ...r.onDeck, ...updates, isManuallyEdited: true };
+                  changed = true;
+                }
+                if (r.inTheHole && isBoutMatch(r.inTheHole.bout, boutNumber)) {
+                  newRing.inTheHole = { ...r.inTheHole, ...updates, isManuallyEdited: true };
+                  changed = true;
+                }
+                if (Array.isArray(r.suspendedBouts)) {
+                  const newSuspended = r.suspendedBouts.map(sb => {
+                    if (isBoutMatch(sb.bout, boutNumber)) {
+                      changed = true;
+                      return { ...sb, ...updates, isManuallyEdited: true };
+                    }
+                    return sb;
+                  });
+                  if (changed) newRing.suspendedBouts = newSuspended;
+                }
+
+                return changed ? newRing : r;
               }));
 
               // Update in queue
               setBoutQueue(prev => prev.map(q => {
-                if (q.data.ring === ringNumber && isBoutMatch(q.data.bout, boutNumber)) {
+                if (isBoutMatch(q.data.bout, boutNumber)) {
                   return {
                     ...q,
-                    data: { ...q.data, ...updates }
+                    data: { ...q.data, ...updates, isManuallyEdited: true }
                   };
                 }
                 return q;
@@ -6730,17 +7161,15 @@ export default function App() {
         />
       )}
 
-      {missingBoutPrompt && (
-        <MissingBoutModal
-          prompt={missingBoutPrompt}
-          onClose={() => setMissingBoutPrompt(null)}
-          onSubmitReason={handleMissingBoutReason}
-          onSubmitManual={handleMissingBoutManual}
-          categories={categories}
-          clubs={clubs}
-          boutNumberingMode={boutNumberingMode}
-        />
-      )}
+      <TeamLogosManagerModal
+        isOpen={isTeamLogosModalOpen}
+        onClose={() => setIsTeamLogosModalOpen(false)}
+        teamLogos={teamLogos}
+        onSaveTeamLogo={handleSaveTeamLogo}
+        onDeleteTeamLogo={handleDeleteTeamLogo}
+        existingClubs={allExistingClubs}
+      />
+
 
       {/* Mobile Bottom Navigation */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 px-6 py-3 flex items-center justify-between z-[60] shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
@@ -6925,225 +7354,7 @@ function RebootConfirmModal({ onClose, onConfirm, isAdmin }: RebootConfirmModalP
   );
 }
 
-interface MissingBoutModalProps {
-  prompt: { ringNumber: number; expectedBout: number; totalBouts: number };
-  onClose: () => void;
-  onSubmitReason: (ringNumber: number, boutNumber: number, reason: string) => void;
-  onSubmitManual: (ringNumber: number, data: MatchData) => void;
-  categories: string[];
-  clubs: string[];
-}
 
-function MissingBoutModal({ prompt, onClose, onSubmitReason, onSubmitManual, categories, clubs, boutNumberingMode = 'alphanumeric' }: MissingBoutModalProps & { boutNumberingMode?: 'numeric' | 'alphanumeric' }) {
-  const [mode, setMode] = useState<'reason' | 'manual'>('reason');
-  const [reason, setReason] = useState('Walkover');
-  const [customReason, setCustomReason] = useState('');
-
-  const [manualData, setManualData] = useState<MatchData>(() => {
-    const savedCategory = localStorage.getItem('tkd_last_category') || categories[0] || '';
-    const savedBlueClub = localStorage.getItem('tkd_last_blue_club') || '';
-    const savedRedClub = localStorage.getItem('tkd_last_red_club') || '';
-    
-    return {
-      ring: prompt.ringNumber,
-      bout: prompt.expectedBout,
-      category: savedCategory,
-      blue_name: '',
-      blue_club: savedBlueClub,
-      red_name: '',
-      red_club: savedRedClub,
-      privacy_mode: false
-    };
-  });
-
-  const handleClearMemory = () => {
-    localStorage.removeItem('tkd_last_category');
-    localStorage.removeItem('tkd_last_blue_club');
-    localStorage.removeItem('tkd_last_red_club');
-    setManualData(prev => ({
-      ...prev,
-      category: '',
-      blue_club: '',
-      red_club: ''
-    }));
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (mode === 'reason') {
-      const finalReason = reason === 'Other' ? customReason : reason;
-      onSubmitReason(prompt.ringNumber, prompt.expectedBout, finalReason);
-    } else {
-      localStorage.setItem('tkd_last_category', manualData.category);
-      localStorage.setItem('tkd_last_blue_club', manualData.blue_club);
-      localStorage.setItem('tkd_last_red_club', manualData.red_club);
-      onSubmitManual(prompt.ringNumber, manualData);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-      <motion.div
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden"
-      >
-        <div className="p-6 bg-slate-900 text-white flex items-center justify-between">
-          <div>
-            <h2 className="text-xl font-black">Queue Empty</h2>
-            <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">Bout {formatBoutNumber(prompt.ringNumber, prompt.expectedBout, boutNumberingMode)} of {formatBoutNumber(prompt.ringNumber, prompt.totalBouts, boutNumberingMode)}</p>
-          </div>
-        </div>
-
-        <div className="p-6 space-y-6">
-          <div className="flex bg-slate-100 p-1 rounded-xl">
-            <button
-              type="button"
-              onClick={() => setMode('reason')}
-              className={`flex-1 py-2 text-xs font-bold uppercase tracking-widest rounded-lg transition-colors ${mode === 'reason' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-            >
-              Record Reason
-            </button>
-            <button
-              type="button"
-              onClick={() => setMode('manual')}
-              className={`flex-1 py-2 text-xs font-bold uppercase tracking-widest rounded-lg transition-colors ${mode === 'manual' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-            >
-              Manual Entry
-            </button>
-          </div>
-
-          <form id="missing-bout-form" onSubmit={handleSubmit} className="space-y-4" autoComplete="off">
-            {mode === 'reason' ? (
-              <div className="space-y-4">
-                <p className="text-sm text-slate-600">
-                  There are no upcoming bouts in the queue for Ring {prompt.ringNumber}. Please provide a reason to skip Bout {prompt.expectedBout} and continue.
-                </p>
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Reason</label>
-                  <select
-                    value={reason}
-                    onChange={(e) => setReason(e.target.value)}
-                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold"
-                    autoComplete="off"
-                  >
-                    <option value="Walkover">Walkover</option>
-                    <option value="Player No-Show">Player No-Show</option>
-                    <option value="Disqualification">Disqualification</option>
-                    <option value="Break / Lunch">Break / Lunch</option>
-                    <option value="Other">Other...</option>
-                  </select>
-                </div>
-                {reason === 'Other' && (
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Specify Reason</label>
-                    <input
-                      type="text"
-                      value={customReason}
-                      onChange={(e) => setCustomReason(e.target.value)}
-                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold"
-                      required
-                      placeholder="Enter reason..."
-                      autoComplete="off"
-                    />
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Category</label>
-                  <select
-                    value={manualData.category}
-                    onChange={(e) => setManualData({...manualData, category: e.target.value})}
-                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold"
-                    required
-                    autoComplete="off"
-                  >
-                    <option value="" disabled>Select Category</option>
-                    {categories.map((cat, i) => (
-                      <option key={`${cat}-${i}`} value={cat}>{cat}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-blue-500 uppercase tracking-widest ml-1">Blue Player</label>
-                    <input
-                      type="text"
-                      value={manualData.blue_name}
-                      onChange={(e) => setManualData({...manualData, blue_name: e.target.value})}
-                      className="w-full px-3 py-2 bg-white border border-blue-200 rounded-xl text-sm font-bold"
-                      placeholder="Name"
-                      required
-                      autoComplete="off"
-                    />
-                    <select
-                      value={manualData.blue_club}
-                      onChange={(e) => setManualData({...manualData, blue_club: e.target.value})}
-                      className="w-full px-3 py-2 bg-white border border-blue-200 rounded-xl text-sm font-bold"
-                      required
-                      autoComplete="off"
-                    >
-                      <option value="" disabled>Select Club</option>
-                      {clubs.map((club, i) => (
-                        <option key={`${club}-${i}`} value={club}>{club}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-red-500 uppercase tracking-widest ml-1">Red Player</label>
-                    <input
-                      type="text"
-                      value={manualData.red_name}
-                      onChange={(e) => setManualData({...manualData, red_name: e.target.value})}
-                      className="w-full px-3 py-2 bg-white border border-red-200 rounded-xl text-sm font-bold"
-                      placeholder="Name"
-                      required
-                      autoComplete="off"
-                    />
-                    <select
-                      value={manualData.red_club}
-                      onChange={(e) => setManualData({...manualData, red_club: e.target.value})}
-                      className="w-full px-3 py-2 bg-white border border-red-200 rounded-xl text-sm font-bold"
-                      required
-                      autoComplete="off"
-                    >
-                      <option value="" disabled>Select Club</option>
-                      {clubs.map((club, i) => (
-                        <option key={`${club}-${i}`} value={club}>{club}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              </div>
-            )}
-          </form>
-
-          <div className="flex gap-3 pt-2">
-            {mode === 'manual' && (
-              <button
-                type="button"
-                onClick={handleClearMemory}
-                className="px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl font-black text-xs uppercase tracking-widest transition-colors"
-                title="Clear remembered category and clubs"
-              >
-                Clear Memory
-              </button>
-            )}
-            <button
-              type="submit"
-              form="missing-bout-form"
-              className="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-lg shadow-red-200 transition-all"
-            >
-              {mode === 'reason' ? 'Record & Continue' : 'Start Bout'}
-            </button>
-          </div>
-        </div>
-      </motion.div>
-    </div>
-  );
-}
 
 function NavGroup({ icon, label, children, isActive = false }: { icon: React.ReactNode, label: string, children: React.ReactNode, isActive?: boolean }) {
   const [isOpen, setIsOpen] = useState(isActive);
@@ -7439,60 +7650,6 @@ function EditResultModal({ onClose, onSubmit, rings, queue, user, boutNumberingM
   );
 }
 
-interface FinalBoutCheckModalProps {
-  ringNumber: number;
-  remainingCount: number;
-  onConfirmFinal: () => void;
-  onAddBout: () => void;
-}
-
-function FinalBoutCheckModal({ ringNumber, remainingCount, onConfirmFinal, onAddBout }: FinalBoutCheckModalProps) {
-  return (
-    <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
-      <motion.div 
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden"
-      >
-        <div className="p-6 bg-red-600 text-white flex items-center gap-4">
-          <div className="w-12 h-12 bg-white/20 rounded-2xl flex items-center justify-center">
-            <AlertTriangle size={24} />
-          </div>
-          <div>
-            <h2 className="text-xl font-black tracking-tight">Upcoming Bouts Alert</h2>
-            <p className="text-xs text-red-100 font-bold uppercase tracking-widest">Ring {ringNumber}</p>
-          </div>
-        </div>
-        
-        <div className="p-8 space-y-6">
-          <div className="space-y-2 text-center">
-            <p className="text-slate-600 font-medium">
-              There are only <span className="text-red-600 font-black">{remainingCount}</span> upcoming bouts remaining for this ring.
-            </p>
-            <p className="text-sm text-slate-500">
-              A minimum of 3 standby bouts is required unless these are the final bouts of the session.
-            </p>
-          </div>
-          
-          <div className="flex flex-col gap-3">
-            <button 
-              onClick={onConfirmFinal}
-              className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black uppercase tracking-widest hover:bg-slate-800 transition-all shadow-lg shadow-slate-200"
-            >
-              Yes, these are final bouts
-            </button>
-            <button 
-              onClick={onAddBout}
-              className="w-full py-4 bg-white text-slate-900 border-2 border-slate-200 rounded-2xl font-black uppercase tracking-widest hover:bg-slate-50 transition-all"
-            >
-              No, add more bouts
-            </button>
-          </div>
-        </div>
-      </motion.div>
-    </div>
-  );
-}
 
 interface NewBoutModalProps {
   onClose: () => void;
@@ -9036,38 +9193,45 @@ function FighterSide({ color, name, club, privacy, inspected, activeNameFontScal
   return (
     <div className="flex-1 space-y-1">
       <div className={cn(
-        "flex items-center gap-1 text-[11px] font-black uppercase tracking-widest mb-1",
+        "flex items-center justify-between text-[11px] font-black uppercase tracking-widest mb-1",
         inspected 
           ? (color === 'blue' ? "text-[#00a2e8]" : "text-[#ed1c24]")
           : "text-slate-400"
       )}>
-        INSPECTION {inspected ? <Check size={12} strokeWidth={4} /> : <X size={12} strokeWidth={4} />}
+        <span className="flex items-center gap-1">
+          INSPECTION {inspected ? <Check size={12} strokeWidth={4} /> : <X size={12} strokeWidth={4} />}
+        </span>
       </div>
       <div className={cn(
         "h-1 w-full rounded-full mb-2",
         color === 'blue' ? "bg-[#00a2e8]" : "bg-[#ed1c24]"
       )} />
-      <p 
-        className="font-black text-slate-800 leading-tight line-clamp-3 whitespace-normal break-words"
-        style={{
-          fontSize: `${baseSize * (activeNameFontScale / 100)}px`,
-          lineHeight: 1.15
-        }}
-      >
-        {privacy ? "---" : cleanPlaceholder(name)}
-      </p>
-      <p 
-        className={cn(
-          "font-bold uppercase",
-          color === 'blue' ? "text-[#00a2e8]" : "text-[#ed1c24]"
-        )}
-        style={{
-          fontSize: `${15 * (activeClubFontScale / 100)}px`,
-          lineHeight: 1.15
-        }}
-      >
-        {cleanPlaceholder(club)}
-      </p>
+      <div className="flex items-start gap-2.5">
+        <PlayerLogoBadge club={club} name={name} size="md" className="shrink-0 mt-0.5" />
+        <div className="min-w-0 flex-1">
+          <p 
+            className="font-black text-slate-800 leading-tight line-clamp-3 whitespace-normal break-words"
+            style={{
+              fontSize: `${baseSize * (activeNameFontScale / 100)}px`,
+              lineHeight: 1.15
+            }}
+          >
+            {privacy ? "---" : cleanPlaceholder(name)}
+          </p>
+          <p 
+            className={cn(
+              "font-bold uppercase",
+              color === 'blue' ? "text-[#00a2e8]" : "text-[#ed1c24]"
+            )}
+            style={{
+              fontSize: `${15 * (activeClubFontScale / 100)}px`,
+              lineHeight: 1.15
+            }}
+          >
+            {cleanPlaceholder(club)}
+          </p>
+        </div>
+      </div>
     </div>
   );
 }
@@ -9543,6 +9707,7 @@ function StandbyView({
   const [syncedClubFontScale, setSyncedClubFontScale] = useSyncedState<number>('tkd_active_club_font_scale', 100);
   const [syncedStandbyNameFontScale, setSyncedStandbyNameFontScale] = useSyncedState<number>('tkd_standby_name_font_scale', 100);
   const [syncedStandbyClubFontScale, setSyncedStandbyClubFontScale] = useSyncedState<number>('tkd_standby_club_font_scale', 100);
+  const [teamLogos] = useSyncedState<Record<string, string>>('tkd_team_logos', {});
   const effectiveNameScale = activeNameFontScale ?? syncedNameFontScale;
   const effectiveSetNameScale = setActiveNameFontScale ?? setSyncedNameFontScale;
   const effectiveClubScale = activeClubFontScale ?? syncedClubFontScale;
@@ -9816,36 +9981,54 @@ function StandbyView({
                       {/* Players */}
                       <div className="col-span-10 flex flex-col">
                         <div className={cn(
-                          "flex-1 bg-blue-600/90 flex flex-col justify-center px-4 relative",
+                          "flex-1 bg-blue-600/90 flex items-center px-4 relative gap-3 min-w-0",
                           !isPoomsaeModeCurrent && "border-b border-white/10"
                         )}>
-                          <p 
-                            className="text-[14px] font-bold text-white uppercase leading-none mb-1"
-                            style={effectiveClubScale !== 100 ? { fontSize: `calc(14px * ${effectiveClubScale / 100})`, lineHeight: 1.15 } : undefined}
-                          >
-                            {current ? cleanPlaceholder(current.blue_club || "") : "---"}
-                          </p>
-                          <h4 
-                            className="text-[27px] font-black text-white uppercase leading-none truncate"
-                            style={effectiveNameScale !== 100 ? { fontSize: `calc(27px * ${effectiveNameScale / 100})`, lineHeight: 1.15 } : undefined}
-                          >
-                            {current ? cleanPlaceholder(current.blue_name || "") : "---"}
-                          </h4>
-                        </div>
-                        {!isPoomsaeModeCurrent && (
-                          <div className="flex-1 bg-red-600/90 flex flex-col justify-center px-4 relative">
+                          <PlayerLogoBadge
+                            club={current?.blue_club}
+                            name={current?.blue_name}
+                            customLogos={teamLogos}
+                            directLogo={current?.blue_logo || current?.blue_flag}
+                            size="md"
+                          />
+                          <div className="flex-1 min-w-0 flex flex-col justify-center">
                             <p 
-                              className="text-[14px] font-bold text-white uppercase leading-none mb-1"
+                              className="text-[14px] font-bold text-white uppercase leading-none mb-1 truncate"
                               style={effectiveClubScale !== 100 ? { fontSize: `calc(14px * ${effectiveClubScale / 100})`, lineHeight: 1.15 } : undefined}
                             >
-                              {current ? cleanPlaceholder(current.red_club || "") : "---"}
+                              {current ? cleanPlaceholder(current.blue_club || "") : "---"}
                             </p>
                             <h4 
                               className="text-[27px] font-black text-white uppercase leading-none truncate"
                               style={effectiveNameScale !== 100 ? { fontSize: `calc(27px * ${effectiveNameScale / 100})`, lineHeight: 1.15 } : undefined}
                             >
-                              {current ? cleanPlaceholder(current.red_name || "") : "---"}
+                              {current ? cleanPlaceholder(current.blue_name || "") : "---"}
                             </h4>
+                          </div>
+                        </div>
+                        {!isPoomsaeModeCurrent && (
+                          <div className="flex-1 bg-red-600/90 flex items-center px-4 relative gap-3 min-w-0">
+                            <PlayerLogoBadge
+                              club={current?.red_club}
+                              name={current?.red_name}
+                              customLogos={teamLogos}
+                              directLogo={current?.red_logo || current?.red_flag}
+                              size="md"
+                            />
+                            <div className="flex-1 min-w-0 flex flex-col justify-center">
+                              <p 
+                                className="text-[14px] font-bold text-white uppercase leading-none mb-1 truncate"
+                                style={effectiveClubScale !== 100 ? { fontSize: `calc(14px * ${effectiveClubScale / 100})`, lineHeight: 1.15 } : undefined}
+                              >
+                                {current ? cleanPlaceholder(current.red_club || "") : "---"}
+                              </p>
+                              <h4 
+                                className="text-[27px] font-black text-white uppercase leading-none truncate"
+                                style={effectiveNameScale !== 100 ? { fontSize: `calc(27px * ${effectiveNameScale / 100})`, lineHeight: 1.15 } : undefined}
+                              >
+                                {current ? cleanPlaceholder(current.red_name || "") : "---"}
+                              </h4>
+                            </div>
                           </div>
                         )}
                       </div>
@@ -9874,25 +10057,34 @@ function StandbyView({
                         {b?.data?.bout ? formatBoutNumber(ring.ringNumber, b.data.bout, boutNumberingMode) : "---"}
                       </div>
                       <div className={cn(
-                        "flex flex-col justify-center px-3 relative",
+                        "flex items-center px-3 relative gap-2 min-w-0",
                         isPoomsaeItem ? "col-span-10" : "col-span-5 border-r border-white/10",
                         isRingInactive ? "bg-slate-800" : "bg-blue-600/80"
                       )}>
-                        <span 
-                          style={effectiveStandbyClubScale !== 100 ? { fontSize: `calc(13px * ${effectiveStandbyClubScale / 100})`, lineHeight: 1.15 } : undefined}
-                          className="text-[13px] font-bold text-white uppercase leading-tight break-words whitespace-normal w-full"
-                        >
-                          {cleanPlaceholder(b?.data.blue_club || "")}
-                        </span>
-                        <span 
-                          style={effectiveStandbyNameScale !== 100 ? { fontSize: `calc(16px * ${effectiveStandbyNameScale / 100})`, lineHeight: 1.15 } : undefined}
-                          className={cn(
-                            "text-[16px] font-black uppercase leading-tight break-words whitespace-normal w-full mt-0.5",
-                            isRingInactive ? "text-slate-400" : "text-white"
-                          )}
-                        >
-                          {cleanPlaceholder(b?.data.blue_name || "")}
-                        </span>
+                        <PlayerLogoBadge
+                          club={b?.data.blue_club}
+                          name={b?.data.blue_name}
+                          customLogos={teamLogos}
+                          directLogo={b?.data.blue_logo || b?.data.blue_flag}
+                          size="sm"
+                        />
+                        <div className="flex-1 min-w-0 flex flex-col justify-center">
+                          <span 
+                            style={effectiveStandbyClubScale !== 100 ? { fontSize: `calc(13px * ${effectiveStandbyClubScale / 100})`, lineHeight: 1.15 } : undefined}
+                            className="text-[13px] font-bold text-white uppercase leading-tight truncate w-full"
+                          >
+                            {cleanPlaceholder(b?.data.blue_club || "")}
+                          </span>
+                          <span 
+                            style={effectiveStandbyNameScale !== 100 ? { fontSize: `calc(16px * ${effectiveStandbyNameScale / 100})`, lineHeight: 1.15 } : undefined}
+                            className={cn(
+                              "text-[16px] font-black uppercase leading-tight truncate w-full mt-0.5",
+                              isRingInactive ? "text-slate-400" : "text-white"
+                            )}
+                          >
+                            {cleanPlaceholder(b?.data.blue_name || "")}
+                          </span>
+                        </div>
                         {b?.data.blue_inspected ? (
                           <div className="absolute bottom-1 right-2 z-10">
                             <span 
@@ -9920,24 +10112,33 @@ function StandbyView({
                       </div>
                       {!isPoomsaeItem && (
                         <div className={cn(
-                          "col-span-5 flex flex-col justify-center px-3 relative",
+                          "col-span-5 flex items-center px-3 relative gap-2 min-w-0",
                           isRingInactive ? "bg-slate-800" : "bg-red-600/80"
                         )}>
-                          <span 
-                            style={effectiveStandbyClubScale !== 100 ? { fontSize: `calc(13px * ${effectiveStandbyClubScale / 100})`, lineHeight: 1.15 } : undefined}
-                            className="text-[13px] font-bold text-white uppercase leading-tight break-words whitespace-normal w-full"
-                          >
-                            {cleanPlaceholder(b?.data.red_club || "")}
-                          </span>
-                          <span 
-                            style={effectiveStandbyNameScale !== 100 ? { fontSize: `calc(16px * ${effectiveStandbyNameScale / 100})`, lineHeight: 1.15 } : undefined}
-                            className={cn(
-                              "text-[16px] font-black uppercase leading-tight break-words whitespace-normal w-full mt-0.5",
-                              isRingInactive ? "text-slate-400" : "text-white"
-                            )}
-                          >
-                            {cleanPlaceholder(b?.data.red_name || "")}
-                          </span>
+                          <PlayerLogoBadge
+                            club={b?.data.red_club}
+                            name={b?.data.red_name}
+                            customLogos={teamLogos}
+                            directLogo={b?.data.red_logo || b?.data.red_flag}
+                            size="sm"
+                          />
+                          <div className="flex-1 min-w-0 flex flex-col justify-center">
+                            <span 
+                              style={effectiveStandbyClubScale !== 100 ? { fontSize: `calc(13px * ${effectiveStandbyClubScale / 100})`, lineHeight: 1.15 } : undefined}
+                              className="text-[13px] font-bold text-white uppercase leading-tight truncate w-full"
+                            >
+                              {cleanPlaceholder(b?.data.red_club || "")}
+                            </span>
+                            <span 
+                              style={effectiveStandbyNameScale !== 100 ? { fontSize: `calc(16px * ${effectiveStandbyNameScale / 100})`, lineHeight: 1.15 } : undefined}
+                              className={cn(
+                                "text-[16px] font-black uppercase leading-tight truncate w-full mt-0.5",
+                                isRingInactive ? "text-slate-400" : "text-white"
+                              )}
+                            >
+                              {cleanPlaceholder(b?.data.red_name || "")}
+                            </span>
+                          </div>
                           {b?.data.red_inspected ? (
                             <div className="absolute bottom-1 right-2 z-10">
                               <span 
@@ -10042,6 +10243,7 @@ function SiteView({
   const [syncedClubFontScale, setSyncedClubFontScale] = useSyncedState<number>('tkd_active_club_font_scale', 100);
   const [syncedStandbyNameFontScale, setSyncedStandbyNameFontScale] = useSyncedState<number>('tkd_standby_name_font_scale', 100);
   const [syncedStandbyClubFontScale, setSyncedStandbyClubFontScale] = useSyncedState<number>('tkd_standby_club_font_scale', 100);
+  const [teamLogos] = useSyncedState<Record<string, string>>('tkd_team_logos', {});
   const effectiveNameScale = activeNameFontScale ?? syncedNameFontScale;
   const effectiveSetNameScale = setActiveNameFontScale ?? setSyncedNameFontScale;
   const effectiveClubScale = activeClubFontScale ?? syncedClubFontScale;
@@ -10292,36 +10494,54 @@ function SiteView({
                       {/* Players */}
                       <div className="col-span-10 flex flex-col">
                         <div className={cn(
-                          "flex-1 bg-blue-600/90 flex flex-col justify-center px-4 relative",
+                          "flex-1 bg-blue-600/90 flex items-center px-4 relative gap-3 min-w-0",
                           !isPoomsaeModeCurrent && "border-b border-white/10"
                         )}>
-                          <p 
-                            className="text-[14px] font-bold text-[#ffd700] uppercase leading-none mb-1"
-                            style={effectiveClubScale !== 100 ? { fontSize: `calc(14px * ${effectiveClubScale / 100})`, lineHeight: 1.15 } : undefined}
-                          >
-                            {current ? cleanPlaceholder(current.blue_club || "") : "---"}
-                          </p>
-                          <h4 
-                            className="text-[27px] font-black text-white uppercase leading-none truncate"
-                            style={effectiveNameScale !== 100 ? { fontSize: `calc(27px * ${effectiveNameScale / 100})`, lineHeight: 1.15 } : undefined}
-                          >
-                            {current ? cleanPlaceholder(current.blue_name || "") : "---"}
-                          </h4>
-                        </div>
-                        {!isPoomsaeModeCurrent && (
-                          <div className="flex-1 bg-red-600/90 flex flex-col justify-center px-4 relative">
+                          <PlayerLogoBadge
+                            club={current?.blue_club}
+                            name={current?.blue_name}
+                            customLogos={teamLogos}
+                            directLogo={current?.blue_logo || current?.blue_flag}
+                            size="md"
+                          />
+                          <div className="flex-1 min-w-0 flex flex-col justify-center">
                             <p 
-                              className="text-[14px] font-bold text-[#ffd700] uppercase leading-none mb-1"
+                              className="text-[14px] font-bold text-[#ffd700] uppercase leading-none mb-1 truncate"
                               style={effectiveClubScale !== 100 ? { fontSize: `calc(14px * ${effectiveClubScale / 100})`, lineHeight: 1.15 } : undefined}
                             >
-                              {current ? cleanPlaceholder(current.red_club || "") : "---"}
+                              {current ? cleanPlaceholder(current.blue_club || "") : "---"}
                             </p>
                             <h4 
                               className="text-[27px] font-black text-white uppercase leading-none truncate"
                               style={effectiveNameScale !== 100 ? { fontSize: `calc(27px * ${effectiveNameScale / 100})`, lineHeight: 1.15 } : undefined}
                             >
-                              {current ? cleanPlaceholder(current.red_name || "") : "---"}
+                              {current ? cleanPlaceholder(current.blue_name || "") : "---"}
                             </h4>
+                          </div>
+                        </div>
+                        {!isPoomsaeModeCurrent && (
+                          <div className="flex-1 bg-red-600/90 flex items-center px-4 relative gap-3 min-w-0">
+                            <PlayerLogoBadge
+                              club={current?.red_club}
+                              name={current?.red_name}
+                              customLogos={teamLogos}
+                              directLogo={current?.red_logo || current?.red_flag}
+                              size="md"
+                            />
+                            <div className="flex-1 min-w-0 flex flex-col justify-center">
+                              <p 
+                                className="text-[14px] font-bold text-[#ffd700] uppercase leading-none mb-1 truncate"
+                                style={effectiveClubScale !== 100 ? { fontSize: `calc(14px * ${effectiveClubScale / 100})`, lineHeight: 1.15 } : undefined}
+                              >
+                                {current ? cleanPlaceholder(current.red_club || "") : "---"}
+                              </p>
+                              <h4 
+                                className="text-[27px] font-black text-white uppercase leading-none truncate"
+                                style={effectiveNameScale !== 100 ? { fontSize: `calc(27px * ${effectiveNameScale / 100})`, lineHeight: 1.15 } : undefined}
+                              >
+                                {current ? cleanPlaceholder(current.red_name || "") : "---"}
+                              </h4>
+                            </div>
                           </div>
                         )}
                       </div>
@@ -10350,46 +10570,64 @@ function SiteView({
                         {b?.data?.bout ? formatBoutNumber(ring.ringNumber, b.data.bout, boutNumberingMode) : "---"}
                       </div>
                       <div className={cn(
-                        "flex flex-col justify-center px-3 relative",
+                        "flex items-center px-3 relative gap-2 min-w-0",
                         isPoomsaeItem ? "col-span-10" : "col-span-5 border-r border-white/10",
                         isRingInactive ? "bg-slate-800" : "bg-blue-600/80"
                       )}>
-                        <span 
-                          style={effectiveStandbyClubScale !== 100 ? { fontSize: `calc(13px * ${effectiveStandbyClubScale / 100})`, lineHeight: 1.15 } : undefined}
-                          className="text-[13px] font-bold text-[#ffd700] uppercase leading-tight break-words whitespace-normal w-full"
-                        >
-                          {cleanPlaceholder(b?.data.blue_club || "")}
-                        </span>
-                        <span 
-                          style={effectiveStandbyNameScale !== 100 ? { fontSize: `calc(16px * ${effectiveStandbyNameScale / 100})`, lineHeight: 1.15 } : undefined}
-                          className={cn(
-                            "text-[16px] font-black uppercase leading-tight break-words whitespace-normal w-full mt-0.5",
-                            isRingInactive ? "text-slate-400" : "text-white"
-                          )}
-                        >
-                          {cleanPlaceholder(b?.data.blue_name || "")}
-                        </span>
-                      </div>
-                      {!isPoomsaeItem && (
-                        <div className={cn(
-                          "col-span-5 flex flex-col justify-center px-3 relative",
-                          isRingInactive ? "bg-slate-800" : "bg-red-600/80"
-                        )}>
+                        <PlayerLogoBadge
+                          club={b?.data.blue_club}
+                          name={b?.data.blue_name}
+                          customLogos={teamLogos}
+                          directLogo={b?.data.blue_logo || b?.data.blue_flag}
+                          size="sm"
+                        />
+                        <div className="flex-1 min-w-0 flex flex-col justify-center">
                           <span 
                             style={effectiveStandbyClubScale !== 100 ? { fontSize: `calc(13px * ${effectiveStandbyClubScale / 100})`, lineHeight: 1.15 } : undefined}
-                            className="text-[13px] font-bold text-[#ffd700] uppercase leading-tight break-words whitespace-normal w-full"
+                            className="text-[13px] font-bold text-[#ffd700] uppercase leading-tight truncate w-full"
                           >
-                            {cleanPlaceholder(b?.data.red_club || "")}
+                            {cleanPlaceholder(b?.data.blue_club || "")}
                           </span>
                           <span 
                             style={effectiveStandbyNameScale !== 100 ? { fontSize: `calc(16px * ${effectiveStandbyNameScale / 100})`, lineHeight: 1.15 } : undefined}
                             className={cn(
-                              "text-[16px] font-black uppercase leading-tight break-words whitespace-normal w-full mt-0.5",
+                              "text-[16px] font-black uppercase leading-tight truncate w-full mt-0.5",
                               isRingInactive ? "text-slate-400" : "text-white"
                             )}
                           >
-                            {cleanPlaceholder(b?.data.red_name || "")}
+                            {cleanPlaceholder(b?.data.blue_name || "")}
                           </span>
+                        </div>
+                      </div>
+                      {!isPoomsaeItem && (
+                        <div className={cn(
+                          "col-span-5 flex items-center px-3 relative gap-2 min-w-0",
+                          isRingInactive ? "bg-slate-800" : "bg-red-600/80"
+                        )}>
+                          <PlayerLogoBadge
+                            club={b?.data.red_club}
+                            name={b?.data.red_name}
+                            customLogos={teamLogos}
+                            directLogo={b?.data.red_logo || b?.data.red_flag}
+                            size="sm"
+                          />
+                          <div className="flex-1 min-w-0 flex flex-col justify-center">
+                            <span 
+                              style={effectiveStandbyClubScale !== 100 ? { fontSize: `calc(13px * ${effectiveStandbyClubScale / 100})`, lineHeight: 1.15 } : undefined}
+                              className="text-[13px] font-bold text-[#ffd700] uppercase leading-tight truncate w-full"
+                            >
+                              {cleanPlaceholder(b?.data.red_club || "")}
+                            </span>
+                            <span 
+                              style={effectiveStandbyNameScale !== 100 ? { fontSize: `calc(16px * ${effectiveStandbyNameScale / 100})`, lineHeight: 1.15 } : undefined}
+                              className={cn(
+                                "text-[16px] font-black uppercase leading-tight truncate w-full mt-0.5",
+                                isRingInactive ? "text-slate-400" : "text-white"
+                              )}
+                            >
+                              {cleanPlaceholder(b?.data.red_name || "")}
+                            </span>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -10468,6 +10706,7 @@ function PointsView({
   const [syncedClubFontScale, setSyncedClubFontScale] = useSyncedState<number>('tkd_active_club_font_scale', 100);
   const [syncedStandbyNameFontScale, setSyncedStandbyNameFontScale] = useSyncedState<number>('tkd_standby_name_font_scale', 100);
   const [syncedStandbyClubFontScale, setSyncedStandbyClubFontScale] = useSyncedState<number>('tkd_standby_club_font_scale', 100);
+  const [teamLogos] = useSyncedState<Record<string, string>>('tkd_team_logos', {});
   const effectiveNameScale = activeNameFontScale ?? syncedNameFontScale;
   const effectiveSetNameScale = setActiveNameFontScale ?? setSyncedNameFontScale;
   const effectiveClubScale = activeClubFontScale ?? syncedClubFontScale;
@@ -10716,36 +10955,54 @@ function PointsView({
                       <div className="col-span-10 grid grid-cols-12 h-full">
                         <div className={isPoomsaeModeCurrent ? "col-span-12 flex flex-col" : "col-span-8 flex flex-col"}>
                           <div className={cn(
-                            "flex-1 bg-blue-600/90 flex flex-col justify-center px-4 relative",
+                            "flex-1 bg-blue-600/90 flex items-center px-4 relative gap-3 min-w-0",
                             !isPoomsaeModeCurrent && "border-b border-white/10"
                           )}>
-                            <p 
-                              className="text-[15px] font-bold text-[#ffd700] uppercase leading-none mb-1"
-                              style={effectiveClubScale !== 100 ? { fontSize: `calc(15px * ${effectiveClubScale / 100})`, lineHeight: 1.15 } : undefined}
-                            >
-                              {current ? cleanPlaceholder(current.blue_club || "") : "---"}
-                            </p>
-                            <h4 
-                              className="text-[23px] font-black text-white uppercase leading-none truncate"
-                              style={effectiveNameScale !== 100 ? { fontSize: `calc(23px * ${effectiveNameScale / 100})`, lineHeight: 1.15 } : undefined}
-                            >
-                              {current ? cleanPlaceholder(current.blue_name || "") : "---"}
-                            </h4>
-                          </div>
-                          {!isPoomsaeModeCurrent && (
-                            <div className="flex-1 bg-red-600/90 flex flex-col justify-center px-4 relative">
+                            <PlayerLogoBadge
+                              club={current?.blue_club}
+                              name={current?.blue_name}
+                              customLogos={teamLogos}
+                              directLogo={current?.blue_logo || current?.blue_flag}
+                              size="md"
+                            />
+                            <div className="flex-1 min-w-0 flex flex-col justify-center">
                               <p 
-                                className="text-[15px] font-bold text-[#ffd700] uppercase leading-none mb-1"
+                                className="text-[15px] font-bold text-[#ffd700] uppercase leading-none mb-1 truncate"
                                 style={effectiveClubScale !== 100 ? { fontSize: `calc(15px * ${effectiveClubScale / 100})`, lineHeight: 1.15 } : undefined}
                               >
-                                {current ? cleanPlaceholder(current.red_club || "") : "---"}
+                                {current ? cleanPlaceholder(current.blue_club || "") : "---"}
                               </p>
                               <h4 
                                 className="text-[23px] font-black text-white uppercase leading-none truncate"
                                 style={effectiveNameScale !== 100 ? { fontSize: `calc(23px * ${effectiveNameScale / 100})`, lineHeight: 1.15 } : undefined}
                               >
-                                {current ? cleanPlaceholder(current.red_name || "") : "---"}
+                                {current ? cleanPlaceholder(current.blue_name || "") : "---"}
                               </h4>
+                            </div>
+                          </div>
+                          {!isPoomsaeModeCurrent && (
+                            <div className="flex-1 bg-red-600/90 flex items-center px-4 relative gap-3 min-w-0">
+                              <PlayerLogoBadge
+                                club={current?.red_club}
+                                name={current?.red_name}
+                                customLogos={teamLogos}
+                                directLogo={current?.red_logo || current?.red_flag}
+                                size="md"
+                              />
+                              <div className="flex-1 min-w-0 flex flex-col justify-center">
+                                <p 
+                                  className="text-[15px] font-bold text-[#ffd700] uppercase leading-none mb-1 truncate"
+                                  style={effectiveClubScale !== 100 ? { fontSize: `calc(15px * ${effectiveClubScale / 100})`, lineHeight: 1.15 } : undefined}
+                                >
+                                  {current ? cleanPlaceholder(current.red_club || "") : "---"}
+                                </p>
+                                <h4 
+                                  className="text-[23px] font-black text-white uppercase leading-none truncate"
+                                  style={effectiveNameScale !== 100 ? { fontSize: `calc(23px * ${effectiveNameScale / 100})`, lineHeight: 1.15 } : undefined}
+                                >
+                                  {current ? cleanPlaceholder(current.red_name || "") : "---"}
+                                </h4>
+                              </div>
                             </div>
                           )}
                         </div>
@@ -10863,44 +11120,52 @@ function PointsView({
                         isPoomsaeItem ? "col-span-9" : "col-span-5 border-r border-white/10",
                         isRingInactive ? "bg-slate-800" : "bg-blue-600/80"
                       )}>
-                        <span 
-                          style={effectiveStandbyClubScale !== 100 ? { fontSize: `calc(13px * ${effectiveStandbyClubScale / 100})`, lineHeight: 1.15 } : undefined}
-                          className="text-[13px] font-bold text-[#ffd700] uppercase leading-none"
-                        >
-                          {cleanPlaceholder(b?.data.blue_club || "")}
-                        </span>
-                        <span 
-                          style={effectiveStandbyNameScale !== 100 ? { fontSize: `calc(15px * ${effectiveStandbyNameScale / 100})`, lineHeight: 1.15 } : undefined}
-                          className={cn(
-                            "text-[15px] font-black uppercase truncate leading-tight",
-                            isRingInactive ? "text-slate-400" : "text-white"
-                          )}
-                        >
-                          {cleanPlaceholder(b?.data.blue_name || "")}
-                        </span>
-                        
+                        <div className="flex items-center gap-2 min-w-0">
+                          <PlayerLogoBadge club={b?.data.blue_club} name={b?.data.blue_name} size="sm" />
+                          <div className="flex flex-col min-w-0 flex-1">
+                            <span 
+                              style={effectiveStandbyClubScale !== 100 ? { fontSize: `calc(13px * ${effectiveStandbyClubScale / 100})`, lineHeight: 1.15 } : undefined}
+                              className="text-[13px] font-bold text-[#ffd700] uppercase leading-none truncate"
+                            >
+                              {cleanPlaceholder(b?.data.blue_club || "")}
+                            </span>
+                            <span 
+                              style={effectiveStandbyNameScale !== 100 ? { fontSize: `calc(15px * ${effectiveStandbyNameScale / 100})`, lineHeight: 1.15 } : undefined}
+                              className={cn(
+                                "text-[15px] font-black uppercase truncate leading-tight",
+                                isRingInactive ? "text-slate-400" : "text-white"
+                              )}
+                            >
+                              {cleanPlaceholder(b?.data.blue_name || "")}
+                            </span>
+                          </div>
+                        </div>
                       </div>
                       {!isPoomsaeItem && (
                         <div className={cn(
                           "col-span-4 flex flex-col justify-center px-3 relative",
                           isRingInactive ? "bg-slate-800" : "bg-red-600/80"
                         )}>
-                          <span 
-                            style={effectiveStandbyClubScale !== 100 ? { fontSize: `calc(13px * ${effectiveStandbyClubScale / 100})`, lineHeight: 1.15 } : undefined}
-                            className="text-[13px] font-bold text-[#ffd700] uppercase leading-none"
-                          >
-                            {cleanPlaceholder(b?.data.red_club || "")}
-                          </span>
-                          <span 
-                            style={effectiveStandbyNameScale !== 100 ? { fontSize: `calc(15px * ${effectiveStandbyNameScale / 100})`, lineHeight: 1.15 } : undefined}
-                            className={cn(
-                              "text-[15px] font-black uppercase truncate leading-tight",
-                              isRingInactive ? "text-slate-400" : "text-white"
-                            )}
-                          >
-                            {cleanPlaceholder(b?.data.red_name || "")}
-                          </span>
-                          
+                          <div className="flex items-center gap-2 min-w-0">
+                            <PlayerLogoBadge club={b?.data.red_club} name={b?.data.red_name} size="sm" />
+                            <div className="flex flex-col min-w-0 flex-1">
+                              <span 
+                                style={effectiveStandbyClubScale !== 100 ? { fontSize: `calc(13px * ${effectiveStandbyClubScale / 100})`, lineHeight: 1.15 } : undefined}
+                                className="text-[13px] font-bold text-[#ffd700] uppercase leading-none truncate"
+                              >
+                                {cleanPlaceholder(b?.data.red_club || "")}
+                              </span>
+                              <span 
+                                style={effectiveStandbyNameScale !== 100 ? { fontSize: `calc(15px * ${effectiveStandbyNameScale / 100})`, lineHeight: 1.15 } : undefined}
+                                className={cn(
+                                  "text-[15px] font-black uppercase truncate leading-tight",
+                                  isRingInactive ? "text-slate-400" : "text-white"
+                                )}
+                              >
+                                {cleanPlaceholder(b?.data.red_name || "")}
+                              </span>
+                            </div>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -10981,6 +11246,7 @@ function OnsiteView({
   const [syncedClubFontScale, setSyncedClubFontScale] = useSyncedState<number>('tkd_active_club_font_scale', 100);
   const [syncedStandbyNameFontScale, setSyncedStandbyNameFontScale] = useSyncedState<number>('tkd_standby_name_font_scale', 100);
   const [syncedStandbyClubFontScale, setSyncedStandbyClubFontScale] = useSyncedState<number>('tkd_standby_club_font_scale', 100);
+  const [teamLogos] = useSyncedState<Record<string, string>>('tkd_team_logos', {});
   const effectiveNameScale = activeNameFontScale ?? syncedNameFontScale;
   const effectiveSetNameScale = setActiveNameFontScale ?? setSyncedNameFontScale;
   const effectiveClubScale = activeClubFontScale ?? syncedClubFontScale;
@@ -11298,23 +11564,33 @@ function OnsiteView({
                       <>
                         {/* Blue Side */}
                         <div className={cn(
-                          "flex-1 h-full bg-blue-600 flex flex-col justify-center px-10 relative overflow-hidden group transition-all duration-500",
+                          "flex-1 h-full bg-blue-600 flex items-center px-8 relative overflow-hidden group transition-all duration-500 gap-4",
                           isPoomsaeModeCurrent ? "flex-[10]" : "flex-1"
                         )}>
                           <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-white/20 to-transparent pointer-events-none" />
                           <div className="absolute -right-4 top-1/2 -translate-y-1/2 text-8xl font-black text-white/5 italic select-none">{(!current || !hasPlayers(current)) ? 'BLURRED' : 'BLUE'}</div>
-                          <p 
-                            className="text-[16px] font-black text-yellow-400 uppercase tracking-[0.2em] mb-1 relative z-10 truncate w-full"
-                            style={effectiveClubScale !== 100 ? { fontSize: `calc(16px * ${effectiveClubScale / 100})`, lineHeight: 1.15 } : undefined}
-                          >
-                            {current ? cleanPlaceholder(current.blue_club || "") : "---"}
-                          </p>
-                          <h4 
-                            className="font-black text-white uppercase relative z-10 leading-tight text-[25px] break-words whitespace-normal w-full"
-                            style={effectiveNameScale !== 100 ? { fontSize: `calc(25px * ${effectiveNameScale / 100})`, lineHeight: 1.15 } : undefined}
-                          >
-                            {current?.privacy_mode || !current?.blue_name ? "---" : cleanPlaceholder(current.blue_name)}
-                          </h4>
+                          <PlayerLogoBadge
+                            club={current?.blue_club}
+                            name={current?.blue_name}
+                            customLogos={teamLogos}
+                            directLogo={current?.blue_logo || current?.blue_flag}
+                            size="lg"
+                            className="z-10 shrink-0"
+                          />
+                          <div className="flex-1 min-w-0 flex flex-col justify-center">
+                            <p 
+                              className="text-[16px] font-black text-yellow-400 uppercase tracking-[0.2em] mb-1 relative z-10 truncate w-full"
+                              style={effectiveClubScale !== 100 ? { fontSize: `calc(16px * ${effectiveClubScale / 100})`, lineHeight: 1.15 } : undefined}
+                            >
+                              {current ? cleanPlaceholder(current.blue_club || "") : "---"}
+                            </p>
+                            <h4 
+                              className="font-black text-white uppercase relative z-10 leading-tight text-[25px] break-words whitespace-normal w-full"
+                              style={effectiveNameScale !== 100 ? { fontSize: `calc(25px * ${effectiveNameScale / 100})`, lineHeight: 1.15 } : undefined}
+                            >
+                              {current?.privacy_mode || !current?.blue_name ? "---" : cleanPlaceholder(current.blue_name)}
+                            </h4>
+                          </div>
                         </div>
 
                         {/* Bout Number Circle */}
@@ -11329,21 +11605,31 @@ function OnsiteView({
 
                         {/* Red Side */}
                         {!isPoomsaeModeCurrent && (
-                          <div className="flex-1 h-full bg-red-600 flex flex-col justify-center px-10 text-right relative overflow-hidden group">
+                          <div className="flex-1 h-full bg-red-600 flex items-center px-8 text-right relative overflow-hidden group gap-4">
                             <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-bl from-white/20 to-transparent pointer-events-none" />
                             <div className="absolute -left-4 top-1/2 -translate-y-1/2 text-8xl font-black text-white/5 italic select-none">{(!current || !hasPlayers(current)) ? 'BLURRED' : 'RED'}</div>
-                            <p 
-                              className="text-[16px] font-black text-yellow-400 uppercase tracking-[0.2em] mb-1 relative z-10 truncate w-full text-right"
-                              style={effectiveClubScale !== 100 ? { fontSize: `calc(16px * ${effectiveClubScale / 100})`, lineHeight: 1.15 } : undefined}
-                            >
-                              {current ? cleanPlaceholder(current.red_club || "") : "---"}
-                            </p>
-                            <h4 
-                              className="font-black text-white uppercase relative z-10 leading-tight text-[25px] break-words whitespace-normal w-full text-right"
-                              style={effectiveNameScale !== 100 ? { fontSize: `calc(25px * ${effectiveNameScale / 100})`, lineHeight: 1.15 } : undefined}
-                            >
-                              {current?.privacy_mode || !current?.red_name ? "---" : cleanPlaceholder(current.red_name)}
-                            </h4>
+                            <div className="flex-1 min-w-0 flex flex-col justify-center">
+                              <p 
+                                className="text-[16px] font-black text-yellow-400 uppercase tracking-[0.2em] mb-1 relative z-10 truncate w-full text-right"
+                                style={effectiveClubScale !== 100 ? { fontSize: `calc(16px * ${effectiveClubScale / 100})`, lineHeight: 1.15 } : undefined}
+                              >
+                                {current ? cleanPlaceholder(current.red_club || "") : "---"}
+                              </p>
+                              <h4 
+                                className="font-black text-white uppercase relative z-10 leading-tight text-[25px] break-words whitespace-normal w-full text-right"
+                                style={effectiveNameScale !== 100 ? { fontSize: `calc(25px * ${effectiveNameScale / 100})`, lineHeight: 1.15 } : undefined}
+                              >
+                                {current?.privacy_mode || !current?.red_name ? "---" : cleanPlaceholder(current.red_name)}
+                              </h4>
+                            </div>
+                            <PlayerLogoBadge
+                              club={current?.red_club}
+                              name={current?.red_name}
+                              customLogos={teamLogos}
+                              directLogo={current?.red_logo || current?.red_flag}
+                              size="lg"
+                              className="z-10 shrink-0"
+                            />
                           </div>
                         )}
                       </>
@@ -11378,27 +11664,37 @@ function OnsiteView({
                       <div key={idx} className="flex items-center bg-slate-900 rounded-full border border-slate-800 overflow-hidden min-h-[2.5rem] py-1 shadow-lg group hover:border-slate-600 transition-colors">
                         {/* Blue Side */}
                         <div className={cn(
-                          "self-stretch flex flex-col justify-center px-3 min-w-0 relative transition-all duration-500",
+                          "self-stretch flex items-center px-3 min-w-0 relative transition-all duration-500 gap-1.5",
                           isPoomsaeItem ? "flex-[10]" : "flex-1",
                           isRingInactive ? "bg-slate-800" : "bg-blue-600/90"
                         )}>
                           {!isRingInactive && <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-white/10 to-transparent pointer-events-none" />}
-                          <p 
-                            className="text-[9px] font-bold text-yellow-400 uppercase leading-none mb-0.5 relative z-10"
-                            style={effectiveStandbyClubScale !== 100 ? { fontSize: `calc(9px * ${effectiveStandbyClubScale / 100})`, lineHeight: 1.15 } : undefined}
-                          >
-                            {bout ? cleanPlaceholder(bout.data.blue_club) : ""}
-                          </p>
-                          <p 
-                            className={cn(
-                              "font-black uppercase tracking-[1px] relative z-10 leading-tight line-clamp-2 whitespace-normal break-words",
-                              effectiveStandbyNameScale === 100 && getStandbyDynamicFontSize(bout?.data.blue_name || ""),
-                              isRingInactive ? "text-slate-400" : "text-white"
-                            )}
-                            style={effectiveStandbyNameScale !== 100 ? { fontSize: `calc(11px * ${effectiveStandbyNameScale / 100})`, lineHeight: 1.15 } : undefined}
-                          >
-                            {bout ? (bout.data.privacy_mode ? "---" : cleanPlaceholder(bout.data.blue_name)) : ""}
-                          </p>
+                          <PlayerLogoBadge
+                            club={bout?.data.blue_club}
+                            name={bout?.data.blue_name}
+                            customLogos={teamLogos}
+                            directLogo={bout?.data.blue_logo || bout?.data.blue_flag}
+                            size="xs"
+                            className="z-10 shrink-0"
+                          />
+                          <div className="flex-1 min-w-0 flex flex-col justify-center">
+                            <p 
+                              className="text-[9px] font-bold text-yellow-400 uppercase leading-none mb-0.5 relative z-10 truncate"
+                              style={effectiveStandbyClubScale !== 100 ? { fontSize: `calc(9px * ${effectiveStandbyClubScale / 100})`, lineHeight: 1.15 } : undefined}
+                            >
+                              {bout ? cleanPlaceholder(bout.data.blue_club) : ""}
+                            </p>
+                            <p 
+                              className={cn(
+                                "font-black uppercase tracking-[1px] relative z-10 leading-tight line-clamp-2 whitespace-normal break-words",
+                                effectiveStandbyNameScale === 100 && getStandbyDynamicFontSize(bout?.data.blue_name || ""),
+                                isRingInactive ? "text-slate-400" : "text-white"
+                              )}
+                              style={effectiveStandbyNameScale !== 100 ? { fontSize: `calc(11px * ${effectiveStandbyNameScale / 100})`, lineHeight: 1.15 } : undefined}
+                            >
+                              {bout ? (bout.data.privacy_mode ? "---" : cleanPlaceholder(bout.data.blue_name)) : ""}
+                            </p>
+                          </div>
                         </div>
                         
                         {/* Bout Number */}
@@ -11414,26 +11710,36 @@ function OnsiteView({
                         {/* Red Side */}
                         {!isPoomsaeItem && (
                           <div className={cn(
-                            "flex-1 self-stretch flex flex-col justify-center px-3 min-w-0 text-right relative",
+                            "flex-1 self-stretch flex items-center px-3 min-w-0 text-right relative gap-1.5",
                             isRingInactive ? "bg-slate-800" : "bg-red-600/90"
                           )}>
                             {!isRingInactive && <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-bl from-white/10 to-transparent pointer-events-none" />}
-                            <p 
-                              className="text-[9px] font-bold text-yellow-400 uppercase leading-none mb-0.5 relative z-10"
-                              style={effectiveStandbyClubScale !== 100 ? { fontSize: `calc(9px * ${effectiveStandbyClubScale / 100})`, lineHeight: 1.15 } : undefined}
-                            >
-                              {bout ? cleanPlaceholder(bout.data.red_club) : ""}
-                            </p>
-                            <p 
-                              className={cn(
-                                "font-black uppercase tracking-[1px] relative z-10 leading-tight line-clamp-2 whitespace-normal break-words",
-                                effectiveStandbyNameScale === 100 && getStandbyDynamicFontSize(bout?.data.red_name || ""),
-                                isRingInactive ? "text-slate-400" : "text-white"
-                              )}
-                              style={effectiveStandbyNameScale !== 100 ? { fontSize: `calc(11px * ${effectiveStandbyNameScale / 100})`, lineHeight: 1.15 } : undefined}
-                            >
-                              {bout ? (bout.data.privacy_mode ? "---" : cleanPlaceholder(bout.data.red_name)) : ""}
-                            </p>
+                            <div className="flex-1 min-w-0 flex flex-col justify-center">
+                              <p 
+                                className="text-[9px] font-bold text-yellow-400 uppercase leading-none mb-0.5 relative z-10 truncate text-right"
+                                style={effectiveStandbyClubScale !== 100 ? { fontSize: `calc(9px * ${effectiveStandbyClubScale / 100})`, lineHeight: 1.15 } : undefined}
+                              >
+                                {bout ? cleanPlaceholder(bout.data.red_club) : ""}
+                              </p>
+                              <p 
+                                className={cn(
+                                  "font-black uppercase tracking-[1px] relative z-10 leading-tight line-clamp-2 whitespace-normal break-words text-right",
+                                  effectiveStandbyNameScale === 100 && getStandbyDynamicFontSize(bout?.data.red_name || ""),
+                                  isRingInactive ? "text-slate-400" : "text-white"
+                                )}
+                                style={effectiveStandbyNameScale !== 100 ? { fontSize: `calc(11px * ${effectiveStandbyNameScale / 100})`, lineHeight: 1.15 } : undefined}
+                              >
+                                {bout ? (bout.data.privacy_mode ? "---" : cleanPlaceholder(bout.data.red_name)) : ""}
+                              </p>
+                            </div>
+                            <PlayerLogoBadge
+                              club={bout?.data.red_club}
+                              name={bout?.data.red_name}
+                              customLogos={teamLogos}
+                              directLogo={bout?.data.red_logo || bout?.data.red_flag}
+                              size="xs"
+                              className="z-10 shrink-0"
+                            />
                           </div>
                         )}
                       </div>
@@ -11948,19 +12254,22 @@ function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, b
             {publicViewLayout === 'standard' ? (
               <div className="flex flex-col items-center justify-center gap-2 sm:gap-6 py-1 sm:py-4">
                 {/* BLUE SIDE */}
-                <div className="text-center space-y-0.5 w-full px-1 sm:px-2">
-                  <p 
-                    style={{ fontSize: `calc(clamp(18px, 2.5vw, 34px) * (${effectiveNameScale} / 100))`, lineHeight: 1.15 }}
-                    className="text-[18px] sm:text-[26px] md:text-[34px] font-black text-[#00a2e8] uppercase tracking-tight break-words mx-auto w-full"
-                  >
-                    {current ? (current.privacy_mode ? "---" : cleanPlaceholder(current.blue_name)) : ""}
-                  </p>
-                  <p 
-                    style={{ fontSize: `calc(clamp(9px, 1.2vw, 14px) * (${effectiveClubScale} / 100))`, lineHeight: 1.2 }}
-                    className="text-white font-black text-[8px] sm:text-sm uppercase tracking-widest break-words whitespace-normal w-full"
-                  >
-                    {current ? cleanPlaceholder(current.blue_club) : ""}
-                  </p>
+                <div className="flex items-center justify-center gap-3 w-full px-1 sm:px-2">
+                  <PlayerLogoBadge club={current?.blue_club} name={current?.blue_name} size="lg" className="shrink-0" />
+                  <div className="text-center space-y-0.5">
+                    <p 
+                      style={{ fontSize: `calc(clamp(18px, 2.5vw, 34px) * (${effectiveNameScale} / 100))`, lineHeight: 1.15 }}
+                      className="text-[18px] sm:text-[26px] md:text-[34px] font-black text-[#00a2e8] uppercase tracking-tight break-words mx-auto w-full"
+                    >
+                      {current ? (current.privacy_mode ? "---" : cleanPlaceholder(current.blue_name)) : ""}
+                    </p>
+                    <p 
+                      style={{ fontSize: `calc(clamp(9px, 1.2vw, 14px) * (${effectiveClubScale} / 100))`, lineHeight: 1.2 }}
+                      className="text-white font-black text-[8px] sm:text-sm uppercase tracking-widest break-words whitespace-normal w-full"
+                    >
+                      {current ? cleanPlaceholder(current.blue_club) : ""}
+                    </p>
+                  </div>
                 </div>
 
                 {!current?.category?.toUpperCase().includes('INDIVIDUAL POOMSAE') && 
@@ -11970,19 +12279,22 @@ function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, b
                     <div className="text-[10px] sm:text-xl font-black text-white italic leading-none my-0.5">VS</div>
 
                     {/* RED SIDE */}
-                    <div className="text-center space-y-0.5 w-full px-1 sm:px-2">
-                      <p 
-                        style={{ fontSize: `calc(clamp(18px, 2.5vw, 34px) * (${effectiveNameScale} / 100))`, lineHeight: 1.15 }}
-                        className="text-[18px] sm:text-[26px] md:text-[34px] font-black text-[#ed1c24] uppercase tracking-tight break-words mx-auto w-full"
-                      >
-                        {current ? (current.privacy_mode ? "---" : cleanPlaceholder(current.red_name)) : ""}
-                      </p>
-                      <p 
-                        style={{ fontSize: `calc(clamp(9px, 1.2vw, 14px) * (${effectiveClubScale} / 100))`, lineHeight: 1.2 }}
-                        className="text-white font-black text-[8px] sm:text-sm uppercase tracking-widest break-words whitespace-normal w-full"
-                      >
-                        {current ? cleanPlaceholder(current.red_club) : ""}
-                      </p>
+                    <div className="flex items-center justify-center gap-3 w-full px-1 sm:px-2">
+                      <PlayerLogoBadge club={current?.red_club} name={current?.red_name} size="lg" className="shrink-0" />
+                      <div className="text-center space-y-0.5">
+                        <p 
+                          style={{ fontSize: `calc(clamp(18px, 2.5vw, 34px) * (${effectiveNameScale} / 100))`, lineHeight: 1.15 }}
+                          className="text-[18px] sm:text-[26px] md:text-[34px] font-black text-[#ed1c24] uppercase tracking-tight break-words mx-auto w-full"
+                        >
+                          {current ? (current.privacy_mode ? "---" : cleanPlaceholder(current.red_name)) : ""}
+                        </p>
+                        <p 
+                          style={{ fontSize: `calc(clamp(9px, 1.2vw, 14px) * (${effectiveClubScale} / 100))`, lineHeight: 1.2 }}
+                          className="text-white font-black text-[8px] sm:text-sm uppercase tracking-widest break-words whitespace-normal w-full"
+                        >
+                          {current ? cleanPlaceholder(current.red_club) : ""}
+                        </p>
+                      </div>
                     </div>
                   </>
                 )}
@@ -12077,7 +12389,50 @@ function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, b
                   !current?.category?.toUpperCase().includes('FREESTYLE') && 
                   !(current?.category?.toUpperCase().includes('POOMSAE') && !current?.red_name) ? (
                   <div className="grid grid-cols-[1fr,auto,1fr] gap-1.5 sm:gap-4 items-center pb-1">
-                    <div className="flex flex-col min-w-0">
+                    <div className="flex items-center justify-center gap-2 min-w-0">
+                      <PlayerLogoBadge club={current?.blue_club} name={current?.blue_name} size="md" className="shrink-0" />
+                      <div className="flex flex-col min-w-0">
+                        <div className="h-0.5 w-full bg-[#00a2e8] rounded-full mb-1 sm:mb-2 shadow-[0_0_8px_rgba(0,162,232,0.8)]" />
+                        <span 
+                          style={{ fontSize: `calc(clamp(16px, 2vw, 24px) * (${effectiveNameScale} / 100))`, lineHeight: 1.15 }}
+                          className="font-bold text-[#00a2e8] text-[18px] sm:text-[24px] whitespace-normal break-words text-center"
+                        >
+                          {current ? (current.privacy_mode ? "---" : cleanPlaceholder(current.blue_name)) : ""}
+                        </span>
+                        <span 
+                          style={{ fontSize: `calc(clamp(9px, 1.2vw, 14px) * (${effectiveClubScale} / 100))`, lineHeight: 1.2 }}
+                          className="font-bold text-white text-[9px] sm:text-sm whitespace-normal break-words text-center mt-0.5"
+                        >
+                          {current ? (current.privacy_mode ? "---" : cleanPlaceholder(current.blue_club)) : ""}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="text-[10px] sm:text-xl font-black text-white italic pt-1 text-center">VS</div>
+
+                    <div className="flex items-center justify-center gap-2 min-w-0">
+                      <div className="flex flex-col min-w-0">
+                        <div className="h-0.5 w-full bg-[#ed1c24] rounded-full mb-1 sm:mb-2 shadow-[0_0_8px_rgba(237,28,36,0.8)]" />
+                        <span 
+                          style={{ fontSize: `calc(clamp(16px, 2vw, 24px) * (${effectiveNameScale} / 100))`, lineHeight: 1.15 }}
+                          className="font-bold text-[#ed1c24] text-[18px] sm:text-[24px] whitespace-normal break-words text-center"
+                        >
+                          {current ? (current.privacy_mode ? "---" : cleanPlaceholder(current.red_name)) : ""}
+                        </span>
+                        <span 
+                          style={{ fontSize: `calc(clamp(9px, 1.2vw, 14px) * (${effectiveClubScale} / 100))`, lineHeight: 1.2 }}
+                          className="font-bold text-white text-[9px] sm:text-sm whitespace-normal break-words text-center mt-0.5"
+                        >
+                          {current ? (current.privacy_mode ? "---" : cleanPlaceholder(current.red_club)) : ""}
+                        </span>
+                      </div>
+                      <PlayerLogoBadge club={current?.red_club} name={current?.red_name} size="md" className="shrink-0" />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-center gap-2.5 max-w-sm mx-auto w-full px-1">
+                    <PlayerLogoBadge club={current?.blue_club} name={current?.blue_name} size="md" className="shrink-0" />
+                    <div className="flex flex-col min-w-0 flex-1">
                       <div className="h-0.5 w-full bg-[#00a2e8] rounded-full mb-1 sm:mb-2 shadow-[0_0_8px_rgba(0,162,232,0.8)]" />
                       <span 
                         style={{ fontSize: `calc(clamp(16px, 2vw, 24px) * (${effectiveNameScale} / 100))`, lineHeight: 1.15 }}
@@ -12092,40 +12447,6 @@ function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, b
                         {current ? (current.privacy_mode ? "---" : cleanPlaceholder(current.blue_club)) : ""}
                       </span>
                     </div>
-
-                    <div className="text-[10px] sm:text-xl font-black text-white italic pt-1 text-center">VS</div>
-
-                    <div className="flex flex-col min-w-0">
-                      <div className="h-0.5 w-full bg-[#ed1c24] rounded-full mb-1 sm:mb-2 shadow-[0_0_8px_rgba(237,28,36,0.8)]" />
-                      <span 
-                        style={{ fontSize: `calc(clamp(16px, 2vw, 24px) * (${effectiveNameScale} / 100))`, lineHeight: 1.15 }}
-                        className="font-bold text-[#ed1c24] text-[18px] sm:text-[24px] whitespace-normal break-words text-center"
-                      >
-                        {current ? (current.privacy_mode ? "---" : cleanPlaceholder(current.red_name)) : ""}
-                      </span>
-                      <span 
-                        style={{ fontSize: `calc(clamp(9px, 1.2vw, 14px) * (${effectiveClubScale} / 100))`, lineHeight: 1.2 }}
-                        className="font-bold text-white text-[9px] sm:text-sm whitespace-normal break-words text-center mt-0.5"
-                      >
-                        {current ? (current.privacy_mode ? "---" : cleanPlaceholder(current.red_club)) : ""}
-                      </span>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex flex-col max-w-sm mx-auto w-full px-1">
-                    <div className="h-0.5 w-full bg-[#00a2e8] rounded-full mb-1 sm:mb-2 shadow-[0_0_8px_rgba(0,162,232,0.8)]" />
-                    <span 
-                      style={{ fontSize: `calc(clamp(16px, 2vw, 24px) * (${effectiveNameScale} / 100))`, lineHeight: 1.15 }}
-                      className="font-bold text-[#00a2e8] text-[18px] sm:text-[24px] whitespace-normal break-words text-center"
-                    >
-                      {current ? (current.privacy_mode ? "---" : cleanPlaceholder(current.blue_name)) : ""}
-                    </span>
-                    <span 
-                      style={{ fontSize: `calc(clamp(9px, 1.2vw, 14px) * (${effectiveClubScale} / 100))`, lineHeight: 1.2 }}
-                      className="font-bold text-white text-[9px] sm:text-sm whitespace-normal break-words text-center mt-0.5"
-                    >
-                      {current ? (current.privacy_mode ? "---" : cleanPlaceholder(current.blue_club)) : ""}
-                    </span>
                   </div>
                 )}
               </div>
@@ -12177,24 +12498,29 @@ function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, b
                         isRingInactive ? "border-slate-600" : "border-[#00a2e8]"
                       )}>
                         {!isRingInactive && <div className="absolute top-0 right-0 w-full h-full bg-gradient-to-r from-blue-900/10 to-transparent pointer-events-none" />}
-                        <p 
-                          className={cn(
-                            "text-[9px] sm:text-[11px] font-bold uppercase leading-normal sm:leading-tight mb-0.5 break-words whitespace-normal",
-                            isRingInactive ? "text-slate-400" : "text-white"
-                          )}
-                          style={effectiveStandbyClubScale !== 100 ? { fontSize: `calc((9px + (2px * (100vw - 640px) / 384)) * ${effectiveStandbyClubScale / 100})`, lineHeight: 1.15 } : undefined}
-                        >
-                          {bout ? cleanPlaceholder(bout.data.blue_club) : ""}
-                        </p>
-                        <p 
-                          className={cn(
-                            "text-[12px] sm:text-[15px] font-black uppercase tracking-[0.5px] leading-tight break-words whitespace-normal w-full",
-                            isRingInactive ? "text-slate-500" : "text-[#00a2e8]"
-                          )}
-                          style={effectiveStandbyNameScale !== 100 ? { fontSize: `calc((12px + (3px * (100vw - 640px) / 384)) * ${effectiveStandbyNameScale / 100})`, lineHeight: 1.15 } : undefined}
-                        >
-                          {bout ? (bout.data.privacy_mode ? "---" : cleanPlaceholder(bout.data.blue_name)) : ""}
-                        </p>
+                        <div className="flex items-center gap-2 min-w-0">
+                          <PlayerLogoBadge club={bout?.data?.blue_club} name={bout?.data?.blue_name} size="xs" />
+                          <div className="flex flex-col min-w-0 flex-1">
+                            <p 
+                              className={cn(
+                                "text-[9px] sm:text-[11px] font-bold uppercase leading-normal sm:leading-tight mb-0.5 break-words whitespace-normal truncate",
+                                isRingInactive ? "text-slate-400" : "text-white"
+                              )}
+                              style={effectiveStandbyClubScale !== 100 ? { fontSize: `calc((9px + (2px * (100vw - 640px) / 384)) * ${effectiveStandbyClubScale / 100})`, lineHeight: 1.15 } : undefined}
+                            >
+                              {bout ? cleanPlaceholder(bout.data.blue_club) : ""}
+                            </p>
+                            <p 
+                              className={cn(
+                                "text-[12px] sm:text-[15px] font-black uppercase tracking-[0.5px] leading-tight break-words whitespace-normal w-full truncate",
+                                isRingInactive ? "text-slate-500" : "text-[#00a2e8]"
+                              )}
+                              style={effectiveStandbyNameScale !== 100 ? { fontSize: `calc((12px + (3px * (100vw - 640px) / 384)) * ${effectiveStandbyNameScale / 100})`, lineHeight: 1.15 } : undefined}
+                            >
+                              {bout ? (bout.data.privacy_mode ? "---" : cleanPlaceholder(bout.data.blue_name)) : ""}
+                            </p>
+                          </div>
+                        </div>
                       </div>
 
                       {/* Red Side */}
@@ -12204,24 +12530,29 @@ function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, b
                           isRingInactive ? "border-slate-600" : "border-[#ed1c24]"
                         )}>
                           {!isRingInactive && <div className="absolute top-0 right-0 w-full h-full bg-gradient-to-r from-red-900/10 to-transparent pointer-events-none" />}
-                          <p 
-                            className={cn(
-                              "text-[9px] sm:text-[11px] font-bold uppercase leading-normal sm:leading-tight mb-0.5 break-words whitespace-normal",
-                              isRingInactive ? "text-slate-400" : "text-white"
-                            )}
-                            style={effectiveStandbyClubScale !== 100 ? { fontSize: `calc((9px + (2px * (100vw - 640px) / 384)) * ${effectiveStandbyClubScale / 100})`, lineHeight: 1.15 } : undefined}
-                          >
-                            {bout ? cleanPlaceholder(bout.data.red_club) : ""}
-                          </p>
-                          <p 
-                            className={cn(
-                              "text-[12px] sm:text-[15px] font-black uppercase tracking-[0.5px] leading-tight break-words whitespace-normal w-full",
-                              isRingInactive ? "text-slate-500" : "text-[#ed1c24]"
-                            )}
-                            style={effectiveStandbyNameScale !== 100 ? { fontSize: `calc((12px + (3px * (100vw - 640px) / 384)) * ${effectiveStandbyNameScale / 100})`, lineHeight: 1.15 } : undefined}
-                          >
-                            {bout ? (bout.data.privacy_mode ? "---" : cleanPlaceholder(bout.data.red_name)) : ""}
-                          </p>
+                          <div className="flex items-center gap-2 min-w-0">
+                            <PlayerLogoBadge club={bout?.data?.red_club} name={bout?.data?.red_name} size="xs" />
+                            <div className="flex flex-col min-w-0 flex-1">
+                              <p 
+                                className={cn(
+                                  "text-[9px] sm:text-[11px] font-bold uppercase leading-normal sm:leading-tight mb-0.5 break-words whitespace-normal truncate",
+                                  isRingInactive ? "text-slate-400" : "text-white"
+                                )}
+                                style={effectiveStandbyClubScale !== 100 ? { fontSize: `calc((9px + (2px * (100vw - 640px) / 384)) * ${effectiveStandbyClubScale / 100})`, lineHeight: 1.15 } : undefined}
+                              >
+                                {bout ? cleanPlaceholder(bout.data.red_club) : ""}
+                              </p>
+                              <p 
+                                className={cn(
+                                  "text-[12px] sm:text-[15px] font-black uppercase tracking-[0.5px] leading-tight break-words whitespace-normal w-full truncate",
+                                  isRingInactive ? "text-slate-500" : "text-[#ed1c24]"
+                                )}
+                                style={effectiveStandbyNameScale !== 100 ? { fontSize: `calc((12px + (3px * (100vw - 640px) / 384)) * ${effectiveStandbyNameScale / 100})`, lineHeight: 1.15 } : undefined}
+                              >
+                                {bout ? (bout.data.privacy_mode ? "---" : cleanPlaceholder(bout.data.red_name)) : ""}
+                              </p>
+                            </div>
+                          </div>
                         </div>
                       )}
                     </div>

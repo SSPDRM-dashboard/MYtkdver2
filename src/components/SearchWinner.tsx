@@ -3,6 +3,7 @@ import { Search, Trophy, RotateCcw, AlertTriangle, User, Hash, Sparkles, X, Chev
 import { MatchHistoryItem, MatchData, BoutMapping } from '../types';
 import { isBoutMatch, cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
+import { PlayerLogoBadge } from './PlayerLogoBadge';
 
 interface SearchWinnerProps {
   matchHistory: MatchHistoryItem[];
@@ -319,8 +320,11 @@ export function SearchWinner({ matchHistory, currentEventId, onRestoreMatch, bou
                                 </span>
                               )}
                             </div>
-                            <div className="text-xs text-slate-700 font-bold truncate uppercase" title={det.winnerName}>
-                              Winner: {det.winnerName}
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <PlayerLogoBadge club={det.winnerClub} name={det.winnerName} size="xs" />
+                              <div className="text-xs text-slate-700 font-bold truncate uppercase flex-1" title={det.winnerName}>
+                                {det.winnerName}
+                              </div>
                             </div>
                             <div className="text-[11px] text-slate-400 truncate mt-1">
                               {r.category || 'General'}
@@ -351,14 +355,19 @@ export function SearchWinner({ matchHistory, currentEventId, onRestoreMatch, bou
 
                       {/* Winner Display Centerpiece */}
                       <div className="pt-2 flex flex-col items-center">
-                        <div className={`w-20 h-20 rounded-full flex items-center justify-center mb-4 border shadow-xs ${
-                          selectedMatch.winnerSide === 'Blue' 
-                            ? 'bg-blue-50 text-blue-600 border-blue-200' 
-                            : selectedMatch.winnerSide === 'Red' 
-                              ? 'bg-red-50 text-red-600 border-red-200' 
-                              : 'bg-yellow-50 text-yellow-600 border-yellow-200'
-                        }`}>
-                          <Trophy size={40} className="drop-shadow-2xs" />
+                        <div className="relative mb-3">
+                          <div className={`w-20 h-20 rounded-full flex items-center justify-center border shadow-xs ${
+                            selectedMatch.winnerSide === 'Blue' 
+                              ? 'bg-blue-50 text-blue-600 border-blue-200' 
+                              : selectedMatch.winnerSide === 'Red' 
+                                ? 'bg-red-50 text-red-600 border-red-200' 
+                                : 'bg-yellow-50 text-yellow-600 border-yellow-200'
+                          }`}>
+                            <Trophy size={40} className="drop-shadow-2xs" />
+                          </div>
+                          <div className="absolute -bottom-1 -right-1">
+                            <PlayerLogoBadge club={selectedMatchDetails.winnerClub} name={selectedMatchDetails.winnerName} size="md" className="shadow-md ring-2 ring-white" />
+                          </div>
                         </div>
 
                         {selectedMatch.winnerSide && (
@@ -379,7 +388,10 @@ export function SearchWinner({ matchHistory, currentEventId, onRestoreMatch, bou
                         </p>
 
                         {selectedMatchDetails.winnerClub && (
-                          <p className="text-base font-bold text-blue-900 uppercase tracking-wider">{selectedMatchDetails.winnerClub}</p>
+                          <div className="flex items-center justify-center gap-2 mt-1">
+                            <PlayerLogoBadge club={selectedMatchDetails.winnerClub} size="sm" />
+                            <p className="text-base font-bold text-blue-900 uppercase tracking-wider">{selectedMatchDetails.winnerClub}</p>
+                          </div>
                         )}
 
                         {selectedMatch.winType && (
@@ -405,7 +417,7 @@ export function SearchWinner({ matchHistory, currentEventId, onRestoreMatch, bou
                             ? "bg-blue-50/70 border-blue-300 ring-2 ring-blue-500/20"
                             : "bg-slate-50/50 border-slate-200 opacity-80"
                         )}>
-                          <div className="flex items-center justify-between mb-1">
+                          <div className="flex items-center justify-between mb-2">
                             <span className="text-[10px] font-black text-blue-600 uppercase tracking-widest">Blue Corner</span>
                             {selectedMatch.winnerSide === 'Blue' && (
                               <span className="text-[10px] font-black uppercase px-1.5 py-0.5 rounded bg-blue-600 text-white flex items-center gap-0.5">
@@ -413,8 +425,13 @@ export function SearchWinner({ matchHistory, currentEventId, onRestoreMatch, bou
                               </span>
                             )}
                           </div>
-                          <span className="text-base font-bold text-slate-900 uppercase">{selectedMatchDetails.blueName}</span>
-                          <span className="text-xs font-medium text-slate-500 uppercase mt-auto pt-2">{selectedMatchDetails.blueClub}</span>
+                          <div className="flex items-start gap-3">
+                            <PlayerLogoBadge club={selectedMatchDetails.blueClub} name={selectedMatchDetails.blueName} size="md" className="shrink-0 mt-0.5" />
+                            <div className="min-w-0 flex-1">
+                              <span className="text-base font-bold text-slate-900 uppercase block truncate">{selectedMatchDetails.blueName}</span>
+                              <span className="text-xs font-medium text-slate-500 uppercase block truncate mt-0.5">{selectedMatchDetails.blueClub}</span>
+                            </div>
+                          </div>
                         </div>
 
                         <div className={cn(
@@ -423,7 +440,7 @@ export function SearchWinner({ matchHistory, currentEventId, onRestoreMatch, bou
                             ? "bg-red-50/70 border-red-300 ring-2 ring-red-500/20"
                             : "bg-slate-50/50 border-slate-200 opacity-80"
                         )}>
-                          <div className="flex items-center justify-between mb-1">
+                          <div className="flex items-center justify-between mb-2">
                             <span className="text-[10px] font-black text-red-600 uppercase tracking-widest">Red Corner</span>
                             {selectedMatch.winnerSide === 'Red' && (
                               <span className="text-[10px] font-black uppercase px-1.5 py-0.5 rounded bg-red-600 text-white flex items-center gap-0.5">
@@ -431,8 +448,13 @@ export function SearchWinner({ matchHistory, currentEventId, onRestoreMatch, bou
                               </span>
                             )}
                           </div>
-                          <span className="text-base font-bold text-slate-900 uppercase">{selectedMatchDetails.redName}</span>
-                          <span className="text-xs font-medium text-slate-500 uppercase mt-auto pt-2">{selectedMatchDetails.redClub}</span>
+                          <div className="flex items-start gap-3">
+                            <PlayerLogoBadge club={selectedMatchDetails.redClub} name={selectedMatchDetails.redName} size="md" className="shrink-0 mt-0.5" />
+                            <div className="min-w-0 flex-1">
+                              <span className="text-base font-bold text-slate-900 uppercase block truncate">{selectedMatchDetails.redName}</span>
+                              <span className="text-xs font-medium text-slate-500 uppercase block truncate mt-0.5">{selectedMatchDetails.redClub}</span>
+                            </div>
+                          </div>
                         </div>
                       </div>
 

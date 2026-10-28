@@ -5,6 +5,7 @@ import { collection, query, where, getDocs } from 'firebase/firestore';
 import { Download, RefreshCw, Trophy, Medal, Building2, Search, Upload, Trash2, FileSpreadsheet, X, Plus, Swords, Sparkles, Crown, Award, Filter, User, Edit2, RotateCcw, Check, Users, UserCheck, ChevronDown, ChevronUp, ChevronRight, Printer, ArrowUpDown, Shield } from 'lucide-react';
 import Papa from 'papaparse';
 import { getBoutNumber, isBoutMatch, cn, isPoomsaeCategory, isPlayoffBout } from '../lib/utils';
+import { PlayerLogoBadge } from './PlayerLogoBadge';
 
 export interface PlayerRosterEntry {
   name: string;
@@ -101,8 +102,22 @@ export function isValidAthlete(name?: string | null): boolean {
   return !invalid.includes(cleaned);
 }
 
-export function getCategoryDivision(category?: string | null): string {
+export const STANDARD_DIVISIONS = [
+  'Super Cadet',
+  'Super Junior',
+  'Cadet',
+  'Junior',
+  'Senior',
+  'Novice',
+  'Master / Veteran',
+  'Other'
+];
+
+export function getCategoryDivision(category?: string | null, overrides?: Record<string, string>): string {
   if (!category) return 'Other';
+  if (overrides && overrides[category]) {
+    return overrides[category];
+  }
   const cat = category.toUpperCase().trim();
   if (cat.includes('SUPER CADET') || cat.includes('SUPER-CADET') || cat.includes('SUPER_CADET') ||
       cat.includes('U6') || cat.includes('U8') || cat.includes('U10') || cat.includes('U11') || cat.includes('U12') ||
@@ -634,6 +649,9 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
   // Category division filter: 'all' or specific division like 'Cadet', 'Junior', 'Senior', 'Super Cadet'
   const [selectedDivision, setSelectedDivision] = useState<string>('all');
   
+  // Overall Winners View Mode: 'by-club' (default) or 'by-medal'
+  const [byRankViewMode, setByRankViewMode] = useState<'by-club' | 'by-medal'>('by-club');
+  
   // Player Summary specific state
   const [playerSearchQuery, setPlayerSearchQuery] = useState('');
   const [playerDisciplineFilter, setPlayerDisciplineFilter] = useState<'all' | 'kyorugi' | 'poomsae'>('all');
@@ -680,6 +698,64 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
       setPlacingsOverrides({});
     }
   }, [currentEventId]);
+
+  // Category Division Overrides per event
+  const [categoryDivisionOverrides, setCategoryDivisionOverrides] = useState<Record<string, string>>(() => {
+    if (!currentEventId) return {};
+    try {
+      const saved = localStorage.getItem(`tkd_category_division_overrides_${currentEventId}`);
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  const [showManageDivisionsModal, setShowManageDivisionsModal] = useState(false);
+  const [divisionModalSearch, setDivisionModalSearch] = useState('');
+  const [customDivisionModal, setCustomDivisionModal] = useState<{ categoryName: string } | null>(null);
+  const [customDivisionInputValue, setCustomDivisionInputValue] = useState('');
+
+  // Reload category division overrides when currentEventId changes
+  useEffect(() => {
+    if (!currentEventId) return;
+    try {
+      const saved = localStorage.getItem(`tkd_category_division_overrides_${currentEventId}`);
+      setCategoryDivisionOverrides(saved ? JSON.parse(saved) : {});
+    } catch {
+      setCategoryDivisionOverrides({});
+    }
+  }, [currentEventId]);
+
+  const getDivisionForCategory = (categoryName?: string | null) => {
+    return getCategoryDivision(categoryName, categoryDivisionOverrides);
+  };
+
+  const handleSetCategoryDivision = (categoryName: string, newDivision: string) => {
+    const updated = {
+      ...categoryDivisionOverrides,
+      [categoryName]: newDivision
+    };
+    setCategoryDivisionOverrides(updated);
+    if (currentEventId) {
+      localStorage.setItem(`tkd_category_division_overrides_${currentEventId}`, JSON.stringify(updated));
+    }
+  };
+
+  const handleResetCategoryDivision = (categoryName: string) => {
+    const updated = { ...categoryDivisionOverrides };
+    delete updated[categoryName];
+    setCategoryDivisionOverrides(updated);
+    if (currentEventId) {
+      localStorage.setItem(`tkd_category_division_overrides_${currentEventId}`, JSON.stringify(updated));
+    }
+  };
+
+  const handleResetAllCategoryDivisions = () => {
+    setCategoryDivisionOverrides({});
+    if (currentEventId) {
+      localStorage.removeItem(`tkd_category_division_overrides_${currentEventId}`);
+    }
+  };
 
   // Editing state for category placings
   const [editingCategory, setEditingCategory] = useState<CategoryResult | null>(null);
@@ -1292,17 +1368,18 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
       );
 
       if (existingIdx !== -1) {
+        const existingMatch = combinedMatches[existingIdx];
         combinedMatches[existingIdx] = {
-          ...combinedMatches[existingIdx],
-          date: sheetItem.date || combinedMatches[existingIdx].date,
-          blueName: sheetItem.blueName || combinedMatches[existingIdx].blueName,
-          blueClub: sheetItem.blueClub || combinedMatches[existingIdx].blueClub,
-          redName: sheetItem.redName || combinedMatches[existingIdx].redName,
-          redClub: sheetItem.redClub || combinedMatches[existingIdx].redClub,
-          winner: sheetItem.winner || combinedMatches[existingIdx].winner,
-          winnerClub: sheetItem.winnerClub || combinedMatches[existingIdx].winnerClub,
-          r1Blue: sheetItem.r1Blue !== undefined ? sheetItem.r1Blue : combinedMatches[existingIdx].r1Blue,
-          r1Red: sheetItem.r1Red !== undefined ? sheetItem.r1Red : combinedMatches[existingIdx].r1Red
+          ...existingMatch,
+          date: existingMatch.date || sheetItem.date,
+          blueName: existingMatch.blueName || sheetItem.blueName,
+          blueClub: existingMatch.blueClub || sheetItem.blueClub,
+          redName: existingMatch.redName || sheetItem.redName,
+          redClub: existingMatch.redClub || sheetItem.redClub,
+          winner: existingMatch.winner || sheetItem.winner,
+          winnerClub: existingMatch.winnerClub || sheetItem.winnerClub,
+          r1Blue: existingMatch.r1Blue !== undefined ? existingMatch.r1Blue : sheetItem.r1Blue,
+          r1Red: existingMatch.r1Red !== undefined ? existingMatch.r1Red : sheetItem.r1Red
         };
       } else {
         combinedMatches.push(sheetItem);
@@ -1503,7 +1580,7 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
         pRecord.categories.add(cat);
         const isPoom = isPoomsaeCategory(cat);
         pRecord.disciplines.add(isPoom ? 'Poomsae' : 'Kyorugi');
-        pRecord.divisions.add(getCategoryDivision(cat));
+        pRecord.divisions.add(getDivisionForCategory(cat));
       }
       if (matchBout && matchBout.trim() && matchBout.trim() !== '-') {
         pRecord.bouts.add(matchBout.trim());
@@ -1618,7 +1695,7 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
       totalEntriesAllClubs: totalEntriesSum,
       allDivisionsList: Array.from(allDivisionsSet).sort()
     };
-  }, [matches, athletes, matchHistory, backupData]);
+  }, [matches, athletes, matchHistory, backupData, categoryDivisionOverrides]);
 
   // Filtered and sorted summaries for the Player Summary table
   const filteredAndSortedClubSummaries = useMemo(() => {
@@ -1868,12 +1945,15 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
   const availableDivisions = useMemo(() => {
     const divs = new Set<string>();
     categoryResults.forEach(c => {
-      const div = getCategoryDivision(c.category);
+      const div = getDivisionForCategory(c.category);
       if (div !== 'Other') divs.add(div);
     });
-    if (categoryResults.some(c => getCategoryDivision(c.category) === 'Other')) {
+    if (categoryResults.some(c => getDivisionForCategory(c.category) === 'Other')) {
       divs.add('Other');
     }
+    (Object.values(categoryDivisionOverrides) as string[]).forEach(d => {
+      if (d) divs.add(d);
+    });
     const priority = ['Super Cadet', 'Super Junior', 'Cadet', 'Junior', 'Senior', 'Novice', 'Master / Veteran', 'Other'];
     return Array.from(divs).sort((a, b) => {
       const ia = priority.indexOf(a);
@@ -1883,16 +1963,16 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
       if (ib !== -1) return 1;
       return a.localeCompare(b);
     });
-  }, [categoryResults]);
+  }, [categoryResults, categoryDivisionOverrides]);
 
   const divisionStandingsMap = useMemo(() => {
     const map: Record<string, ReturnType<typeof computeClubStandings>> = {};
     availableDivisions.forEach(div => {
-      const divResults = categoryResults.filter(c => getCategoryDivision(c.category) === div);
+      const divResults = categoryResults.filter(c => getDivisionForCategory(c.category) === div);
       map[div] = computeClubStandings(divResults);
     });
     return map;
-  }, [availableDivisions, categoryResults]);
+  }, [availableDivisions, categoryResults, categoryDivisionOverrides]);
 
   const activeDivisionStandings = useMemo(() => {
     if (selectedDivision === 'all') return clubStandings;
@@ -1905,7 +1985,7 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
       const winner = standings.length > 0 ? standings[0] : null;
       const runnerUp = standings.length > 1 ? standings[1] : null;
       const thirdPlace = standings.length > 2 ? standings[2] : null;
-      const divResults = categoryResults.filter(c => getCategoryDivision(c.category) === div);
+      const divResults = categoryResults.filter(c => getDivisionForCategory(c.category) === div);
       const completedCats = divResults.filter(c => c.gold !== null).length;
       return {
         division: div,
@@ -1917,7 +1997,7 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
         completedCategories: completedCats
       };
     });
-  }, [availableDivisions, divisionStandingsMap, categoryResults]);
+  }, [availableDivisions, divisionStandingsMap, categoryResults, categoryDivisionOverrides]);
 
   const addDisciplineStandingsToTotalOverall = (disc: 'kyorugi' | 'poomsae') => {
     const targetMatches = disc === 'poomsae' ? poomsaeMatches : kyorugiMatches;
@@ -1948,7 +2028,7 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
   const addDivisionStandingsToTotalOverall = (disc: 'kyorugi' | 'poomsae', div: string) => {
     const targetMatches = disc === 'poomsae' ? poomsaeMatches : kyorugiMatches;
     const targetResults = computeCategoryResults(targetMatches, placementOption);
-    const divResults = div === 'all' ? targetResults : targetResults.filter(c => getCategoryDivision(c.category) === div);
+    const divResults = div === 'all' ? targetResults : targetResults.filter(c => getDivisionForCategory(c.category) === div);
     const targetStandings = computeClubStandings(divResults);
     if (targetStandings.length === 0) return;
 
@@ -2000,10 +2080,10 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
             c.bronzes.some(b => (b.name && b.name.toLowerCase().includes(q)) || (b.club && b.club.toLowerCase().includes(q)));
         }
       }
-      const matchesDiv = selectedDivision === 'all' || getCategoryDivision(c.category) === selectedDivision;
+      const matchesDiv = selectedDivision === 'all' || getDivisionForCategory(c.category) === selectedDivision;
       return matchesSearch && matchesDiv;
     });
-  }, [categoryResults, searchQuery, searchCriteria, selectedDivision]);
+  }, [categoryResults, searchQuery, searchCriteria, selectedDivision, categoryDivisionOverrides]);
 
   const allGolds = useMemo(() => {
     return categoryResults
@@ -2039,28 +2119,72 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
     return allGolds.filter(g => {
       const q = searchQuery.trim().toLowerCase();
       const matchesSearch = matchWinnerCriteria(g, q, searchCriteria);
-      const matchesDiv = selectedDivision === 'all' || getCategoryDivision(g.category) === selectedDivision;
+      const matchesDiv = selectedDivision === 'all' || getDivisionForCategory(g.category) === selectedDivision;
       return matchesSearch && matchesDiv;
     });
-  }, [allGolds, searchQuery, searchCriteria, selectedDivision]);
+  }, [allGolds, searchQuery, searchCriteria, selectedDivision, categoryDivisionOverrides]);
 
   const filteredSilvers = useMemo(() => {
     return allSilvers.filter(s => {
       const q = searchQuery.trim().toLowerCase();
       const matchesSearch = matchWinnerCriteria(s, q, searchCriteria);
-      const matchesDiv = selectedDivision === 'all' || getCategoryDivision(s.category) === selectedDivision;
+      const matchesDiv = selectedDivision === 'all' || getDivisionForCategory(s.category) === selectedDivision;
       return matchesSearch && matchesDiv;
     });
-  }, [allSilvers, searchQuery, searchCriteria, selectedDivision]);
+  }, [allSilvers, searchQuery, searchCriteria, selectedDivision, categoryDivisionOverrides]);
 
   const filteredBronzes = useMemo(() => {
     return allBronzes.filter(b => {
       const q = searchQuery.trim().toLowerCase();
       const matchesSearch = matchWinnerCriteria(b, q, searchCriteria);
-      const matchesDiv = selectedDivision === 'all' || getCategoryDivision(b.category) === selectedDivision;
+      const matchesDiv = selectedDivision === 'all' || getDivisionForCategory(b.category) === selectedDivision;
       return matchesSearch && matchesDiv;
     });
-  }, [allBronzes, searchQuery, searchCriteria, selectedDivision]);
+  }, [allBronzes, searchQuery, searchCriteria, selectedDivision, categoryDivisionOverrides]);
+
+  const winnersByClub = useMemo(() => {
+    const clubMap: Record<string, {
+      club: string;
+      golds: Array<{ name: string; category: string; division: string }>;
+      silvers: Array<{ name: string; category: string; division: string }>;
+      bronzes: Array<{ name: string; category: string; division: string; place?: string }>;
+    }> = {};
+
+    filteredGolds.forEach(g => {
+      const clubKey = (g.club && isValidClub(g.club)) ? g.club.trim() : 'Unattached / Independent';
+      if (!clubMap[clubKey]) {
+        clubMap[clubKey] = { club: clubKey, golds: [], silvers: [], bronzes: [] };
+      }
+      clubMap[clubKey].golds.push({ name: g.name, category: g.category, division: getDivisionForCategory(g.category) });
+    });
+
+    filteredSilvers.forEach(s => {
+      const clubKey = (s.club && isValidClub(s.club)) ? s.club.trim() : 'Unattached / Independent';
+      if (!clubMap[clubKey]) {
+        clubMap[clubKey] = { club: clubKey, golds: [], silvers: [], bronzes: [] };
+      }
+      clubMap[clubKey].silvers.push({ name: s.name, category: s.category, division: getDivisionForCategory(s.category) });
+    });
+
+    filteredBronzes.forEach(b => {
+      const clubKey = (b.club && isValidClub(b.club)) ? b.club.trim() : 'Unattached / Independent';
+      if (!clubMap[clubKey]) {
+        clubMap[clubKey] = { club: clubKey, golds: [], silvers: [], bronzes: [] };
+      }
+      clubMap[clubKey].bronzes.push({ name: b.name, category: b.category, division: getDivisionForCategory(b.category), place: b.place });
+    });
+
+    const list = Object.values(clubMap);
+
+    list.sort((a, b) => {
+      if (b.golds.length !== a.golds.length) return b.golds.length - a.golds.length;
+      if (b.silvers.length !== a.silvers.length) return b.silvers.length - a.silvers.length;
+      if (b.bronzes.length !== a.bronzes.length) return b.bronzes.length - a.bronzes.length;
+      return a.club.localeCompare(b.club);
+    });
+
+    return list;
+  }, [filteredGolds, filteredSilvers, filteredBronzes, categoryDivisionOverrides]);
 
   const downloadCategoryPlacings = () => {
     const discLabel = discipline === 'poomsae' ? 'Poomsae' : 'Kyorugi';
@@ -2071,7 +2195,7 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
       const b2ClubLabel = b2.place === '4th' ? '4th Place Club' : '3rd Place Club 2';
       return {
         'Discipline': discLabel,
-        'Division': getCategoryDivision(c.category),
+        'Division': getDivisionForCategory(c.category),
         'Category': c.category,
         '1st Place (Gold)': c.gold?.name || '',
         '1st Place Club': c.gold?.club || '',
@@ -2101,7 +2225,7 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
     filteredGolds.forEach(g => {
       data.push({
         'Discipline': discLabel,
-        'Division': getCategoryDivision(g.category),
+        'Division': getDivisionForCategory(g.category),
         'Rank': '1st Place (Gold)',
         'Athlete Name': g.name,
         'Club Name': g.club,
@@ -2112,7 +2236,7 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
     filteredSilvers.forEach(s => {
       data.push({
         'Discipline': discLabel,
-        'Division': getCategoryDivision(s.category),
+        'Division': getDivisionForCategory(s.category),
         'Rank': '2nd Place (Silver)',
         'Athlete Name': s.name,
         'Club Name': s.club,
@@ -2123,7 +2247,7 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
     filteredBronzes.forEach(b => {
       data.push({
         'Discipline': discLabel,
-        'Division': getCategoryDivision(b.category),
+        'Division': getDivisionForCategory(b.category),
         'Rank': '3rd Place (Bronze)',
         'Athlete Name': b.name,
         'Club Name': b.club,
@@ -2397,7 +2521,7 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
               : "text-slate-500 hover:text-slate-700 hover:bg-slate-50"
           )}
         >
-          Club/State Overall Winner by Category
+          {discipline === 'kyorugi' ? 'Kyorugi' : 'Poomsae'} Overall Winners by Category by club
           {activeTab === 'by-rank' && <div className="absolute -bottom-px left-0 right-0 h-px bg-white" />}
         </button>
         <button
@@ -2456,6 +2580,17 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
                 Category Placings
               </h2>
               <div className="flex flex-wrap items-center gap-3">
+                {userIsAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => setShowManageDivisionsModal(true)}
+                    className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl flex items-center gap-2 text-sm transition-all shadow-sm cursor-pointer"
+                    title="Admin: Open tool to reassign/move categories to correct divisions"
+                  >
+                    <ArrowUpDown size={16} />
+                    Move / Manage Divisions
+                  </button>
+                )}
                 <button
                   onClick={downloadCategoryPlacings}
                   className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl flex items-center gap-2 text-sm transition-all shadow-sm"
@@ -2556,7 +2691,7 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
                 All Divisions ({categoryResults.length})
               </button>
               {availableDivisions.map(div => {
-                const count = categoryResults.filter(c => getCategoryDivision(c.category) === div).length;
+                const count = categoryResults.filter(c => getDivisionForCategory(c.category) === div).length;
                 return (
                   <button
                     key={div}
@@ -2612,23 +2747,77 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
                              </span>
                            )}
                          </div>
-                         <span className="inline-block mt-1 text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-md bg-slate-100 text-slate-500 border border-slate-200">
-                           {getCategoryDivision(c.category)}
-                         </span>
+                         <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                           {userIsAdmin ? (
+                             <div className="inline-flex items-center gap-1">
+                               <select
+                                 value={getDivisionForCategory(c.category)}
+                                 onChange={(e) => {
+                                   const val = e.target.value;
+                                   if (val === 'CUSTOM_NEW') {
+                                     const custom = prompt(`Enter custom division name for category "${c.category}":`);
+                                     if (custom && custom.trim()) {
+                                       handleSetCategoryDivision(c.category, custom.trim());
+                                     }
+                                   } else {
+                                     handleSetCategoryDivision(c.category, val);
+                                   }
+                                 }}
+                                 className={cn(
+                                   "text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-md outline-none cursor-pointer transition-colors border",
+                                   categoryDivisionOverrides[c.category]
+                                     ? "bg-purple-100 text-purple-900 border-purple-300 hover:bg-purple-200"
+                                     : "bg-slate-100 text-slate-700 border-slate-200 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-300"
+                                 )}
+                                 title="Admin: Click to move this category to a different division"
+                               >
+                                 <option value={getDivisionForCategory(c.category)}>
+                                   Division: {getDivisionForCategory(c.category)} {categoryDivisionOverrides[c.category] ? '(Moved)' : ''}
+                                 </option>
+                                 <optgroup label="Move Category to Division...">
+                                   {STANDARD_DIVISIONS.map(div => (
+                                     <option key={div} value={div}>{div}</option>
+                                   ))}
+                                   <option value="CUSTOM_NEW">+ Custom Division...</option>
+                                 </optgroup>
+                               </select>
+                               {categoryDivisionOverrides[c.category] && (
+                                 <button
+                                   type="button"
+                                   onClick={() => handleResetCategoryDivision(c.category)}
+                                   className="text-[9px] font-extrabold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-1.5 py-0.5 rounded cursor-pointer"
+                                   title="Reset category back to auto-detected division"
+                                 >
+                                   Reset Div
+                                 </button>
+                               )}
+                             </div>
+                           ) : (
+                             <span className="inline-block text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-md bg-slate-100 text-slate-500 border border-slate-200">
+                               {getDivisionForCategory(c.category)}
+                             </span>
+                           )}
+                         </div>
                        </td>
                        <td className="p-4">
                          {c.gold ? (
-                           <div>
-                             <div className="font-bold text-slate-900">{c.gold.name}</div>
-                             <div className="text-xs text-blue-900 font-bold">{c.gold.club}</div>
+                           <div className="flex items-center gap-2.5">
+                             <PlayerLogoBadge club={c.gold.club} name={c.gold.name} size="sm" />
+                             <div>
+                               <div className="font-bold text-slate-900">{c.gold.name}</div>
+                               <div className="text-xs text-blue-900 font-bold">{c.gold.club}</div>
+                             </div>
                            </div>
                          ) : <span className="text-slate-400 text-sm italic">Pending Finish</span>}
                        </td>
                        <td className="p-4">
                          {c.silver ? (
-                           <div>
-                             <div className="font-bold text-slate-700">{c.silver.name}</div>
-                             <div className="text-xs text-blue-900 font-bold">{c.silver.club}</div>
+                           <div className="flex items-center gap-2.5">
+                             <PlayerLogoBadge club={c.silver.club} name={c.silver.name} size="sm" />
+                             <div>
+                               <div className="font-bold text-slate-700">{c.silver.name}</div>
+                               <div className="text-xs text-blue-900 font-bold">{c.silver.club}</div>
+                             </div>
                            </div>
                          ) : <span className="text-slate-400">-</span>}
                        </td>
@@ -2636,9 +2825,12 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
                          {c.bronzes.length > 0 ? (
                            <div className="flex flex-col gap-2">
                              {c.bronzes.map((b, bi) => (
-                               <div key={bi} className={cn("px-2 py-1 rounded border inline-block w-max", b.place === '4th' ? "bg-slate-50 border-slate-200 text-slate-700" : "bg-amber-50 border-amber-100")}>
-                                 <div className="font-bold text-slate-800 text-sm flex gap-2"><span>{b.name}</span><span className={cn("font-black", b.place === '4th' ? "text-slate-500" : "text-amber-700/60")}>{b.place === '4th' ? '#4' : '#3'}</span></div>
-                                 <div className="text-xs text-blue-900 font-bold">{b.club}</div>
+                               <div key={bi} className={cn("px-2.5 py-1.5 rounded-xl border flex items-center gap-2 w-max", b.place === '4th' ? "bg-slate-50 border-slate-200 text-slate-700" : "bg-amber-50 border-amber-100")}>
+                                 <PlayerLogoBadge club={b.club} name={b.name} size="xs" />
+                                 <div>
+                                   <div className="font-bold text-slate-800 text-sm flex gap-2"><span>{b.name}</span><span className={cn("font-black", b.place === '4th' ? "text-slate-500" : "text-amber-700/60")}>{b.place === '4th' ? '#4' : '#3'}</span></div>
+                                   <div className="text-xs text-blue-900 font-bold">{b.club}</div>
+                                 </div>
                                </div>
                              ))}
                            </div>
@@ -2680,13 +2872,45 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
         {activeTab === 'by-rank' && (
           <div className="p-6">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
-              <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-                <span className={discipline === 'kyorugi' ? "text-blue-600 font-black" : "text-amber-600 font-black"}>
-                  {discipline === 'kyorugi' ? 'Kyorugi' : 'Poomsae'}
-                </span>
-                Overall Winners by Category
-              </h2>
+              <div>
+                <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                  <span className={discipline === 'kyorugi' ? "text-blue-600 font-black" : "text-amber-600 font-black"}>
+                    {discipline === 'kyorugi' ? 'Kyorugi' : 'Poomsae'}
+                  </span>
+                  Overall Winners by Category by club
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5 font-medium">
+                  Category medal winners grouped by club affiliation ({winnersByClub.length} clubs with category placings)
+                </p>
+              </div>
+
               <div className="flex flex-wrap items-center gap-3">
+                {/* View Mode Switcher */}
+                <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
+                  <button
+                    type="button"
+                    onClick={() => setByRankViewMode('by-club')}
+                    className={cn(
+                      "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5",
+                      byRankViewMode === 'by-club' ? "bg-white text-blue-700 shadow-2xs" : "text-slate-600 hover:text-slate-900"
+                    )}
+                  >
+                    <Building2 size={14} />
+                    Grouped by Club
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setByRankViewMode('by-medal')}
+                    className={cn(
+                      "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5",
+                      byRankViewMode === 'by-medal' ? "bg-white text-blue-700 shadow-2xs" : "text-slate-600 hover:text-slate-900"
+                    )}
+                  >
+                    <Medal size={14} />
+                    By Medal (1st/2nd/3rd)
+                  </button>
+                </div>
+
                 <button
                   onClick={downloadOverallWinners}
                   className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl flex items-center gap-2 text-sm transition-all shadow-sm"
@@ -2694,6 +2918,7 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
                   <Download size={16} />
                   Download Winners CSV
                 </button>
+
                 <div className="flex flex-wrap items-center gap-2">
                   <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
                     <button
@@ -2803,77 +3028,197 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
               ))}
             </div>
 
-            <div className="space-y-12">
-              {/* 1st Place Section */}
-              <div>
-                <h3 className="text-lg font-black text-yellow-600 flex items-center gap-2 mb-4 border-b border-yellow-100 pb-2">
-                  <Medal size={20} className="text-yellow-500" /> 1st Place overall (Gold)
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                  {filteredGolds.length === 0 ? (
-                    <div className="text-slate-500 italic">No gold winners found.</div>
-                  ) : filteredGolds.map((g, i) => (
-                    <div key={i} className="bg-white border text-left border-yellow-200 rounded-xl max-w-sm p-4 shadow-sm hover:shadow-md transition-shadow">
-                      <div className="font-black text-slate-900 text-lg leading-tight uppercase mb-1">{g.name}</div>
-                      <div className="text-sm font-bold text-blue-900 uppercase tracking-widest">{g.club}</div>
-                      <div className="text-xs text-slate-500 mt-3 pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
-                        <span className="truncate">{g.category}</span>
-                        <span className="text-[10px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-yellow-50 text-yellow-800 border border-yellow-200 shrink-0">
-                          {getCategoryDivision(g.category)}
-                        </span>
+            {byRankViewMode === 'by-club' ? (
+              /* GROUPED BY CLUB VIEW */
+              <div className="space-y-6">
+                {winnersByClub.length === 0 ? (
+                  <div className="p-8 text-center text-slate-500 bg-slate-50 rounded-2xl border border-slate-200">
+                    No winners found for the selected filters.
+                  </div>
+                ) : winnersByClub.map((clubGroup) => {
+                  const totalGolds = clubGroup.golds.length;
+                  const totalSilvers = clubGroup.silvers.length;
+                  const totalBronzes = clubGroup.bronzes.length;
+                  const totalMedals = totalGolds + totalSilvers + totalBronzes;
+
+                  return (
+                    <div key={clubGroup.club} className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
+                      {/* Club Header */}
+                      <div className="px-6 py-4 bg-slate-50/80 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <PlayerLogoBadge club={clubGroup.club} size="md" />
+                          <div>
+                            <h3 className="font-extrabold text-slate-900 text-base">{clubGroup.club}</h3>
+                            <p className="text-xs text-slate-500 font-semibold">
+                              {totalMedals} Total Category Winner Placings
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <span className="px-3 py-1 bg-yellow-100 text-yellow-900 border border-yellow-300 rounded-xl text-xs font-extrabold flex items-center gap-1.5">
+                            <Medal size={14} className="text-yellow-600" />
+                            {totalGolds} Gold
+                          </span>
+                          <span className="px-3 py-1 bg-slate-200 text-slate-800 border border-slate-300 rounded-xl text-xs font-extrabold flex items-center gap-1.5">
+                            <Medal size={14} className="text-slate-500" />
+                            {totalSilvers} Silver
+                          </span>
+                          <span className="px-3 py-1 bg-amber-100 text-amber-900 border border-amber-300 rounded-xl text-xs font-extrabold flex items-center gap-1.5">
+                            <Medal size={14} className="text-amber-700" />
+                            {totalBronzes} Bronze
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Winners List by Category for this Club */}
+                      <div className="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                        {/* Gold Winners */}
+                        {clubGroup.golds.map((g, gi) => (
+                          <div key={`g_${gi}`} className="p-3.5 bg-yellow-50/60 border border-yellow-200 rounded-xl flex flex-col justify-between">
+                            <div>
+                              <div className="flex items-center justify-between gap-2 mb-1">
+                                <span className="text-xs font-black uppercase text-yellow-800 flex items-center gap-1">
+                                  🥇 1st Place (Gold)
+                                </span>
+                                <span className="text-[10px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-yellow-100 text-yellow-900 border border-yellow-300">
+                                  {g.division}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2 mt-1">
+                                <PlayerLogoBadge club={clubGroup.club} name={g.name} size="xs" />
+                                <div className="font-extrabold text-slate-900 text-sm truncate">{g.name}</div>
+                              </div>
+                            </div>
+                            <div className="text-xs text-slate-500 font-semibold mt-2 pt-2 border-t border-yellow-200/60 truncate" title={g.category}>
+                              {g.category}
+                            </div>
+                          </div>
+                        ))}
+
+                        {/* Silver Winners */}
+                        {clubGroup.silvers.map((s, si) => (
+                          <div key={`s_${si}`} className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl flex flex-col justify-between">
+                            <div>
+                              <div className="flex items-center justify-between gap-2 mb-1">
+                                <span className="text-xs font-black uppercase text-slate-700 flex items-center gap-1">
+                                  🥈 2nd Place (Silver)
+                                </span>
+                                <span className="text-[10px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 border border-slate-300">
+                                  {s.division}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2 mt-1">
+                                <PlayerLogoBadge club={clubGroup.club} name={s.name} size="xs" />
+                                <div className="font-extrabold text-slate-900 text-sm truncate">{s.name}</div>
+                              </div>
+                            </div>
+                            <div className="text-xs text-slate-500 font-semibold mt-2 pt-2 border-t border-slate-200/60 truncate" title={s.category}>
+                              {s.category}
+                            </div>
+                          </div>
+                        ))}
+
+                        {/* Bronze Winners */}
+                        {clubGroup.bronzes.map((b, bi) => (
+                          <div key={`b_${bi}`} className="p-3.5 bg-amber-50/50 border border-amber-200 rounded-xl flex flex-col justify-between">
+                            <div>
+                              <div className="flex items-center justify-between gap-2 mb-1">
+                                <span className="text-xs font-black uppercase text-amber-800 flex items-center gap-1">
+                                  🥉 {b.place === '4th' ? '4th Place' : '3rd Place (Bronze)'}
+                                </span>
+                                <span className="text-[10px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300">
+                                  {b.division}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2 mt-1">
+                                <PlayerLogoBadge club={clubGroup.club} name={b.name} size="xs" />
+                                <div className="font-extrabold text-slate-900 text-sm truncate">{b.name}</div>
+                              </div>
+                            </div>
+                            <div className="text-xs text-slate-500 font-semibold mt-2 pt-2 border-t border-amber-200/60 truncate" title={b.category}>
+                              {b.category}
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
-                  ))}
-                </div>
+                  );
+                })}
               </div>
-
-              {/* 2nd Place Section */}
-              <div>
-                <h3 className="text-lg font-black text-slate-600 flex items-center gap-2 mb-4 border-b border-slate-100 pb-2">
-                  <Medal size={20} className="text-slate-400" /> 2nd Place overall (Silver)
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                  {filteredSilvers.length === 0 ? (
-                    <div className="text-slate-500 italic">No silver winners found.</div>
-                  ) : filteredSilvers.map((s, i) => (
-                    <div key={i} className="bg-white border text-left border-slate-200 rounded-xl max-w-sm p-4 shadow-sm hover:shadow-md transition-shadow">
-                      <div className="font-black text-slate-900 text-lg leading-tight uppercase mb-1">{s.name}</div>
-                      <div className="text-sm font-bold text-blue-900 uppercase tracking-widest">{s.club}</div>
-                      <div className="text-xs text-slate-500 mt-3 pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
-                        <span className="truncate">{s.category}</span>
-                        <span className="text-[10px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200 shrink-0">
-                          {getCategoryDivision(s.category)}
-                        </span>
+            ) : (
+              /* GROUPED BY MEDAL RANK VIEW */
+              <div className="space-y-12">
+                {/* 1st Place Section */}
+                <div>
+                  <h3 className="text-lg font-black text-yellow-600 flex items-center gap-2 mb-4 border-b border-yellow-100 pb-2">
+                    <Medal size={20} className="text-yellow-500" /> 1st Place overall (Gold)
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                    {filteredGolds.length === 0 ? (
+                      <div className="text-slate-500 italic">No gold winners found.</div>
+                    ) : filteredGolds.map((g, i) => (
+                      <div key={i} className="bg-white border text-left border-yellow-200 rounded-xl max-w-sm p-4 shadow-sm hover:shadow-md transition-shadow">
+                        <div className="font-black text-slate-900 text-lg leading-tight uppercase mb-1">{g.name}</div>
+                        <div className="text-sm font-bold text-blue-900 uppercase tracking-widest">{g.club}</div>
+                        <div className="text-xs text-slate-500 mt-3 pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
+                          <span className="truncate">{g.category}</span>
+                          <span className="text-[10px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-yellow-50 text-yellow-800 border border-yellow-200 shrink-0">
+                            {getCategoryDivision(g.category)}
+                          </span>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
-              </div>
 
-              {/* 3rd Place Section */}
-              <div>
-                <h3 className="text-lg font-black text-amber-700 flex items-center gap-2 mb-4 border-b border-amber-100 pb-2">
-                  <Medal size={20} className="text-amber-600" /> 3rd Place overall (Bronze)
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                  {filteredBronzes.length === 0 ? (
-                    <div className="text-slate-500 italic">No bronze winners found.</div>
-                  ) : filteredBronzes.map((b, i) => (
-                    <div key={i} className="bg-white border text-left border-amber-200 rounded-xl max-w-sm p-4 shadow-sm hover:shadow-md transition-shadow">
-                      <div className="font-black text-slate-900 text-lg leading-tight uppercase mb-1">{b.name}</div>
-                      <div className="text-sm font-bold text-blue-900 uppercase tracking-widest">{b.club}</div>
-                      <div className="text-xs text-slate-500 mt-3 pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
-                        <span className="truncate">{b.category}</span>
-                        <span className="text-[10px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 shrink-0">
-                          {getCategoryDivision(b.category)}
-                        </span>
+                {/* 2nd Place Section */}
+                <div>
+                  <h3 className="text-lg font-black text-slate-600 flex items-center gap-2 mb-4 border-b border-slate-100 pb-2">
+                    <Medal size={20} className="text-slate-400" /> 2nd Place overall (Silver)
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                    {filteredSilvers.length === 0 ? (
+                      <div className="text-slate-500 italic">No silver winners found.</div>
+                    ) : filteredSilvers.map((s, i) => (
+                      <div key={i} className="bg-white border text-left border-slate-200 rounded-xl max-w-sm p-4 shadow-sm hover:shadow-md transition-shadow">
+                        <div className="font-black text-slate-900 text-lg leading-tight uppercase mb-1">{s.name}</div>
+                        <div className="text-sm font-bold text-blue-900 uppercase tracking-widest">{s.club}</div>
+                        <div className="text-xs text-slate-500 mt-3 pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
+                          <span className="truncate">{s.category}</span>
+                          <span className="text-[10px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200 shrink-0">
+                            {getCategoryDivision(s.category)}
+                          </span>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
+                </div>
+
+                {/* 3rd Place Section */}
+                <div>
+                  <h3 className="text-lg font-black text-amber-700 flex items-center gap-2 mb-4 border-b border-amber-100 pb-2">
+                    <Medal size={20} className="text-amber-600" /> 3rd Place overall (Bronze)
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                    {filteredBronzes.length === 0 ? (
+                      <div className="text-slate-500 italic">No bronze winners found.</div>
+                    ) : filteredBronzes.map((b, i) => (
+                      <div key={i} className="bg-white border text-left border-amber-200 rounded-xl max-w-sm p-4 shadow-sm hover:shadow-md transition-shadow">
+                        <div className="font-black text-slate-900 text-lg leading-tight uppercase mb-1">{b.name}</div>
+                        <div className="text-sm font-bold text-blue-900 uppercase tracking-widest">{b.club}</div>
+                        <div className="text-xs text-slate-500 mt-3 pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
+                          <span className="truncate">{b.category}</span>
+                          <span className="text-[10px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 shrink-0">
+                            {getCategoryDivision(b.category)}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
-
-            </div>
+            )}
           </div>
         )}
 
@@ -3097,7 +3442,7 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
                         </div>
                       </td>
                       <td className="p-4 font-bold text-blue-900 text-base flex items-center gap-3">
-                        <Building2 size={18} className="text-slate-400 shrink-0" />
+                        <PlayerLogoBadge club={c.club} size="sm" />
                         <span className="uppercase">{c.club || 'Unknown Club'}</span>
                         {i === 0 && (
                           <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 flex items-center gap-1 border border-amber-200">
@@ -3356,7 +3701,7 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
                               </div>
                             </td>
                             <td className="p-4 font-bold text-blue-900 text-lg flex items-center gap-3">
-                              <Building2 size={20} className="text-slate-400" />
+                              <PlayerLogoBadge club={c.club} size="sm" />
                               {c.club || 'Unknown Club'}
                             </td>
                             <td className="p-4 font-black text-center text-lg">{c.gold}</td>
@@ -3714,9 +4059,7 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
                                   >
                                     {isExpanded ? <ChevronDown size={16} className="text-emerald-600" /> : <ChevronRight size={16} />}
                                   </button>
-                                  <div className="p-1.5 bg-slate-100 text-slate-600 rounded-lg group-hover:bg-emerald-100 group-hover:text-emerald-700 transition-colors">
-                                    <Building2 size={16} />
-                                  </div>
+                                  <PlayerLogoBadge club={club.club} size="sm" />
                                   <div>
                                     <span className="font-extrabold text-slate-900 text-sm group-hover:text-emerald-800 transition-colors">
                                       {club.club}
@@ -3821,11 +4164,12 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
                                           className="p-3 bg-slate-50/80 hover:bg-white rounded-xl border border-slate-200/70 hover:border-emerald-300 transition-all flex flex-col justify-between"
                                         >
                                           <div className="flex items-start justify-between gap-2">
-                                            <div className="flex items-center gap-2">
-                                              <span className="text-[11px] font-bold text-slate-400 w-5">
+                                            <div className="flex items-center gap-2 min-w-0">
+                                              <span className="text-[11px] font-bold text-slate-400 w-5 shrink-0">
                                                 #{pIdx + 1}
                                               </span>
-                                              <span className="font-extrabold text-slate-800 text-xs">
+                                              <PlayerLogoBadge club={club.club} name={player.name} size="xs" />
+                                              <span className="font-extrabold text-slate-800 text-xs truncate">
                                                 {player.name}
                                               </span>
                                             </div>
@@ -4322,6 +4666,247 @@ export function EventReport({ currentEventId, events, matchHistory = [], backupD
                   Save Placings
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ADMIN MANAGE CATEGORY DIVISIONS MODAL */}
+      {showManageDivisionsModal && (
+        <div id="manage-divisions-modal-overlay" className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div id="manage-divisions-modal-container" className="bg-white rounded-2xl max-w-4xl w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
+            {/* Modal Header */}
+            <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-purple-100 text-purple-700 rounded-xl">
+                  <ArrowUpDown size={20} />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-800">Manage & Reassign Category Divisions</h3>
+                  <p className="text-xs text-slate-500 font-medium mt-0.5">
+                    Move mixed or misclassified Kyorugi & Poomsae categories into their correct division (Super Cadet, Cadet, Junior, Senior, Novice, etc.)
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                id="btn-close-manage-divisions-modal"
+                onClick={() => setShowManageDivisionsModal(false)}
+                className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-200 rounded-xl transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Controls Bar */}
+            <div className="p-4 bg-slate-100/80 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+              <div className="relative flex-1 min-w-[240px]">
+                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Filter category name or division..."
+                  value={divisionModalSearch}
+                  onChange={(e) => setDivisionModalSearch(e.target.value)}
+                  className="w-full pl-9 pr-8 py-2 bg-white border border-slate-300 rounded-xl text-sm font-semibold text-slate-800 focus:ring-2 focus:ring-purple-500 outline-none"
+                />
+                {divisionModalSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setDivisionModalSearch('')}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                {Object.keys(categoryDivisionOverrides).length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleResetAllCategoryDivisions}
+                    className="px-3.5 py-2 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 font-bold rounded-xl text-xs transition-all flex items-center gap-1.5"
+                  >
+                    <RotateCcw size={14} />
+                    Reset All ({Object.keys(categoryDivisionOverrides).length} Overrides)
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Modal Body - Category List */}
+            <div className="p-6 overflow-y-auto max-h-[60vh] space-y-3">
+              {(() => {
+                const modalCategories = (Array.from(new Set(matches.map(m => m.category))) as string[])
+                  .filter(cat => Boolean(cat) && cat !== 'SKIPPED' && cat !== '-')
+                  .filter(cat => {
+                    if (!divisionModalSearch.trim()) return true;
+                    const q = divisionModalSearch.toLowerCase();
+                    const currentDiv = getDivisionForCategory(cat).toLowerCase();
+                    return cat.toLowerCase().includes(q) || currentDiv.includes(q);
+                  })
+                  .sort((a, b) => a.localeCompare(b));
+
+                if (modalCategories.length === 0) {
+                  return (
+                    <div className="p-8 text-center text-slate-500 font-medium">
+                      No matching categories found for "{divisionModalSearch}".
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden bg-white">
+                    <div className="bg-slate-50 px-4 py-2.5 text-xs font-bold text-slate-500 grid grid-cols-1 sm:grid-cols-12 gap-3 items-center">
+                      <div className="sm:col-span-6">Category Name</div>
+                      <div className="sm:col-span-4">Assigned Division</div>
+                      <div className="sm:col-span-2 text-right">Action</div>
+                    </div>
+                    {modalCategories.map((catName) => {
+                      const currentDiv = getDivisionForCategory(catName);
+                      const isOverridden = Boolean(categoryDivisionOverrides[catName]);
+
+                      return (
+                        <div key={catName} className="px-4 py-3 grid grid-cols-1 sm:grid-cols-12 gap-3 items-center hover:bg-slate-50/60 transition-colors">
+                          <div className="sm:col-span-6">
+                            <span className="font-bold text-slate-800 text-sm">{catName}</span>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <span className="text-[10px] font-bold text-slate-400 uppercase">
+                                {isPoomsaeCategory(catName) ? 'Poomsae' : 'Kyorugi'}
+                              </span>
+                              {isOverridden && (
+                                <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded bg-purple-100 text-purple-800 border border-purple-200">
+                                  Manually Moved
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="sm:col-span-4 flex items-center gap-2">
+                            <select
+                              value={currentDiv}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                if (val === 'CUSTOM_NEW') {
+                                  const custom = prompt(`Enter custom division name for category "${catName}":`);
+                                  if (custom && custom.trim()) {
+                                    handleSetCategoryDivision(catName, custom.trim());
+                                  }
+                                } else {
+                                  handleSetCategoryDivision(catName, val);
+                                }
+                              }}
+                              className={cn(
+                                "w-full text-xs font-extrabold py-1.5 px-3 rounded-xl border outline-none cursor-pointer transition-all",
+                                isOverridden
+                                  ? "bg-purple-50 text-purple-900 border-purple-300 focus:ring-2 focus:ring-purple-400"
+                                  : "bg-white text-slate-700 border-slate-300 focus:ring-2 focus:ring-blue-400"
+                              )}
+                            >
+                              <option value={currentDiv}>Division: {currentDiv}</option>
+                              <optgroup label="Reassign to Division...">
+                                {STANDARD_DIVISIONS.map(div => (
+                                  <option key={div} value={div}>{div}</option>
+                                ))}
+                                <option value="CUSTOM_NEW">+ Custom Division...</option>
+                              </optgroup>
+                            </select>
+                          </div>
+
+                          <div className="sm:col-span-2 text-right">
+                            {isOverridden ? (
+                              <button
+                                type="button"
+                                onClick={() => handleResetCategoryDivision(catName)}
+                                className="px-2.5 py-1 text-xs font-bold text-amber-700 hover:bg-amber-100 bg-amber-50 border border-amber-200 rounded-lg transition-colors inline-flex items-center gap-1"
+                                title="Reset back to auto-detected division"
+                              >
+                                <RotateCcw size={12} />
+                                Reset
+                              </button>
+                            ) : (
+                              <span className="text-xs text-slate-400 italic">Auto-detected</span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
+              <span className="text-xs text-slate-500 font-semibold">
+                Changes persist automatically for this event.
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowManageDivisionsModal(false)}
+                className="px-5 py-2 bg-slate-800 hover:bg-slate-900 text-white font-bold text-sm rounded-xl transition-all shadow-sm"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CUSTOM DIVISION INPUT MODAL */}
+      {customDivisionModal && (
+        <div id="custom-division-modal-overlay" className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div id="custom-division-modal-container" className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="font-extrabold text-slate-900 text-base flex items-center gap-2">
+                <ArrowUpDown size={18} className="text-purple-600" />
+                Enter Custom Division
+              </h3>
+              <button
+                type="button"
+                onClick={() => setCustomDivisionModal(null)}
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <p className="text-xs text-slate-500 font-medium">
+              Enter custom division name for category <strong className="text-slate-800">{customDivisionModal.categoryName}</strong>:
+            </p>
+            <input
+              type="text"
+              placeholder="e.g. Masters Division, Open Class..."
+              value={customDivisionInputValue}
+              onChange={(e) => setCustomDivisionInputValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && customDivisionInputValue.trim()) {
+                  handleSetCategoryDivision(customDivisionModal.categoryName, customDivisionInputValue.trim());
+                  setCustomDivisionModal(null);
+                }
+              }}
+              autoFocus
+              className="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-sm font-semibold text-slate-800 focus:ring-2 focus:ring-purple-500 outline-none"
+            />
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setCustomDivisionModal(null)}
+                className="px-4 py-2 border border-slate-300 hover:bg-slate-100 text-slate-700 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (customDivisionInputValue.trim()) {
+                    handleSetCategoryDivision(customDivisionModal.categoryName, customDivisionInputValue.trim());
+                    setCustomDivisionModal(null);
+                  }
+                }}
+                disabled={!customDivisionInputValue.trim()}
+                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl text-xs transition-colors shadow-sm disabled:opacity-50 cursor-pointer"
+              >
+                Save Division
+              </button>
             </div>
           </div>
         </div>

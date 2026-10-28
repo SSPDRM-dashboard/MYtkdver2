@@ -49,6 +49,35 @@ export interface MatchData {
   };
   isManuallyEdited?: boolean;
   allowCompleted?: boolean;
+  isTransferred?: boolean;
+  transferredToRing?: number;
+  blue_logo?: string;
+  blue_flag?: string;
+  red_logo?: string;
+  red_flag?: string;
+}
+
+export interface AdminBoutOverride {
+  id: string;
+  eventId: string;
+  eventName: string;
+  eventDate?: string;
+  bout: string;
+  ring?: number;
+  originalRing?: number;
+  transferredToRing?: number;
+  isTransferred?: boolean;
+  blue_name?: string;
+  blue_club?: string;
+  red_name?: string;
+  red_club?: string;
+  blue_logo?: string;
+  blue_flag?: string;
+  red_logo?: string;
+  red_flag?: string;
+  category?: string;
+  isManuallyEdited?: boolean;
+  updatedAt: number;
 }
 
 export interface RingStatus {
@@ -77,6 +106,9 @@ export interface MatchHistoryItem {
   blue_club?: string;
   red_name?: string;
   red_club?: string;
+  blue_logo?: string;
+  red_logo?: string;
+  winner_logo?: string;
   eventId: string;
   ring?: number;
   syncedAt?: string | Date | any;
