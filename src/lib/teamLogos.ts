@@ -149,11 +149,15 @@ export function normalizeKey(text?: string | null): string {
     .replace(/\s+/g, " ");
 }
 
+function escapeRegExp(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 /**
  * Resolves a built-in flag (Malaysian State or World Country) from a given name or club text
  */
 export function resolveBuiltInFlag(nameOrClub?: string | null): string | null {
-  if (!nameOrClub) return null;
+  if (!nameOrClub || typeof nameOrClub !== 'string') return null;
   const raw = nameOrClub.trim().toLowerCase();
   const cleaned = normalizeKey(nameOrClub);
 
@@ -168,21 +172,29 @@ export function resolveBuiltInFlag(nameOrClub?: string | null): string | null {
   // 2. Multi-word string containing state name (e.g. "PERSATUAN TAEKWONDO SELANGOR", "KELAB KEDAH")
   const stateKeys = Object.keys(MALAYSIAN_STATE_FLAGS);
   for (const s of stateKeys) {
-    const wordBoundaryRegex = new RegExp(`\\b${s}\\b`, 'i');
-    if (wordBoundaryRegex.test(raw)) {
-      return MALAYSIAN_STATE_FLAGS[s];
+    try {
+      const wordBoundaryRegex = new RegExp(`\\b${escapeRegExp(s)}\\b`, 'i');
+      if (wordBoundaryRegex.test(raw)) {
+        return MALAYSIAN_STATE_FLAGS[s];
+      }
+    } catch (e) {
+      // Ignore regex error fallback
     }
   }
 
   // Check state aliases inside strings (e.g., "(KL)", "- KL", "JHR")
   const aliasKeys = Object.keys(STATE_ALIASES);
   for (const a of aliasKeys) {
-    const aliasRegex = new RegExp(`(?:^|[^a-z0-9])${a}(?:$|[^a-z0-9])`, 'i');
-    if (aliasRegex.test(raw)) {
-      const canonicalState = STATE_ALIASES[a];
-      if (MALAYSIAN_STATE_FLAGS[canonicalState]) {
-        return MALAYSIAN_STATE_FLAGS[canonicalState];
+    try {
+      const aliasRegex = new RegExp(`(?:^|[^a-z0-9])${escapeRegExp(a)}(?:$|[^a-z0-9])`, 'i');
+      if (aliasRegex.test(raw)) {
+        const canonicalState = STATE_ALIASES[a];
+        if (MALAYSIAN_STATE_FLAGS[canonicalState]) {
+          return MALAYSIAN_STATE_FLAGS[canonicalState];
+        }
       }
+    } catch (e) {
+      // Ignore regex error fallback
     }
   }
 
@@ -191,9 +203,13 @@ export function resolveBuiltInFlag(nameOrClub?: string | null): string | null {
     return `https://flagcdn.com/w80/${COUNTRY_CODES[cleaned]}.png`;
   }
   for (const [countryName, isoCode] of Object.entries(COUNTRY_CODES)) {
-    const countryRegex = new RegExp(`\\b${countryName}\\b`, 'i');
-    if (countryRegex.test(raw)) {
-      return `https://flagcdn.com/w80/${isoCode}.png`;
+    try {
+      const countryRegex = new RegExp(`\\b${escapeRegExp(countryName)}\\b`, 'i');
+      if (countryRegex.test(raw)) {
+        return `https://flagcdn.com/w80/${isoCode}.png`;
+      }
+    } catch (e) {
+      // Ignore regex error fallback
     }
   }
 

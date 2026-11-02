@@ -34,7 +34,9 @@ export const PlayerLogoBadge: React.FC<PlayerLogoBadgeProps> = ({
   }
 
   // If both club and name are empty or placeholders, don't render an empty icon
-  const hasContent = (club && club.trim() && club.trim() !== '---') || (name && name.trim() && name.trim() !== '---');
+  const clubStr = typeof club === 'string' ? club.trim() : (club ? String(club) : '');
+  const nameStr = typeof name === 'string' ? name.trim() : (name ? String(name) : '');
+  const hasContent = (clubStr && clubStr !== '---') || (nameStr && nameStr !== '---');
   if (!hasContent && !directLogo) {
     return null;
   }

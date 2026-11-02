@@ -20,8 +20,9 @@ export function validateIC(ic: string): boolean {
 }
 
 export function parseRingNumber(ringVal: any): number {
-  if (!ringVal) return 1;
-  const s = ringVal.toString().trim().toUpperCase();
+  if (ringVal === null || ringVal === undefined) return 1;
+  const s = String(ringVal).trim().toUpperCase();
+  if (!s) return 1;
   
   // 1. Check for court/ring keyword followed by number or letter (e.g., "RING 3", "COURT B")
   const keywordMatch = s.match(/(?:RING|COURT|AISTUDIO)\s*([A-Z0-9]+)/i);
@@ -58,8 +59,9 @@ export function parseRingNumber(ringVal: any): number {
   return 1;
 }
 
-export function normalizeBoutNumber(bout: string | number): string {
-  let s = bout.toString().replace(/\s+/g, '').toUpperCase();
+export function normalizeBoutNumber(bout?: string | number | null): string {
+  if (bout === null || bout === undefined) return '';
+  let s = String(bout).replace(/\s+/g, '').toUpperCase();
   if (!s) return '';
   
   // Replace letter 'O' with digit '0' if it is inside the alphabetic ring prefix of a bout (e.g., "CO1" -> "C01")
@@ -79,12 +81,12 @@ export function normalizeBoutNumber(bout: string | number): string {
   return s;
 }
 
-export function isBoutMatch(bout1: string | number, bout2: string | number): boolean {
-  if (bout1 === bout2) return true;
-  if (!bout1 || !bout2) return false;
+export function isBoutMatch(bout1?: string | number | null, bout2?: string | number | null): boolean {
+  if (bout1 === bout2 && bout1 !== undefined && bout1 !== null) return true;
+  if (bout1 === null || bout1 === undefined || bout2 === null || bout2 === undefined) return false;
 
   const getSuffix = (b: string | number): string => {
-    const s = b.toString().toUpperCase().replace(/[^A-Z0-9]/g, '').trim();
+    const s = String(b).toUpperCase().replace(/[^A-Z0-9]/g, '').trim();
     const match = s.match(/([0-9]+)([A-Z]+)$/);
     return match ? match[2] : '';
   };
@@ -95,7 +97,7 @@ export function isBoutMatch(bout1: string | number, bout2: string | number): boo
   if (suffix1 !== suffix2) return false;
 
   const normalizeLenient = (b: string | number) => {
-    let s = b.toString().toUpperCase().replace(/[^A-Z0-9]/g, '').trim();
+    let s = String(b).toUpperCase().replace(/[^A-Z0-9]/g, '').trim();
     // Also cover lenient "O" to "0" replacing for single letter prefixes
     s = s.replace(/^([A-H])O+(\d+)([A-Z]*)$/, '$10$2$3');
     return s;
@@ -137,8 +139,9 @@ export function isBoutMatch(bout1: string | number, bout2: string | number): boo
   return false;
 }
 
-export function normalizeBoutWithRing(bout: string | number, ringNum: number, originalRingNum?: number): string {
-  let s = bout.toString().replace(/\s+/g, '').toUpperCase();
+export function normalizeBoutWithRing(bout?: string | number | null, ringNum: number = 1, originalRingNum?: number): string {
+  if (bout === null || bout === undefined) return '';
+  let s = String(bout).replace(/\s+/g, '').toUpperCase();
   if (!s) return '';
   
   // Normalize O to 0
@@ -184,12 +187,14 @@ export function normalizeBoutWithRing(bout: string | number, ringNum: number, or
   return num.toString() + suffix;
 }
 
-export function getBoutNumber(bout: string | number): number {
+export function getBoutNumber(bout?: string | number | null): number {
+  if (bout === null || bout === undefined) return 0;
   return parseInt(normalizeBoutNumber(bout)) || 0;
 }
 
-export function formatBoutNumber(ringNum: number, bout: string | number, mode: 'numeric' | 'alphanumeric' = 'alphanumeric'): string {
-  const s = bout.toString().replace(/\s+/g, '').toUpperCase();
+export function formatBoutNumber(ringNum: number, bout?: string | number | null, mode: 'numeric' | 'alphanumeric' = 'alphanumeric'): string {
+  if (bout === null || bout === undefined) return '';
+  const s = String(bout).replace(/\s+/g, '').toUpperCase();
   if (!s) return '';
 
   const num = parseInt(s.replace(/[^0-9]/g, ''));
@@ -238,9 +243,11 @@ export function formatBoutNumber(ringNum: number, bout: string | number, mode: '
  * If any bout in the queue or rings starts with a letter, we assume A01 method.
  */
 export function isUsingA01Method(data: any[]): boolean {
+  if (!Array.isArray(data)) return false;
   return data.some(item => {
-    const bout = item.data?.bout || item.bout || '';
-    return /^[A-Z]/.test(bout.toString().trim().toUpperCase());
+    const bout = item?.data?.bout || item?.bout;
+    if (!bout) return false;
+    return /^[A-Z]/.test(String(bout).trim().toUpperCase());
   });
 }
 

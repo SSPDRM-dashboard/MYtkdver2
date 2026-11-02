@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, Component } from 'react';
 import { 
   Trophy, 
   Users, 
@@ -100,8 +100,8 @@ function isEqual(a: any, b: any): boolean {
   return true;
 }
 
-function cleanPlaceholder(text?: string): string {
-  if (!text) return "---";
+function cleanPlaceholder(text?: string | null): string {
+  if (!text || typeof text !== 'string') return "---";
   const t = text.trim().toUpperCase();
   const placeholders = ["NEW COMPETITOR", "CLUB A", "CLUB B", "OPEN CATEGORY", "---", "-"];
   if (placeholders.includes(t)) return "---";
@@ -516,6 +516,51 @@ interface BoutTransferBroadcast {
   author?: string;
 }
 
+interface PublicViewErrorBoundaryProps {
+  children: React.ReactNode;
+  key?: React.Key;
+}
+
+interface PublicViewErrorBoundaryState {
+  hasError: boolean;
+}
+
+class PublicViewErrorBoundary extends React.Component<PublicViewErrorBoundaryProps, PublicViewErrorBoundaryState> {
+  state: PublicViewErrorBoundaryState = { hasError: false };
+
+  constructor(props: PublicViewErrorBoundaryProps) {
+    super(props);
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: any, errorInfo: any) {
+    console.error("Public View Error Boundary caught an exception:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="p-6 bg-slate-950 text-white rounded-2xl border border-slate-800 text-center my-4 flex flex-col items-center justify-center gap-3">
+          <AlertCircle className="w-8 h-8 text-amber-500 animate-pulse" />
+          <p className="text-sm font-black uppercase tracking-wider text-slate-300">
+            Live View Updating...
+          </p>
+          <button
+            onClick={() => (this as any).setState({ hasError: false })}
+            className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs font-bold text-white rounded-lg transition-colors border border-slate-700 cursor-pointer"
+          >
+            Refresh View Component
+          </button>
+        </div>
+      );
+    }
+    return (this as any).props.children;
+  }
+}
+
 function PinnedTransferBanner({ transfers, isAdmin, onDelete }: { 
   transfers: BoutTransferBroadcast[], 
   isAdmin: boolean,
@@ -528,10 +573,10 @@ function PinnedTransferBanner({ transfers, isAdmin, onDelete }: {
     return () => clearInterval(interval);
   }, []);
 
-  const activeTransfers = transfers.filter(t => {
-    if (!t.isPinned) return false;
+  const activeTransfers = (transfers || []).filter(t => {
+    if (!t || !t.isPinned || !t.pinnedUntil) return false;
     const expiry = new Date(t.pinnedUntil);
-    return expiry > now;
+    return !isNaN(expiry.getTime()) && expiry > now;
   });
 
   if (activeTransfers.length === 0) return null;
@@ -4390,20 +4435,32 @@ export default function App() {
   };
 
   const currentBoutQueue = React.useMemo(() => {
-    if (!currentEventId || events.length === 0) return [];
-    return boutQueue.filter(b => b.data.eventId === currentEventId);
+    if (!currentEventId || events.length === 0) return boutQueue;
+    return boutQueue.filter(b => !b.data.eventId || b.data.eventId === currentEventId);
   }, [boutQueue, currentEventId, events.length]);
 
   const currentRings = React.useMemo(() => {
-    const nonDeleted = rings.filter(r => !r.isDeleted && r.ringNumber <= visibleRingsCount);
+    const effCount = (typeof visibleRingsCount === 'number' && !isNaN(visibleRingsCount) && visibleRingsCount > 0) ? visibleRingsCount : 12;
+    let nonDeleted = (rings || []).filter(r => r && !r.isDeleted && r.ringNumber <= effCount);
+    if (nonDeleted.length === 0) {
+      nonDeleted = (rings || []).filter(r => r && !r.isDeleted);
+    }
+    if (nonDeleted.length === 0) {
+      nonDeleted = Array.from({ length: effCount }, (_, i) => ({
+        ringNumber: i + 1,
+        currentBout: null,
+        onDeck: null,
+        inTheHole: null
+      }));
+    }
     if (!currentEventId || events.length === 0) {
-      return nonDeleted.map(r => ({ ...r, currentBout: null, onDeck: null, inTheHole: null }));
+      return nonDeleted;
     }
     return nonDeleted.map(r => ({
       ...r,
-      currentBout: r.currentBout && r.currentBout.eventId === currentEventId ? r.currentBout : null,
-      onDeck: r.onDeck && r.onDeck.eventId === currentEventId ? r.onDeck : null,
-      inTheHole: r.inTheHole && r.inTheHole.eventId === currentEventId ? r.inTheHole : null,
+      currentBout: r.currentBout && (!r.currentBout.eventId || !currentEventId || String(r.currentBout.eventId) === String(currentEventId)) ? r.currentBout : (r.currentBout || null),
+      onDeck: r.onDeck && (!r.onDeck.eventId || !currentEventId || String(r.onDeck.eventId) === String(currentEventId)) ? r.onDeck : (r.onDeck || null),
+      inTheHole: r.inTheHole && (!r.inTheHole.eventId || !currentEventId || String(r.inTheHole.eventId) === String(currentEventId)) ? r.inTheHole : (r.inTheHole || null),
     }));
   }, [rings, currentEventId, visibleRingsCount, events.length]);
 
@@ -4416,30 +4473,44 @@ export default function App() {
   }, [publicEventId, currentEventId, events.length]);
 
   const publicBoutQueue = React.useMemo(() => {
-    if (!effectivePublicEventId || events.length === 0) return [];
-    return boutQueue.filter(b => b.data.eventId === effectivePublicEventId);
+    if (!effectivePublicEventId || events.length === 0) return boutQueue || [];
+    const filtered = (boutQueue || []).filter(b => b && b.data && (!b.data.eventId || String(b.data.eventId) === String(effectivePublicEventId)));
+    return filtered.length > 0 ? filtered : (boutQueue || []);
   }, [boutQueue, effectivePublicEventId, events.length]);
 
   const publicRings = React.useMemo(() => {
-    const nonDeleted = rings.filter(r => !r.isDeleted && r.ringNumber <= visibleRingsCount);
+    const effCount = (typeof visibleRingsCount === 'number' && !isNaN(visibleRingsCount) && visibleRingsCount > 0) ? visibleRingsCount : 12;
+    let nonDeleted = (rings || []).filter(r => r && !r.isDeleted && r.ringNumber <= effCount);
+    if (nonDeleted.length === 0) {
+      nonDeleted = (rings || []).filter(r => r && !r.isDeleted);
+    }
+    if (nonDeleted.length === 0) {
+      nonDeleted = Array.from({ length: effCount }, (_, i) => ({
+        ringNumber: i + 1,
+        currentBout: null,
+        onDeck: null,
+        inTheHole: null
+      }));
+    }
     if (!effectivePublicEventId || events.length === 0) {
-      return nonDeleted.map(r => ({ ...r, currentBout: null, onDeck: null, inTheHole: null }));
+      return nonDeleted;
     }
     return nonDeleted.map(r => ({
       ...r,
-      currentBout: r.currentBout && r.currentBout.eventId === effectivePublicEventId ? r.currentBout : null,
-      onDeck: r.onDeck && r.onDeck.eventId === effectivePublicEventId ? r.onDeck : null,
-      inTheHole: r.inTheHole && r.inTheHole.eventId === effectivePublicEventId ? r.inTheHole : null,
+      currentBout: r.currentBout && (!r.currentBout.eventId || !effectivePublicEventId || String(r.currentBout.eventId) === String(effectivePublicEventId)) ? r.currentBout : (r.currentBout || null),
+      onDeck: r.onDeck && (!r.onDeck.eventId || !effectivePublicEventId || String(r.onDeck.eventId) === String(effectivePublicEventId)) ? r.onDeck : (r.onDeck || null),
+      inTheHole: r.inTheHole && (!r.inTheHole.eventId || !effectivePublicEventId || String(r.inTheHole.eventId) === String(effectivePublicEventId)) ? r.inTheHole : (r.inTheHole || null),
     }));
   }, [rings, effectivePublicEventId, visibleRingsCount, events.length]);
 
   const getStageForBout = (boutId: string | number, categoryName: string): string => {
-    if (!boutId || !categoryName) return "";
+    if (!boutId || !categoryName || typeof categoryName !== 'string') return "";
     const activeEvtId = effectivePublicEventId || currentEventId;
     
     // 1. Try with AI mappings first
-    const catMappings = mappings.filter(m => 
-      m.eventId === activeEvtId && 
+    const catMappings = (mappings || []).filter(m => 
+      m && m.eventId === activeEvtId && 
+      m.categoryName && typeof m.categoryName === 'string' &&
       m.categoryName.trim().toUpperCase() === categoryName.trim().toUpperCase()
     );
     
@@ -4448,7 +4519,7 @@ export default function App() {
       let curr = String(boutId);
       let iterations = 0;
       while (iterations < 20) {
-        const m = catMappings.find(x => normalizeBoutNumber(x.sourceBout) === normalizeBoutNumber(curr));
+        const m = catMappings.find(x => x && x.sourceBout && normalizeBoutNumber(x.sourceBout) === normalizeBoutNumber(curr));
         if (!m || !m.nextBout) break;
         curr = String(m.nextBout);
         distance++;
@@ -4468,12 +4539,13 @@ export default function App() {
     } else {
       // 2. Guess from bout chronological position in category
       const allBouts = [
-        ...matchHistory.filter(h => h.eventId === activeEvtId && h.category === categoryName).map(h => h.bout),
-        ...boutQueue.filter(q => q.data.eventId === activeEvtId && q.data.category === categoryName).map(q => q.data.bout),
-        ...rings.filter(r => r.currentBout?.eventId === activeEvtId && r.currentBout?.category === categoryName).map(r => r.currentBout!.bout)
+        ...(matchHistory || []).filter(h => h && h.eventId === activeEvtId && h.category === categoryName && h.bout != null).map(h => h.bout),
+        ...(boutQueue || []).filter(q => q && q.data && q.data.eventId === activeEvtId && q.data.category === categoryName && q.data.bout != null).map(q => q.data.bout),
+        ...(rings || []).filter(r => r && r.currentBout?.eventId === activeEvtId && r.currentBout?.category === categoryName && r.currentBout?.bout != null).map(r => r.currentBout!.bout)
       ];
       
-      const uniqueBouts = Array.from(new Set(allBouts.map(b => normalizeBoutNumber(b.toString()))))
+      const uniqueBouts = Array.from(new Set(allBouts.filter(b => b != null).map(b => normalizeBoutNumber(String(b)))))
+        .filter(Boolean)
         .sort((a, b) => {
           const numA = parseInt(a.replace(/[^0-9]/g, ''));
           const numB = parseInt(b.replace(/[^0-9]/g, ''));
@@ -4512,72 +4584,76 @@ export default function App() {
 
   if (!user) {
     return (
-      <PublicDashboardView 
-        rings={publicRings} 
-        boutQueue={publicBoutQueue}
-        getStageForBout={getStageForBout} 
-        namingMode={ringNamingMode} 
-        onBack={() => setShowLogin(true)} 
-        isSpectator={true}
-        showTotalBouts={showTotalBoutsPublic}
-        boutNumberingMode={boutNumberingMode}
-        showOnlyActiveRings={showOnlyActiveRings}
-        showEmptyBoutAsInactive={showEmptyBoutAsInactive}
-        showPublicStandbyQueue={showPublicStandbyQueue}
-        publicViewLayout={publicViewLayout}
-        selectedEventName={publicEventName}
-        boutTransfers={boutTransfers}
-        isAdmin={false}
-        onDeleteTransfer={handleCancelTransferPin}
-        currentEventId={effectivePublicEventId}
-        events={events}
-        onUpdateEventName={handleUpdateActiveEventName}
-        displayEventName={displayEventName}
-        onUpdateDisplayEventName={setDisplayEventName}
-        activeNameFontScale={activeNameFontScale}
-        setActiveNameFontScale={setActiveNameFontScale}
-        activeClubFontScale={activeClubFontScale}
-        setActiveClubFontScale={setActiveClubFontScale}
-        standbyNameFontScale={standbyNameFontScale}
-        setStandbyNameFontScale={setStandbyNameFontScale}
-        standbyClubFontScale={standbyClubFontScale}
-        setStandbyClubFontScale={setStandbyClubFontScale}
-      />
+      <PublicViewErrorBoundary>
+        <PublicDashboardView 
+          rings={publicRings} 
+          boutQueue={publicBoutQueue}
+          getStageForBout={getStageForBout} 
+          namingMode={ringNamingMode} 
+          onBack={() => setShowLogin(true)} 
+          isSpectator={true}
+          showTotalBouts={showTotalBoutsPublic}
+          boutNumberingMode={boutNumberingMode}
+          showOnlyActiveRings={showOnlyActiveRings}
+          showEmptyBoutAsInactive={showEmptyBoutAsInactive}
+          showPublicStandbyQueue={showPublicStandbyQueue}
+          publicViewLayout={publicViewLayout}
+          selectedEventName={publicEventName}
+          boutTransfers={boutTransfers}
+          isAdmin={false}
+          onDeleteTransfer={handleCancelTransferPin}
+          currentEventId={effectivePublicEventId}
+          events={events}
+          onUpdateEventName={handleUpdateActiveEventName}
+          displayEventName={displayEventName}
+          onUpdateDisplayEventName={setDisplayEventName}
+          activeNameFontScale={activeNameFontScale}
+          setActiveNameFontScale={setActiveNameFontScale}
+          activeClubFontScale={activeClubFontScale}
+          setActiveClubFontScale={setActiveClubFontScale}
+          standbyNameFontScale={standbyNameFontScale}
+          setStandbyNameFontScale={setStandbyNameFontScale}
+          standbyClubFontScale={standbyClubFontScale}
+          setStandbyClubFontScale={setStandbyClubFontScale}
+        />
+      </PublicViewErrorBoundary>
     );
   }
 
   if (isPublicView) {
     return (
-      <PublicDashboardView 
-        rings={publicRings} 
-        boutQueue={publicBoutQueue}
-        getStageForBout={getStageForBout} 
-        namingMode={ringNamingMode} 
-        onBack={() => setIsPublicView(false)} 
-        showTotalBouts={showTotalBoutsPublic}
-        boutNumberingMode={boutNumberingMode}
-        showOnlyActiveRings={showOnlyActiveRings}
-        showEmptyBoutAsInactive={showEmptyBoutAsInactive}
-        showPublicStandbyQueue={showPublicStandbyQueue}
-        publicViewLayout={publicViewLayout}
-        selectedEventName={publicEventName}
-        boutTransfers={boutTransfers}
-        isAdmin={user?.role === 'admin'}
-        onDeleteTransfer={handleCancelTransferPin}
-        currentEventId={effectivePublicEventId}
-        events={events}
-        onUpdateEventName={handleUpdateActiveEventName}
-        displayEventName={displayEventName}
-        onUpdateDisplayEventName={setDisplayEventName}
-        activeNameFontScale={activeNameFontScale}
-        setActiveNameFontScale={setActiveNameFontScale}
-        activeClubFontScale={activeClubFontScale}
-        setActiveClubFontScale={setActiveClubFontScale}
-        standbyNameFontScale={standbyNameFontScale}
-        setStandbyNameFontScale={setStandbyNameFontScale}
-        standbyClubFontScale={standbyClubFontScale}
-        setStandbyClubFontScale={setStandbyClubFontScale}
-      />
+      <PublicViewErrorBoundary>
+        <PublicDashboardView 
+          rings={publicRings} 
+          boutQueue={publicBoutQueue}
+          getStageForBout={getStageForBout} 
+          namingMode={ringNamingMode} 
+          onBack={() => setIsPublicView(false)} 
+          showTotalBouts={showTotalBoutsPublic}
+          boutNumberingMode={boutNumberingMode}
+          showOnlyActiveRings={showOnlyActiveRings}
+          showEmptyBoutAsInactive={showEmptyBoutAsInactive}
+          showPublicStandbyQueue={showPublicStandbyQueue}
+          publicViewLayout={publicViewLayout}
+          selectedEventName={publicEventName}
+          boutTransfers={boutTransfers}
+          isAdmin={user?.role === 'admin'}
+          onDeleteTransfer={handleCancelTransferPin}
+          currentEventId={effectivePublicEventId}
+          events={events}
+          onUpdateEventName={handleUpdateActiveEventName}
+          displayEventName={displayEventName}
+          onUpdateDisplayEventName={setDisplayEventName}
+          activeNameFontScale={activeNameFontScale}
+          setActiveNameFontScale={setActiveNameFontScale}
+          activeClubFontScale={activeClubFontScale}
+          setActiveClubFontScale={setActiveClubFontScale}
+          standbyNameFontScale={standbyNameFontScale}
+          setStandbyNameFontScale={setStandbyNameFontScale}
+          standbyClubFontScale={standbyClubFontScale}
+          setStandbyClubFontScale={setStandbyClubFontScale}
+        />
+      </PublicViewErrorBoundary>
     );
   }
 
@@ -9901,38 +9977,41 @@ function StandbyView({
                    toRingNorm === ringNumStr || toRingNorm === ringNameNorm;
           });
 
-          const ringQueueAll = boutQueue
+          const ringQueueAll = (boutQueue || [])
             .filter(q => 
+              q && q.data &&
               parseRingNumber(q.data.ring) === parseRingNumber(ring.ringNumber) && 
               ((!q.data.eventId && !currentEventId) || q.data.eventId === currentEventId)
             )
             .sort((a, b) => {
-              const parseBout = (bout: string | number) => {
-                const s = bout.toString().replace(/\s+/g, '').toUpperCase().replace(/^([A-H])O+(\d+)([A-Z]*)$/, '$10$2$3');
+              const parseBout = (bout: any) => {
+                if (bout === null || bout === undefined) return 0;
+                const s = String(bout).replace(/\s+/g, '').toUpperCase().replace(/^([A-H])O+(\d+)([A-Z]*)$/, '$10$2$3');
                 if (/^[A-Z]/.test(s)) return s;
                 return parseInt(s.replace(/[^0-9]/g, '')) || 0;
               };
-              const valA = parseBout(a.data.bout);
-              const valB = parseBout(b.data.bout);
+              const valA = parseBout(a?.data?.bout);
+              const valB = parseBout(b?.data?.bout);
               if (typeof valA === 'number' && typeof valB === 'number') {
                 if (valA !== valB) return valA - valB;
-                return (a.id || '').localeCompare(b.id || '');
+                return (a?.id || '').localeCompare(b?.id || '');
               }
               const comp = String(valA).localeCompare(String(valB), undefined, { numeric: true, sensitivity: 'base' });
-              return comp !== 0 ? comp : (a.id || '').localeCompare(b.id || '');
+              return comp !== 0 ? comp : (a?.id || '').localeCompare(b?.id || '');
             });
 
           const standbyRaw: typeof ringQueueAll = [];
-          if (ring.onDeck) {
+          if (ring.onDeck && hasPlayers(ring.onDeck)) {
             standbyRaw.push({ id: `ondeck-${ring.ringNumber}`, data: ring.onDeck });
           }
-          if (ring.inTheHole) {
+          if (ring.inTheHole && hasPlayers(ring.inTheHole)) {
             standbyRaw.push({ id: `inthehole-${ring.ringNumber}`, data: ring.inTheHole });
           }
           ringQueueAll.forEach(q => {
-            const isAlreadyCurrent = ring.currentBout && isBoutMatch(q.data.bout, ring.currentBout.bout);
-            const isAlreadyOnDeck = ring.onDeck && isBoutMatch(q.data.bout, ring.onDeck.bout);
-            const isAlreadyInTheHole = ring.inTheHole && isBoutMatch(q.data.bout, ring.inTheHole.bout);
+            if (!q || !q.data) return;
+            const isAlreadyCurrent = ring.currentBout && ring.currentBout.bout && q.data.bout && isBoutMatch(q.data.bout, ring.currentBout.bout);
+            const isAlreadyOnDeck = ring.onDeck && ring.onDeck.bout && q.data.bout && isBoutMatch(q.data.bout, ring.onDeck.bout);
+            const isAlreadyInTheHole = ring.inTheHole && ring.inTheHole.bout && q.data.bout && isBoutMatch(q.data.bout, ring.inTheHole.bout);
             if (!isAlreadyCurrent && !isAlreadyOnDeck && !isAlreadyInTheHole) {
               standbyRaw.push(q);
             }
@@ -10422,38 +10501,41 @@ function SiteView({
 
       <div className="flex-1 p-4 space-y-4">
         {displayedRings.map((ring, i) => {
-          const ringQueueAll = boutQueue
+          const ringQueueAll = (boutQueue || [])
             .filter(q => 
+              q && q.data &&
               parseRingNumber(q.data.ring) === parseRingNumber(ring.ringNumber) && 
               ((!q.data.eventId && !currentEventId) || q.data.eventId === currentEventId)
             )
             .sort((a, b) => {
-              const parseBout = (bout: string | number) => {
-                const s = bout.toString().replace(/\s+/g, '').toUpperCase().replace(/^([A-H])O+(\d+)([A-Z]*)$/, '$10$2$3');
+              const parseBout = (bout: any) => {
+                if (bout === null || bout === undefined) return 0;
+                const s = String(bout).replace(/\s+/g, '').toUpperCase().replace(/^([A-H])O+(\d+)([A-Z]*)$/, '$10$2$3');
                 if (/^[A-Z]/.test(s)) return s;
                 return parseInt(s.replace(/[^0-9]/g, '')) || 0;
               };
-              const valA = parseBout(a.data.bout);
-              const valB = parseBout(b.data.bout);
+              const valA = parseBout(a?.data?.bout);
+              const valB = parseBout(b?.data?.bout);
               if (typeof valA === 'number' && typeof valB === 'number') {
                 if (valA !== valB) return valA - valB;
-                return (a.id || '').localeCompare(b.id || '');
+                return (a?.id || '').localeCompare(b?.id || '');
               }
               const comp = String(valA).localeCompare(String(valB), undefined, { numeric: true, sensitivity: 'base' });
-              return comp !== 0 ? comp : (a.id || '').localeCompare(b.id || '');
+              return comp !== 0 ? comp : (a?.id || '').localeCompare(b?.id || '');
             });
 
           const standbyRaw: typeof ringQueueAll = [];
-          if (ring.onDeck) {
+          if (ring.onDeck && hasPlayers(ring.onDeck)) {
             standbyRaw.push({ id: `ondeck-${ring.ringNumber}`, data: ring.onDeck });
           }
-          if (ring.inTheHole) {
+          if (ring.inTheHole && hasPlayers(ring.inTheHole)) {
             standbyRaw.push({ id: `inthehole-${ring.ringNumber}`, data: ring.inTheHole });
           }
           ringQueueAll.forEach(q => {
-            const isAlreadyCurrent = ring.currentBout && isBoutMatch(q.data.bout, ring.currentBout.bout);
-            const isAlreadyOnDeck = ring.onDeck && isBoutMatch(q.data.bout, ring.onDeck.bout);
-            const isAlreadyInTheHole = ring.inTheHole && isBoutMatch(q.data.bout, ring.inTheHole.bout);
+            if (!q || !q.data) return;
+            const isAlreadyCurrent = ring.currentBout && ring.currentBout.bout && q.data.bout && isBoutMatch(q.data.bout, ring.currentBout.bout);
+            const isAlreadyOnDeck = ring.onDeck && ring.onDeck.bout && q.data.bout && isBoutMatch(q.data.bout, ring.onDeck.bout);
+            const isAlreadyInTheHole = ring.inTheHole && ring.inTheHole.bout && q.data.bout && isBoutMatch(q.data.bout, ring.inTheHole.bout);
             if (!isAlreadyCurrent && !isAlreadyOnDeck && !isAlreadyInTheHole) {
               standbyRaw.push(q);
             }
@@ -10888,7 +10970,7 @@ function PointsView({
           const ringQueue = boutQueue
             .filter(q => 
               parseRingNumber(q.data.ring) === parseRingNumber(ring.ringNumber) && 
-              ((!q.data.eventId && !currentEventId) || q.data.eventId === currentEventId)
+              (!q.data.eventId || !currentEventId || q.data.eventId === currentEventId)
             )
             .sort((a, b) => {
               const parseBout = (bout: string | number) => {
@@ -11489,38 +11571,41 @@ function OnsiteView({
         isFullscreen ? "flex flex-col justify-around pt-24 pb-4 gap-y-8" : "space-y-24 py-12"
       )}>
         {displayedRings.map((ring, i) => {
-          const ringQueueAll = boutQueue
+          const ringQueueAll = (boutQueue || [])
             .filter(q => 
+              q && q.data &&
               parseRingNumber(q.data.ring) === parseRingNumber(ring.ringNumber) && 
-              ((!q.data.eventId && !currentEventId) || q.data.eventId === currentEventId)
+              (!q.data.eventId || !currentEventId || q.data.eventId === currentEventId)
             )
             .sort((a, b) => {
-              const parseBout = (bout: string | number) => {
-                const s = bout.toString().replace(/\s+/g, '').toUpperCase().replace(/^([A-H])O+(\d+)([A-Z]*)$/, '$10$2$3');
+              const parseBout = (bout: any) => {
+                if (bout === null || bout === undefined) return 0;
+                const s = String(bout).replace(/\s+/g, '').toUpperCase().replace(/^([A-H])O+(\d+)([A-Z]*)$/, '$10$2$3');
                 if (/^[A-Z]/.test(s)) return s;
                 return parseInt(s.replace(/[^0-9]/g, '')) || 0;
               };
-              const valA = parseBout(a.data.bout);
-              const valB = parseBout(b.data.bout);
+              const valA = parseBout(a?.data?.bout);
+              const valB = parseBout(b?.data?.bout);
               if (typeof valA === 'number' && typeof valB === 'number') {
                 if (valA !== valB) return valA - valB;
-                return (a.id || '').localeCompare(b.id || '');
+                return (a?.id || '').localeCompare(b?.id || '');
               }
               const comp = String(valA).localeCompare(String(valB), undefined, { numeric: true, sensitivity: 'base' });
-              return comp !== 0 ? comp : (a.id || '').localeCompare(b.id || '');
+              return comp !== 0 ? comp : (a?.id || '').localeCompare(b?.id || '');
             });
 
           const standbyRaw: typeof ringQueueAll = [];
-          if (ring.onDeck) {
+          if (ring.onDeck && hasPlayers(ring.onDeck)) {
             standbyRaw.push({ id: `ondeck-${ring.ringNumber}`, data: ring.onDeck });
           }
-          if (ring.inTheHole) {
+          if (ring.inTheHole && hasPlayers(ring.inTheHole)) {
             standbyRaw.push({ id: `inthehole-${ring.ringNumber}`, data: ring.inTheHole });
           }
           ringQueueAll.forEach(q => {
-            const isAlreadyCurrent = ring.currentBout && isBoutMatch(q.data.bout, ring.currentBout.bout);
-            const isAlreadyOnDeck = ring.onDeck && isBoutMatch(q.data.bout, ring.onDeck.bout);
-            const isAlreadyInTheHole = ring.inTheHole && isBoutMatch(q.data.bout, ring.inTheHole.bout);
+            if (!q || !q.data) return;
+            const isAlreadyCurrent = ring.currentBout && ring.currentBout.bout && q.data.bout && isBoutMatch(q.data.bout, ring.currentBout.bout);
+            const isAlreadyOnDeck = ring.onDeck && ring.onDeck.bout && q.data.bout && isBoutMatch(q.data.bout, ring.onDeck.bout);
+            const isAlreadyInTheHole = ring.inTheHole && ring.inTheHole.bout && q.data.bout && isBoutMatch(q.data.bout, ring.inTheHole.bout);
             if (!isAlreadyCurrent && !isAlreadyOnDeck && !isAlreadyInTheHole) {
               standbyRaw.push(q);
             }
@@ -11878,9 +11963,23 @@ function PublicDashboardView({
     }
   };
 
-  const effectiveRings = showOnlyActiveRings ? rings.filter(r => r.currentBout && hasPlayers(r.currentBout)) : rings;
+  const fallbackRings = React.useMemo(() => {
+    if (rings && rings.length > 0) return rings;
+    return Array.from({ length: 4 }, (_, i) => ({
+      ringNumber: i + 1,
+      currentBout: null,
+      onDeck: null,
+      inTheHole: null
+    }));
+  }, [rings]);
 
-  const displayedRings = effectiveRings;
+  const displayedRings = React.useMemo(() => {
+    if (showOnlyActiveRings) {
+      const active = fallbackRings.filter(r => r && r.currentBout && hasPlayers(r.currentBout));
+      if (active.length > 0) return active;
+    }
+    return fallbackRings;
+  }, [fallbackRings, showOnlyActiveRings]);
 
   const gridColsClass = courtsPerRow === 1 ? 'lg:grid-cols-1' :
                          courtsPerRow === 2 ? 'lg:grid-cols-2' :
@@ -12002,35 +12101,37 @@ function PublicDashboardView({
             </h3>
             <div className={cn("grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6", gridColsClass)}>
               {displayedRings.map((ring, i) => {
-                const ringQueueAllSorted = boutQueue
-                  .filter(q => parseRingNumber(q.data.ring) === parseRingNumber(ring.ringNumber))
+                const ringQueueAllSorted = (boutQueue || [])
+                  .filter(q => q && q.data && parseRingNumber(q.data.ring) === parseRingNumber(ring.ringNumber) && (!q.data.eventId || !currentEventId || q.data.eventId === currentEventId))
                   .sort((a, b) => {
-                    const parseBout = (bout: string | number) => {
-                      const s = bout.toString().replace(/\s+/g, '').toUpperCase().replace(/^([A-H])O+(\d+)([A-Z]*)$/, '$10$2$3');
+                    const parseBout = (bout: any) => {
+                      if (bout === null || bout === undefined) return 0;
+                      const s = String(bout).replace(/\s+/g, '').toUpperCase().replace(/^([A-H])O+(\d+)([A-Z]*)$/, '$10$2$3');
                       if (/^[A-Z]/.test(s)) return s;
                       return parseInt(s.replace(/[^0-9]/g, '')) || 0;
                     };
-                    const valA = parseBout(a.data.bout);
-                    const valB = parseBout(b.data.bout);
+                    const valA = parseBout(a?.data?.bout);
+                    const valB = parseBout(b?.data?.bout);
                     if (typeof valA === 'number' && typeof valB === 'number') {
                       if (valA !== valB) return valA - valB;
-                      return (a.id || '').localeCompare(b.id || '');
+                      return (a?.id || '').localeCompare(b?.id || '');
                     }
                     const comp = String(valA).localeCompare(String(valB), undefined, { numeric: true, sensitivity: 'base' });
-                    return comp !== 0 ? comp : (a.id || '').localeCompare(b.id || '');
+                    return comp !== 0 ? comp : (a?.id || '').localeCompare(b?.id || '');
                   });
 
                 const standbyRaw: typeof ringQueueAllSorted = [];
-                if (ring.onDeck) {
+                if (ring.onDeck && hasPlayers(ring.onDeck)) {
                   standbyRaw.push({ id: `ondeck-${ring.ringNumber}`, data: ring.onDeck });
                 }
-                if (ring.inTheHole) {
+                if (ring.inTheHole && hasPlayers(ring.inTheHole)) {
                   standbyRaw.push({ id: `inthehole-${ring.ringNumber}`, data: ring.inTheHole });
                 }
                 ringQueueAllSorted.forEach(q => {
-                  const isAlreadyCurrent = ring.currentBout && isBoutMatch(q.data.bout, ring.currentBout.bout);
-                  const isAlreadyOnDeck = ring.onDeck && isBoutMatch(q.data.bout, ring.onDeck.bout);
-                  const isAlreadyInTheHole = ring.inTheHole && isBoutMatch(q.data.bout, ring.inTheHole.bout);
+                  if (!q || !q.data) return;
+                  const isAlreadyCurrent = ring.currentBout && ring.currentBout.bout && q.data.bout && isBoutMatch(q.data.bout, ring.currentBout.bout);
+                  const isAlreadyOnDeck = ring.onDeck && ring.onDeck.bout && q.data.bout && isBoutMatch(q.data.bout, ring.onDeck.bout);
+                  const isAlreadyInTheHole = ring.inTheHole && ring.inTheHole.bout && q.data.bout && isBoutMatch(q.data.bout, ring.inTheHole.bout);
                   if (!isAlreadyCurrent && !isAlreadyOnDeck && !isAlreadyInTheHole) {
                     standbyRaw.push(q);
                   }
@@ -12038,32 +12139,34 @@ function PublicDashboardView({
 
                 const isPoomsaeRing = ring.currentBout?.category?.toUpperCase().includes('POOMSAE') || 
                                       ring.currentBout?.category?.toUpperCase().includes('FREESTYLE') ||
-                                      (standbyRaw.length > 0 && (
-                                        standbyRaw[0].data.category?.toUpperCase().includes('POOMSAE') ||
-                                        standbyRaw[0].data.category?.toUpperCase().includes('FREESTYLE')
+                                      (standbyRaw.length > 0 && standbyRaw[0]?.data?.category && (
+                                        standbyRaw[0].data.category.toUpperCase().includes('POOMSAE') ||
+                                        standbyRaw[0].data.category.toUpperCase().includes('FREESTYLE')
                                       ));
 
                 const queueLimit = isPoomsaeRing ? 8 : 3;
                 const rQueue = standbyRaw.slice(0, queueLimit);
                 
                 return (
-                  <PublicRingCard 
-                    key={ring.ringNumber} 
-                    ring={ring} 
-                    namingMode={namingMode} 
-                    queueCount={ringQueueAllSorted.length}
-                    showTotalBouts={showTotalBouts}
-                    boutNumberingMode={boutNumberingMode}
-                    ringQueue={rQueue}
-                    showPublicStandbyQueue={showPublicStandbyQueue}
-                    showEmptyBoutAsInactive={showEmptyBoutAsInactive}
-                    publicViewLayout={publicViewLayout}
-                    transfers={boutTransfers}
-                    activeNameFontScale={effectiveNameScale}
-                    activeClubFontScale={effectiveClubScale}
-                    standbyNameFontScale={effectiveStandbyNameScale}
-                    standbyClubFontScale={effectiveStandbyClubScale}
-                  />
+                  <PublicViewErrorBoundary key={ring.ringNumber}>
+                    <PublicRingCard 
+                      ring={ring} 
+                      namingMode={namingMode} 
+                      queueCount={ringQueueAllSorted.length}
+                      showTotalBouts={showTotalBouts}
+                      boutNumberingMode={boutNumberingMode}
+                      ringQueue={rQueue}
+                      showPublicStandbyQueue={showPublicStandbyQueue}
+                      showEmptyBoutAsInactive={showEmptyBoutAsInactive}
+                      publicViewLayout={publicViewLayout}
+                      transfers={boutTransfers}
+                      activeNameFontScale={effectiveNameScale}
+                      activeClubFontScale={effectiveClubScale}
+                      standbyNameFontScale={effectiveStandbyNameScale}
+                      standbyClubFontScale={effectiveStandbyClubScale}
+                      getStageForBout={getStageForBout}
+                    />
+                  </PublicViewErrorBoundary>
                 );
               })}
             </div>
@@ -12121,18 +12224,18 @@ function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, b
     return () => clearInterval(interval);
   }, []);
 
-  const current = ring.currentBout;
-  const ringName = namingMode === 'number' ? ring.ringNumber.toString() : String.fromCharCode(64 + ring.ringNumber);
+  const current = ring?.currentBout;
+  const ringName = namingMode === 'number' ? (ring?.ringNumber || 1).toString() : String.fromCharCode(64 + (ring?.ringNumber || 1));
   
   const activeTransfersForRing = (transfers || []).filter(t => {
-    if (!t.isPinned) return false;
+    if (!t || !t.isPinned || !t.pinnedUntil) return false;
     const expiry = new Date(t.pinnedUntil);
-    if (expiry <= now) return false;
+    if (isNaN(expiry.getTime()) || expiry <= now) return false;
     
-    const ringNumStr = ring.ringNumber.toString().trim().toUpperCase();
+    const ringNumStr = (ring?.ringNumber || 1).toString().trim().toUpperCase();
     const ringNameNorm = ringName.trim().toUpperCase();
-    const fromRingNorm = t.fromRing.trim().toUpperCase();
-    const toRingNorm = t.toRing.trim().toUpperCase();
+    const fromRingNorm = (t.fromRing || '').trim().toUpperCase();
+    const toRingNorm = (t.toRing || '').trim().toUpperCase();
     
     return fromRingNorm === ringNumStr || fromRingNorm === ringNameNorm ||
            toRingNorm === ringNumStr || toRingNorm === ringNameNorm;
@@ -12144,7 +12247,7 @@ function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, b
                                (current?.category?.toUpperCase().includes('POOMSAE') && !current?.red_name);
   
   const formatCategoryName = (cat?: string) => {
-    if (!cat) return "";
+    if (!cat || typeof cat !== 'string') return "";
     // Specifically remove "(INDIVIDUAL POOMSAE)" or "(INDIVIDUAL POOMSAE)-" as requested
     return cat.replace(/\s*\(INDIVIDUAL POOMSAE\)\s*-?/gi, '').trim();
   };
@@ -12154,6 +12257,7 @@ function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, b
     
     const result: { category: string; bouts: typeof ringQueue }[] = [];
     ringQueue.forEach(bout => {
+      if (!bout || !bout.data) return;
       const cat = cleanPlaceholder(bout.data.category) || 'Regular Category';
       const existingGroup = result.find(g => g.category === cat);
       if (existingGroup) {
@@ -12175,7 +12279,7 @@ function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, b
           </div>
           <div>
             <h4 className="font-black text-xs sm:text-[14px] uppercase tracking-wider sm:tracking-widest text-white mt-0">
-              {getStageForBout && current ? (getStageForBout(current.bout.toString(), current.category || "") || `Ring ${ringName}`) : `Ring ${ringName}`}
+              {getStageForBout && current && current.bout ? (getStageForBout(String(current.bout), current.category || "") || `Ring ${ringName}`) : `Ring ${ringName}`}
             </h4>
             {!isRingInactive && (
               <div className="flex items-center gap-1.5">
@@ -12466,6 +12570,7 @@ function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, b
             </div>
             <div className="space-y-3 sm:space-y-4">
               {ringQueue.map((bout, idx) => {
+                if (!bout || !bout.data) return null;
                 const isPoomsaeItem = bout?.data?.category?.toUpperCase().includes('INDIVIDUAL POOMSAE') || 
                                       bout?.data?.category?.toUpperCase().includes('FREESTYLE') ||
                                       (bout?.data?.category?.toUpperCase().includes('POOMSAE') && !bout?.data?.red_name);
@@ -12508,7 +12613,7 @@ function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, b
                               )}
                               style={effectiveStandbyClubScale !== 100 ? { fontSize: `calc((9px + (2px * (100vw - 640px) / 384)) * ${effectiveStandbyClubScale / 100})`, lineHeight: 1.15 } : undefined}
                             >
-                              {bout ? cleanPlaceholder(bout.data.blue_club) : ""}
+                              {bout && bout.data ? cleanPlaceholder(bout.data.blue_club) : ""}
                             </p>
                             <p 
                               className={cn(
@@ -12517,7 +12622,7 @@ function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, b
                               )}
                               style={effectiveStandbyNameScale !== 100 ? { fontSize: `calc((12px + (3px * (100vw - 640px) / 384)) * ${effectiveStandbyNameScale / 100})`, lineHeight: 1.15 } : undefined}
                             >
-                              {bout ? (bout.data.privacy_mode ? "---" : cleanPlaceholder(bout.data.blue_name)) : ""}
+                              {bout && bout.data ? (bout.data.privacy_mode ? "---" : cleanPlaceholder(bout.data.blue_name)) : ""}
                             </p>
                           </div>
                         </div>
@@ -12540,7 +12645,7 @@ function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, b
                                 )}
                                 style={effectiveStandbyClubScale !== 100 ? { fontSize: `calc((9px + (2px * (100vw - 640px) / 384)) * ${effectiveStandbyClubScale / 100})`, lineHeight: 1.15 } : undefined}
                               >
-                                {bout ? cleanPlaceholder(bout.data.red_club) : ""}
+                                {bout && bout.data ? cleanPlaceholder(bout.data.red_club) : ""}
                               </p>
                               <p 
                                 className={cn(
@@ -12549,7 +12654,7 @@ function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, b
                                 )}
                                 style={effectiveStandbyNameScale !== 100 ? { fontSize: `calc((12px + (3px * (100vw - 640px) / 384)) * ${effectiveStandbyNameScale / 100})`, lineHeight: 1.15 } : undefined}
                               >
-                                {bout ? (bout.data.privacy_mode ? "---" : cleanPlaceholder(bout.data.red_name)) : ""}
+                                {bout && bout.data ? (bout.data.privacy_mode ? "---" : cleanPlaceholder(bout.data.red_name)) : ""}
                               </p>
                             </div>
                           </div>
