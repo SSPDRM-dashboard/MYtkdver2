@@ -50,9 +50,12 @@ export const PlayerLogoBadge: React.FC<PlayerLogoBadgeProps> = ({
 
   const currentSizeClass = sizeMap[size] || sizeMap.md;
 
+  const [syncedTeamLogos] = useSyncedState<Record<string, string>>('tkd_team_logos', {});
+  const activeCustomLogos = customLogos || syncedTeamLogos;
+
   const resolvedUrl = loadError
     ? generateFallback ? generateClubMonogramBadge(club || name) : null
-    : getPlayerLogoOrFlag(club, name, customLogos, directLogo, generateFallback);
+    : getPlayerLogoOrFlag(club, name, activeCustomLogos, directLogo, generateFallback);
 
   if (!resolvedUrl) {
     return null;

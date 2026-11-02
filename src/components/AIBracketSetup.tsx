@@ -1505,7 +1505,7 @@ export function AIBracketSetup({
                 className="px-12 py-5 bg-indigo-600 text-white rounded-[2rem] font-black uppercase tracking-widest hover:bg-indigo-700 disabled:bg-slate-200 disabled:text-slate-400 transition-all shadow-xl shadow-indigo-200 flex items-center gap-3"
               >
                 {isProcessing ? <RefreshCw size={24} className="animate-spin" /> : <GitBranch size={24} />}
-                {isProcessing ? "Fast Analysis in Progress..." : "Analyze with AI (Fast)"}
+                {isProcessing ? "Analyzing Bracket with AI..." : "Analyze with AI"}
               </button>
             </div>
           </div>

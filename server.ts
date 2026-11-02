@@ -18,52 +18,87 @@ function getGeminiClient(customApiKey?: string) {
   });
 }
 
-// Resilient helper to handle temporary 503 / high demand spikes with backoff and model fallbacks
+// Helper to call with timeout so hung network requests fail fast and trigger the fallback
+async function callWithTimeout<T>(promise: Promise<T>, timeoutMs = 90000, modelName = ""): Promise<T> {
+  let timer: any;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(`Timeout (${timeoutMs}ms) awaiting response from ${modelName}`));
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Resilient helper to handle temporary 503 / high demand spikes with model fallbacks
 async function generateWithRetry(
   ai: GoogleGenAI,
   primaryModel: string,
   params: any,
-  maxRetries = 2
+  timeoutMs = 90000
 ) {
-  const modelsToTry = [
+  // Ordered fallback models: start with primary, then fast and high-quota gemini-3.1-flash-lite
+  const candidateModels = [
     primaryModel,
-    primaryModel === "gemini-3.8-flash" ? "gemini-flash-latest" : primaryModel,
     "gemini-3.1-flash-lite",
+    "gemini-flash-latest",
   ];
+  const modelsToTry = Array.from(new Set(candidateModels));
 
   let lastError: any = null;
 
   for (const model of modelsToTry) {
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      try {
-        return await ai.models.generateContent({
-          ...params,
+    try {
+      console.log(`[Gemini Server] Requesting model ${model} (timeout ${timeoutMs}ms)...`);
+      
+      // If falling back to non-Gemini 3/4 model, remove thinkingConfig to prevent schema/config errors
+      const modelParams = { ...params };
+      if (modelParams.config?.thinkingConfig && !model.startsWith("gemini-3") && !model.startsWith("gemini-4")) {
+        const { thinkingConfig, ...restConfig } = modelParams.config;
+        modelParams.config = restConfig;
+      }
+
+      const response = await callWithTimeout(
+        ai.models.generateContent({
+          ...modelParams,
           model,
-        });
-      } catch (err: any) {
-        lastError = err;
-        const msg = (err?.message || "").toLowerCase();
-        const isTransient =
-          msg.includes("503") ||
-          msg.includes("high demand") ||
-          msg.includes("unavailable") ||
-          msg.includes("resource_exhausted") ||
-          msg.includes("429") ||
-          msg.includes("overloaded");
+        }),
+        timeoutMs,
+        model
+      );
+      return response;
+    } catch (err: any) {
+      lastError = err;
+      const msg = (err?.message || "").toLowerCase();
+      console.warn(`[Gemini Server] Issue with model ${model}: ${err?.message || 'Error'}.`);
 
-        if (!isTransient || attempt === maxRetries) {
-          if (!isTransient) throw err;
-          break;
-        }
-
-        const delay = (attempt + 1) * 1500;
-        console.warn(`Transient ${err?.status || '503'} on ${model} (attempt ${attempt + 1}), retrying in ${delay}ms...`);
-        await new Promise((resolve) => setTimeout(resolve, delay));
+      // If it's a fatal client error not solvable by switching models (e.g. malformed base64 image)
+      if (
+        msg.includes("invalid_argument") || 
+        msg.includes("unable to process input image") ||
+        msg.includes("api_key")
+      ) {
+        throw err;
       }
     }
   }
 
   throw lastError;
+}
+
+function extractResponseText(response: any): string {
+  if (response?.text) return response.text;
+  const parts = response?.candidates?.[0]?.content?.parts;
+  if (Array.isArray(parts)) {
+    const textParts = parts.filter((p: any) => p && !p.thought && typeof p.text === "string").map((p: any) => p.text);
+    if (textParts.length > 0) return textParts.join("");
+    const anyText = parts.filter((p: any) => p && typeof p.text === "string").map((p: any) => p.text).join("");
+    if (anyText) return anyText;
+  }
+  return "";
 }
 
 async function startServer() {
@@ -134,71 +169,86 @@ async function startServer() {
         - Do not include unescaped double quotes inside string values under any circumstances.
       `;
 
-      const requestedModel = isThinkingMode ? "gemini-3.1-pro-preview" : "gemini-3.8-flash";
+      const requestedModel = "gemini-3.8-flash";
 
-      const response = await generateWithRetry(ai, requestedModel, {
-        contents: [
-          {
-            parts: [
-              { text: prompt },
-              {
-                inlineData: {
-                  mimeType: effectiveMimeType,
-                  data: base64Data,
-                },
-              },
-            ],
-          },
-        ],
-        config: {
-          systemInstruction: "You are an automated tournament bracket data extractor. Extract match bouts, solo poomsae entries, and bout advancement trees from documents and images. You strictly output valid JSON matching the schema with no conversational filler, notes, or explanations.",
-          temperature: 0.1,
-          responseMimeType: "application/json",
-          thinkingConfig: isThinkingMode ? { thinkingLevel: ThinkingLevel.HIGH } : undefined,
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              matches: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    ring: { type: Type.NUMBER },
-                    bout: { type: Type.STRING },
-                    category: { type: Type.STRING },
-                    blue_name: { type: Type.STRING },
-                    blue_club: { type: Type.STRING },
-                    red_name: { type: Type.STRING },
-                    red_club: { type: Type.STRING },
+      const response = await generateWithRetry(
+        ai,
+        requestedModel,
+        {
+          contents: [
+            {
+              parts: [
+                { text: prompt },
+                {
+                  inlineData: {
+                    mimeType: effectiveMimeType,
+                    data: base64Data,
                   },
-                  required: ["bout", "category", "blue_name", "red_name"],
                 },
-              },
-              mappings: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    sourceBout: { type: Type.STRING },
-                    nextBout: { type: Type.STRING },
-                    slot: { type: Type.STRING, enum: ["Chung", "Hong"] },
+              ],
+            },
+          ],
+          config: {
+            systemInstruction: "You are an automated tournament bracket data extractor. Extract match bouts, solo poomsae entries, and bout advancement trees from documents and images. You strictly output valid JSON matching the schema with no conversational filler, notes, or explanations.",
+            responseMimeType: "application/json",
+            thinkingConfig: isThinkingMode 
+              ? { thinkingLevel: ThinkingLevel.HIGH } 
+              : { thinkingLevel: ThinkingLevel.LOW },
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                matches: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      ring: { type: Type.NUMBER },
+                      bout: { type: Type.STRING },
+                      category: { type: Type.STRING },
+                      blue_name: { type: Type.STRING },
+                      blue_club: { type: Type.STRING },
+                      red_name: { type: Type.STRING },
+                      red_club: { type: Type.STRING },
+                    },
+                    required: ["bout", "category", "blue_name"],
                   },
-                  required: ["sourceBout", "nextBout", "slot"],
+                },
+                mappings: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      sourceBout: { type: Type.STRING },
+                      nextBout: { type: Type.STRING },
+                      slot: { type: Type.STRING, enum: ["Chung", "Hong"] },
+                    },
+                    required: ["sourceBout", "nextBout", "slot"],
+                  },
                 },
               },
             },
           },
         },
-      });
+        120000 // 120s timeout for complete multimodal bracket processing
+      );
 
-      return res.json({ rawText: response.text });
+      const rawText = extractResponseText(response);
+      if (!rawText || !rawText.trim()) {
+        return res.status(502).json({ error: "The AI service returned an empty analysis result. Please retry." });
+      }
+
+      return res.json({ rawText });
     } catch (err: any) {
       console.error("Server Bracket Analysis Error:", err);
       const is503 = (err?.message || "").includes("503") || (err?.message || "").includes("high demand") || (err?.message || "").includes("UNAVAILABLE");
-      const userMsg = is503 
-        ? "The AI service is currently experiencing high demand. Please wait a moment and try again."
-        : (err.message || "Failed to analyze bracket file.");
-      return res.status(is503 ? 503 : 500).json({ error: userMsg });
+      const isTimeout = (err?.message || "").toLowerCase().includes("timeout");
+      let userMsg = err?.message || "Failed to analyze bracket file.";
+      if (is503) {
+        userMsg = "The AI service is currently experiencing high demand. Please wait a moment and try again.";
+      } else if (isTimeout) {
+        userMsg = "Bracket analysis took longer than 120 seconds. If uploading a multi-page PDF, consider processing 1-2 pages at a time or ensure 'Deep Thinking Mode' is toggled off for fastest extraction.";
+      }
+      return res.status(is503 ? 503 : (isTimeout ? 504 : 500)).json({ error: userMsg });
     }
   });
 
@@ -240,53 +290,68 @@ async function startServer() {
         - Do not include unescaped double quotes inside string values under any circumstances.
       `;
 
-      const response = await generateWithRetry(ai, "gemini-3.8-flash", {
-        contents: prompt,
-        config: {
-          systemInstruction: "You are an automated tournament bracket auditor. Return strictly valid JSON conforming to the schema.",
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              matches: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    ring: { type: Type.NUMBER },
-                    bout: { type: Type.STRING },
-                    category: { type: Type.STRING },
-                    blue_name: { type: Type.STRING },
-                    blue_club: { type: Type.STRING },
-                    red_name: { type: Type.STRING },
-                    red_club: { type: Type.STRING },
+      const response = await generateWithRetry(
+        ai,
+        "gemini-3.8-flash",
+        {
+          contents: prompt,
+          config: {
+            systemInstruction: "You are an automated tournament bracket auditor. Return strictly valid JSON conforming to the schema.",
+            responseMimeType: "application/json",
+            thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                matches: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      ring: { type: Type.NUMBER },
+                      bout: { type: Type.STRING },
+                      category: { type: Type.STRING },
+                      blue_name: { type: Type.STRING },
+                      blue_club: { type: Type.STRING },
+                      red_name: { type: Type.STRING },
+                      red_club: { type: Type.STRING },
+                    }
                   }
-                }
-              },
-              mappings: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    sourceBout: { type: Type.STRING },
-                    nextBout: { type: Type.STRING },
-                    slot: { type: Type.STRING }
+                },
+                mappings: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      sourceBout: { type: Type.STRING },
+                      nextBout: { type: Type.STRING },
+                      slot: { type: Type.STRING }
+                    }
                   }
                 }
               }
             }
           }
-        }
-      });
+        },
+        90000
+      );
 
-      return res.json({ rawText: response.text });
+      const rawText = extractResponseText(response);
+      if (!rawText || !rawText.trim()) {
+        return res.status(502).json({ error: "The AI service returned an empty refinement result. Please retry." });
+      }
+
+      return res.json({ rawText });
     } catch (err: any) {
       console.error("Server Bracket Refinement Error:", err);
       const is503 = (err?.message || "").includes("503") || (err?.message || "").includes("high demand") || (err?.message || "").includes("UNAVAILABLE");
-      const userMsg = is503 
-        ? "The AI service is currently experiencing high demand. Please wait a moment and try again."
-        : (err.message || "Failed to refine bracket data.");
-      return res.status(is503 ? 503 : 500).json({ error: userMsg });
+      const isTimeout = (err?.message || "").toLowerCase().includes("timeout");
+      let userMsg = err?.message || "Failed to refine bracket data.";
+      if (is503) {
+        userMsg = "The AI service is currently experiencing high demand. Please wait a moment and try again.";
+      } else if (isTimeout) {
+        userMsg = "Bracket audit timed out. Please try refining with a smaller batch of bouts.";
+      }
+      return res.status(is503 ? 503 : (isTimeout ? 504 : 500)).json({ error: userMsg });
     }
   });
 
@@ -319,16 +384,20 @@ async function startServer() {
         formattedContents.push({ role: "user", parts: [{ text: input }] });
       }
 
-      const response = await generateWithRetry(ai, "gemini-3.8-flash", {
-        contents: formattedContents,
-        config: {
-          temperature: 0.7,
-          topP: 0.95,
-          topK: 40,
+      const response = await generateWithRetry(
+        ai,
+        "gemini-3.8-flash",
+        {
+          contents: formattedContents,
+          config: {
+            thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+          },
         },
-      });
+        45000
+      );
 
-      return res.json({ text: response.text || "" });
+      const text = extractResponseText(response);
+      return res.json({ text });
     } catch (err: any) {
       console.error("Server Chat Error:", err);
       const is503 = (err?.message || "").includes("503") || (err?.message || "").includes("high demand") || (err?.message || "").includes("UNAVAILABLE");
