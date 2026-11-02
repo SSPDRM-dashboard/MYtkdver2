@@ -527,6 +527,7 @@ interface PublicViewErrorBoundaryState {
 
 class PublicViewErrorBoundary extends React.Component<PublicViewErrorBoundaryProps, PublicViewErrorBoundaryState> {
   state: PublicViewErrorBoundaryState = { hasError: false };
+  autoRecoverTimer: any = null;
 
   constructor(props: PublicViewErrorBoundaryProps) {
     super(props);
@@ -538,22 +539,31 @@ class PublicViewErrorBoundary extends React.Component<PublicViewErrorBoundaryPro
 
   componentDidCatch(error: any, errorInfo: any) {
     console.error("Public View Error Boundary caught an exception:", error, errorInfo);
+    if (this.autoRecoverTimer) clearTimeout(this.autoRecoverTimer);
+    this.autoRecoverTimer = setTimeout(() => {
+      (this as any).setState({ hasError: false });
+    }, 800);
+  }
+
+  componentDidUpdate(prevProps: PublicViewErrorBoundaryProps) {
+    if (this.state.hasError && prevProps !== (this as any).props) {
+      if (this.autoRecoverTimer) clearTimeout(this.autoRecoverTimer);
+      (this as any).setState({ hasError: false });
+    }
+  }
+
+  componentWillUnmount() {
+    if (this.autoRecoverTimer) clearTimeout(this.autoRecoverTimer);
   }
 
   render() {
     if (this.state.hasError) {
       return (
-        <div className="p-6 bg-slate-950 text-white rounded-2xl border border-slate-800 text-center my-4 flex flex-col items-center justify-center gap-3">
-          <AlertCircle className="w-8 h-8 text-amber-500 animate-pulse" />
-          <p className="text-sm font-black uppercase tracking-wider text-slate-300">
-            Live View Updating...
+        <div className="p-4 bg-slate-900/90 text-white rounded-2xl border border-slate-800 text-center my-2 flex items-center justify-center gap-3 animate-pulse">
+          <div className="w-2.5 h-2.5 bg-emerald-400 rounded-full animate-ping shrink-0" />
+          <p className="text-xs font-bold uppercase tracking-widest text-emerald-400 font-mono">
+            Auto Updating Live Display...
           </p>
-          <button
-            onClick={() => (this as any).setState({ hasError: false })}
-            className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs font-bold text-white rounded-lg transition-colors border border-slate-700 cursor-pointer"
-          >
-            Refresh View Component
-          </button>
         </div>
       );
     }
