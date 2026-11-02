@@ -12254,18 +12254,18 @@ function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, b
             {publicViewLayout === 'standard' ? (
               <div className="flex flex-col items-center justify-center gap-2 sm:gap-6 py-1 sm:py-4">
                 {/* BLUE SIDE */}
-                <div className="flex items-center justify-center gap-3 w-full px-1 sm:px-2">
+                <div className="flex items-center justify-start gap-3 w-full px-2 sm:px-4">
                   <PlayerLogoBadge club={current?.blue_club} name={current?.blue_name} size="lg" className="shrink-0" />
-                  <div className="text-center space-y-0.5">
+                  <div className="text-left space-y-0.5 min-w-0 flex-1">
                     <p 
                       style={{ fontSize: `calc(clamp(18px, 2.5vw, 34px) * (${effectiveNameScale} / 100))`, lineHeight: 1.15 }}
-                      className="text-[18px] sm:text-[26px] md:text-[34px] font-black text-[#00a2e8] uppercase tracking-tight break-words mx-auto w-full"
+                      className="text-[18px] sm:text-[26px] md:text-[34px] font-black text-[#00a2e8] uppercase tracking-tight break-words w-full text-left"
                     >
                       {current ? (current.privacy_mode ? "---" : cleanPlaceholder(current.blue_name)) : ""}
                     </p>
                     <p 
                       style={{ fontSize: `calc(clamp(9px, 1.2vw, 14px) * (${effectiveClubScale} / 100))`, lineHeight: 1.2 }}
-                      className="text-white font-black text-[8px] sm:text-sm uppercase tracking-widest break-words whitespace-normal w-full"
+                      className="text-white font-black text-[8px] sm:text-sm uppercase tracking-widest break-words whitespace-normal w-full text-left"
                     >
                       {current ? cleanPlaceholder(current.blue_club) : ""}
                     </p>
@@ -12279,18 +12279,18 @@ function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, b
                     <div className="text-[10px] sm:text-xl font-black text-white italic leading-none my-0.5">VS</div>
 
                     {/* RED SIDE */}
-                    <div className="flex items-center justify-center gap-3 w-full px-1 sm:px-2">
+                    <div className="flex items-center justify-start gap-3 w-full px-2 sm:px-4">
                       <PlayerLogoBadge club={current?.red_club} name={current?.red_name} size="lg" className="shrink-0" />
-                      <div className="text-center space-y-0.5">
+                      <div className="text-left space-y-0.5 min-w-0 flex-1">
                         <p 
                           style={{ fontSize: `calc(clamp(18px, 2.5vw, 34px) * (${effectiveNameScale} / 100))`, lineHeight: 1.15 }}
-                          className="text-[18px] sm:text-[26px] md:text-[34px] font-black text-[#ed1c24] uppercase tracking-tight break-words mx-auto w-full"
+                          className="text-[18px] sm:text-[26px] md:text-[34px] font-black text-[#ed1c24] uppercase tracking-tight break-words w-full text-left"
                         >
                           {current ? (current.privacy_mode ? "---" : cleanPlaceholder(current.red_name)) : ""}
                         </p>
                         <p 
                           style={{ fontSize: `calc(clamp(9px, 1.2vw, 14px) * (${effectiveClubScale} / 100))`, lineHeight: 1.2 }}
-                          className="text-white font-black text-[8px] sm:text-sm uppercase tracking-widest break-words whitespace-normal w-full"
+                          className="text-white font-black text-[8px] sm:text-sm uppercase tracking-widest break-words whitespace-normal w-full text-left"
                         >
                           {current ? cleanPlaceholder(current.red_club) : ""}
                         </p>
@@ -12389,19 +12389,19 @@ function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, b
                   !current?.category?.toUpperCase().includes('FREESTYLE') && 
                   !(current?.category?.toUpperCase().includes('POOMSAE') && !current?.red_name) ? (
                   <div className="grid grid-cols-[1fr,auto,1fr] gap-1.5 sm:gap-4 items-center pb-1">
-                    <div className="flex items-center justify-center gap-2 min-w-0">
+                    <div className="flex items-center justify-start gap-2 min-w-0">
                       <PlayerLogoBadge club={current?.blue_club} name={current?.blue_name} size="md" className="shrink-0" />
-                      <div className="flex flex-col min-w-0">
+                      <div className="flex flex-col min-w-0 flex-1 text-left">
                         <div className="h-0.5 w-full bg-[#00a2e8] rounded-full mb-1 sm:mb-2 shadow-[0_0_8px_rgba(0,162,232,0.8)]" />
                         <span 
                           style={{ fontSize: `calc(clamp(16px, 2vw, 24px) * (${effectiveNameScale} / 100))`, lineHeight: 1.15 }}
-                          className="font-bold text-[#00a2e8] text-[18px] sm:text-[24px] whitespace-normal break-words text-center"
+                          className="font-bold text-[#00a2e8] text-[18px] sm:text-[24px] whitespace-normal break-words text-left"
                         >
                           {current ? (current.privacy_mode ? "---" : cleanPlaceholder(current.blue_name)) : ""}
                         </span>
                         <span 
                           style={{ fontSize: `calc(clamp(9px, 1.2vw, 14px) * (${effectiveClubScale} / 100))`, lineHeight: 1.2 }}
-                          className="font-bold text-white text-[9px] sm:text-sm whitespace-normal break-words text-center mt-0.5"
+                          className="font-bold text-white text-[9px] sm:text-sm whitespace-normal break-words text-left mt-0.5"
                         >
                           {current ? (current.privacy_mode ? "---" : cleanPlaceholder(current.blue_club)) : ""}
                         </span>
@@ -12410,39 +12410,39 @@ function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, b
 
                     <div className="text-[10px] sm:text-xl font-black text-white italic pt-1 text-center">VS</div>
 
-                    <div className="flex items-center justify-center gap-2 min-w-0">
-                      <div className="flex flex-col min-w-0">
+                    <div className="flex items-center justify-start gap-2 min-w-0">
+                      <PlayerLogoBadge club={current?.red_club} name={current?.red_name} size="md" className="shrink-0" />
+                      <div className="flex flex-col min-w-0 flex-1 text-left">
                         <div className="h-0.5 w-full bg-[#ed1c24] rounded-full mb-1 sm:mb-2 shadow-[0_0_8px_rgba(237,28,36,0.8)]" />
                         <span 
                           style={{ fontSize: `calc(clamp(16px, 2vw, 24px) * (${effectiveNameScale} / 100))`, lineHeight: 1.15 }}
-                          className="font-bold text-[#ed1c24] text-[18px] sm:text-[24px] whitespace-normal break-words text-center"
+                          className="font-bold text-[#ed1c24] text-[18px] sm:text-[24px] whitespace-normal break-words text-left"
                         >
                           {current ? (current.privacy_mode ? "---" : cleanPlaceholder(current.red_name)) : ""}
                         </span>
                         <span 
                           style={{ fontSize: `calc(clamp(9px, 1.2vw, 14px) * (${effectiveClubScale} / 100))`, lineHeight: 1.2 }}
-                          className="font-bold text-white text-[9px] sm:text-sm whitespace-normal break-words text-center mt-0.5"
+                          className="font-bold text-white text-[9px] sm:text-sm whitespace-normal break-words text-left mt-0.5"
                         >
                           {current ? (current.privacy_mode ? "---" : cleanPlaceholder(current.red_club)) : ""}
                         </span>
                       </div>
-                      <PlayerLogoBadge club={current?.red_club} name={current?.red_name} size="md" className="shrink-0" />
                     </div>
                   </div>
                 ) : (
-                  <div className="flex items-center justify-center gap-2.5 max-w-sm mx-auto w-full px-1">
+                  <div className="flex items-center justify-start gap-2.5 max-w-sm mx-auto w-full px-1">
                     <PlayerLogoBadge club={current?.blue_club} name={current?.blue_name} size="md" className="shrink-0" />
-                    <div className="flex flex-col min-w-0 flex-1">
+                    <div className="flex flex-col min-w-0 flex-1 text-left">
                       <div className="h-0.5 w-full bg-[#00a2e8] rounded-full mb-1 sm:mb-2 shadow-[0_0_8px_rgba(0,162,232,0.8)]" />
                       <span 
                         style={{ fontSize: `calc(clamp(16px, 2vw, 24px) * (${effectiveNameScale} / 100))`, lineHeight: 1.15 }}
-                        className="font-bold text-[#00a2e8] text-[18px] sm:text-[24px] whitespace-normal break-words text-center"
+                        className="font-bold text-[#00a2e8] text-[18px] sm:text-[24px] whitespace-normal break-words text-left"
                       >
                         {current ? (current.privacy_mode ? "---" : cleanPlaceholder(current.blue_name)) : ""}
                       </span>
                       <span 
                         style={{ fontSize: `calc(clamp(9px, 1.2vw, 14px) * (${effectiveClubScale} / 100))`, lineHeight: 1.2 }}
-                        className="font-bold text-white text-[9px] sm:text-sm whitespace-normal break-words text-center mt-0.5"
+                        className="font-bold text-white text-[9px] sm:text-sm whitespace-normal break-words text-left mt-0.5"
                       >
                         {current ? (current.privacy_mode ? "---" : cleanPlaceholder(current.blue_club)) : ""}
                       </span>
@@ -12582,18 +12582,23 @@ function PublicFighterSide({ color, name, club, privacy }: { color: 'blue' | 're
         "h-2 w-full rounded-full shadow-inner",
         color === 'blue' ? "bg-[#00a2e8] shadow-blue-900/50" : "bg-[#ed1c24] shadow-red-900/50"
       )} />
-      <p className={cn(
-        "font-black text-white tracking-tight leading-tight whitespace-normal break-words",
-        getDynamicFontSize(privacy ? "---" : cleanPlaceholder(name))
-      )}>
-        {privacy ? "---" : cleanPlaceholder(name)}
-      </p>
-      <p className={cn(
-        "text-sm font-bold uppercase tracking-widest whitespace-normal break-words",
-        color === 'blue' ? "text-[#00a2e8]" : "text-[#ed1c24]"
-      )}>
-        {cleanPlaceholder(club)}
-      </p>
+      <div className="flex items-center justify-start gap-3 min-w-0">
+        <PlayerLogoBadge club={club} name={name} size="md" className="shrink-0" />
+        <div className="flex-1 min-w-0 text-left">
+          <p className={cn(
+            "font-black text-white tracking-tight leading-tight whitespace-normal break-words text-left",
+            getDynamicFontSize(privacy ? "---" : cleanPlaceholder(name))
+          )}>
+            {privacy ? "---" : cleanPlaceholder(name)}
+          </p>
+          <p className={cn(
+            "text-sm font-bold uppercase tracking-widest whitespace-normal break-words text-left",
+            color === 'blue' ? "text-[#00a2e8]" : "text-[#ed1c24]"
+          )}>
+            {cleanPlaceholder(club)}
+          </p>
+        </div>
+      </div>
     </div>
   );
 }
