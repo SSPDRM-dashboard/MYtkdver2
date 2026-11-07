@@ -740,8 +740,15 @@ export function AIBracketSetup({
           errorMessage = "The AI service is currently experiencing high demand. Please wait a moment and click Process File again.";
         } else if (msg.includes("timed out") || msg.includes("timeout")) {
           errorMessage = "The request timed out. If uploading a multi-page PDF, consider processing 1-2 pages at a time or turn off Deep Thinking Mode.";
-        } else if (msg.includes("api_key_invalid") || msg.includes("api key") || msg.includes("not configured")) {
-          errorMessage = "AI API Key configuration issue. Please check your API key in Settings > Secrets or click API Key Configured to update.";
+        } else if (
+          msg.includes("api_key_invalid") ||
+          msg.includes("api key") ||
+          msg.includes("not configured") ||
+          msg.includes("permission_denied") ||
+          msg.includes("403") ||
+          msg.includes("scope")
+        ) {
+          errorMessage = "Gemini API Key authorization error (403 / PERMISSION_DENIED). Please verify your API key in the Settings > Secrets panel or click 'API Key Configured' to enter your API key.";
         } else if (msg.includes("quota") || msg.includes("rate limit") || msg.includes("resource_exhausted")) {
           errorMessage = "API quota exceeded. Google's per-minute rate limit resets every 60 seconds—please wait 1 minute and retry.";
         } else if (msg.includes("model not found") || msg.includes("404")) {

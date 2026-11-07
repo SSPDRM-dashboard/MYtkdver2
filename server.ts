@@ -260,15 +260,20 @@ async function startServer() {
       return res.json({ rawText });
     } catch (err: any) {
       console.error("Server Bracket Analysis Error:", err);
-      const is503 = (err?.message || "").includes("503") || (err?.message || "").includes("high demand") || (err?.message || "").includes("UNAVAILABLE");
-      const isTimeout = (err?.message || "").toLowerCase().includes("timeout");
-      let userMsg = err?.message || "Failed to analyze bracket file.";
+      const msg = err?.message || "";
+      const is503 = msg.includes("503") || msg.includes("high demand") || msg.includes("UNAVAILABLE");
+      const isTimeout = msg.toLowerCase().includes("timeout");
+      const is403 = msg.includes("403") || msg.includes("PERMISSION_DENIED") || msg.includes("ACCESS_TOKEN_SCOPE_INSUFFICIENT");
+
+      let userMsg = msg || "Failed to analyze bracket file.";
       if (is503) {
         userMsg = "The AI service is currently experiencing high demand. Please wait a moment and try again.";
       } else if (isTimeout) {
         userMsg = "Bracket analysis took longer than 120 seconds. If uploading a multi-page PDF, consider processing 1-2 pages at a time or ensure 'Deep Thinking Mode' is toggled off for fastest extraction.";
+      } else if (is403) {
+        userMsg = "Gemini API Key Permission Denied (403). Please check your API key configuration in the Settings > Secrets panel.";
       }
-      return res.status(is503 ? 503 : (isTimeout ? 504 : 500)).json({ error: userMsg });
+      return res.status(is503 ? 503 : (isTimeout ? 504 : (is403 ? 403 : 500))).json({ error: userMsg });
     }
   });
 
