@@ -737,15 +737,15 @@ export function AIBracketSetup({
       if (err instanceof Error) {
         const msg = err.message.toLowerCase();
         if (msg.includes("503") || msg.includes("high demand") || msg.includes("unavailable")) {
-          errorMessage = "The AI service is currently experiencing high demand. Please wait a moment and try again, or try uploading 1-2 pages of your PDF instead of the entire document.";
-        } else if (msg.includes("timed out")) {
-          errorMessage = "The request timed out. The file might be too large or complex. Try uploading 1-2 pages at a time.";
-        } else if (msg.includes("api_key_invalid") || msg.includes("api key")) {
-          errorMessage = "Invalid API Key. Please check your configuration in the API Key settings.";
+          errorMessage = "The AI service is currently experiencing high demand. Please wait a moment and click Process File again.";
+        } else if (msg.includes("timed out") || msg.includes("timeout")) {
+          errorMessage = "The request timed out. If uploading a multi-page PDF, consider processing 1-2 pages at a time or turn off Deep Thinking Mode.";
+        } else if (msg.includes("api_key_invalid") || msg.includes("api key") || msg.includes("not configured")) {
+          errorMessage = "AI API Key configuration issue. Please check your API key in Settings > Secrets or click API Key Configured to update.";
         } else if (msg.includes("quota") || msg.includes("rate limit") || msg.includes("resource_exhausted")) {
-          errorMessage = "API quota exceeded. Google's per-minute rate limit resets every 60 seconds—please wait 1 minute and retry, or upload fewer pages at a time.";
+          errorMessage = "API quota exceeded. Google's per-minute rate limit resets every 60 seconds—please wait 1 minute and retry.";
         } else if (msg.includes("model not found") || msg.includes("404")) {
-          errorMessage = "The AI model is currently unavailable. Please contact support.";
+          errorMessage = "The AI model encountered a temporary connection issue. Please click Process File to try again with automatic fallback.";
         } else if (msg.includes("safety")) {
           errorMessage = "The file was flagged by safety filters. Please ensure it contains only tournament data.";
         } else {

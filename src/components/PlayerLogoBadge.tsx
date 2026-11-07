@@ -26,6 +26,7 @@ export const PlayerLogoBadge: React.FC<PlayerLogoBadgeProps> = ({
   showOverride,
 }) => {
   const [showPlayerLogos] = useSyncedState<boolean>('tkd_show_player_logos', true);
+  const [syncedTeamLogos] = useSyncedState<Record<string, string>>('tkd_team_logos', {});
   const [loadError, setLoadError] = useState(false);
 
   // Globally hide logo if showPlayerLogos is false, unless explicitly overridden
@@ -52,7 +53,6 @@ export const PlayerLogoBadge: React.FC<PlayerLogoBadgeProps> = ({
 
   const currentSizeClass = sizeMap[size] || sizeMap.md;
 
-  const [syncedTeamLogos] = useSyncedState<Record<string, string>>('tkd_team_logos', {});
   const activeCustomLogos = customLogos || syncedTeamLogos;
 
   const resolvedUrl = loadError

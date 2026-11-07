@@ -33,16 +33,17 @@ async function callWithTimeout<T>(promise: Promise<T>, timeoutMs = 90000, modelN
   }
 }
 
-// Resilient helper to handle temporary 503 / high demand spikes with model fallbacks
+// Resilient helper to handle temporary 503 / high demand spikes / 404s with model fallbacks
 async function generateWithRetry(
   ai: GoogleGenAI,
   primaryModel: string,
   params: any,
   timeoutMs = 90000
 ) {
-  // Ordered fallback models: start with primary, then fast and high-quota gemini-3.1-flash-lite
+  // Ordered fallback models: start with primary, then fast & high-quota gemini-3.8-flash, gemini-3.1-flash-lite, gemini-flash-latest
   const candidateModels = [
     primaryModel,
+    "gemini-3.8-flash",
     "gemini-3.1-flash-lite",
     "gemini-flash-latest",
   ];
@@ -54,32 +55,51 @@ async function generateWithRetry(
     try {
       console.log(`[Gemini Server] Requesting model ${model} (timeout ${timeoutMs}ms)...`);
       
-      // If falling back to non-Gemini 3/4 model, remove thinkingConfig to prevent schema/config errors
-      const modelParams = { ...params };
+      const modelParams = JSON.parse(JSON.stringify(params));
+      
+      // If model does not support thinkingConfig (only gemini-3* and gemini-4*), remove it
       if (modelParams.config?.thinkingConfig && !model.startsWith("gemini-3") && !model.startsWith("gemini-4")) {
-        const { thinkingConfig, ...restConfig } = modelParams.config;
-        modelParams.config = restConfig;
+        delete modelParams.config.thinkingConfig;
       }
 
-      const response = await callWithTimeout(
-        ai.models.generateContent({
-          ...modelParams,
-          model,
-        }),
-        timeoutMs,
-        model
-      );
-      return response;
+      try {
+        const response = await callWithTimeout(
+          ai.models.generateContent({
+            ...modelParams,
+            model,
+          }),
+          timeoutMs,
+          model
+        );
+        return response;
+      } catch (innerErr: any) {
+        const innerMsg = (innerErr?.message || "").toLowerCase();
+        // If responseSchema caused a 400/404 on this model, attempt fallback without responseSchema
+        if ((innerMsg.includes("schema") || innerMsg.includes("400") || innerMsg.includes("404")) && modelParams.config?.responseSchema) {
+          console.warn(`[Gemini Server] Retrying ${model} without responseSchema constraint...`);
+          delete modelParams.config.responseSchema;
+          delete modelParams.config.responseMimeType;
+          const fallbackResp = await callWithTimeout(
+            ai.models.generateContent({
+              ...modelParams,
+              model,
+            }),
+            timeoutMs,
+            model
+          );
+          return fallbackResp;
+        }
+        throw innerErr;
+      }
     } catch (err: any) {
       lastError = err;
       const msg = (err?.message || "").toLowerCase();
       console.warn(`[Gemini Server] Issue with model ${model}: ${err?.message || 'Error'}.`);
 
-      // If it's a fatal client error not solvable by switching models (e.g. malformed base64 image)
+      // If it's a fatal client error not solvable by switching models (e.g. malformed base64 image or invalid API key)
       if (
-        msg.includes("invalid_argument") || 
-        msg.includes("unable to process input image") ||
-        msg.includes("api_key")
+        (msg.includes("invalid_argument") && (msg.includes("image") || msg.includes("base64"))) ||
+        msg.includes("api_key_invalid")
       ) {
         throw err;
       }
