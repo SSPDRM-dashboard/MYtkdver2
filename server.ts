@@ -63,7 +63,7 @@ async function generateWithRetry(
       }
 
       try {
-        const response = await callWithTimeout(
+        let response = await callWithTimeout(
           ai.models.generateContent({
             ...modelParams,
             model,
@@ -71,7 +71,27 @@ async function generateWithRetry(
           timeoutMs,
           model
         );
-        return response;
+
+        let txt = extractResponseText(response);
+
+        // If high thinking caused token exhaustion without returning JSON, retry with LOW thinking level
+        if ((!txt || !txt.includes("{")) && modelParams.config?.thinkingConfig?.thinkingLevel === ThinkingLevel.HIGH) {
+          console.warn(`[Gemini Server] Output lacked JSON structure with HIGH thinking. Retrying ${model} with LOW thinking level...`);
+          modelParams.config.thinkingConfig = { thinkingLevel: ThinkingLevel.LOW };
+          response = await callWithTimeout(
+            ai.models.generateContent({
+              ...modelParams,
+              model,
+            }),
+            timeoutMs,
+            model
+          );
+          txt = extractResponseText(response);
+        }
+
+        if (txt) {
+          return response;
+        }
       } catch (innerErr: any) {
         const innerMsg = (innerErr?.message || "").toLowerCase();
         // If responseSchema caused a 400/404 on this model, attempt fallback without responseSchema
@@ -110,14 +130,42 @@ async function generateWithRetry(
 }
 
 function extractResponseText(response: any): string {
-  if (response?.text) return response.text;
-  const parts = response?.candidates?.[0]?.content?.parts;
-  if (Array.isArray(parts)) {
-    const textParts = parts.filter((p: any) => p && !p.thought && typeof p.text === "string").map((p: any) => p.text);
-    if (textParts.length > 0) return textParts.join("");
-    const anyText = parts.filter((p: any) => p && typeof p.text === "string").map((p: any) => p.text).join("");
-    if (anyText) return anyText;
+  if (typeof response?.text === "string" && response.text.trim()) {
+    return response.text;
   }
+
+  const candidates = response?.candidates;
+  if (Array.isArray(candidates)) {
+    for (const candidate of candidates) {
+      const parts = candidate?.content?.parts;
+      if (Array.isArray(parts)) {
+        // Collect all non-thought parts that contain text
+        const nonThoughtText = parts
+          .filter((p: any) => p && !p.thought && typeof p.text === "string" && p.text.trim())
+          .map((p: any) => p.text)
+          .join("");
+
+        if (nonThoughtText) return nonThoughtText;
+
+        // Fallback: look for parts containing JSON delimiters '{' or '['
+        const jsonParts = parts
+          .filter((p: any) => p && typeof p.text === "string" && (p.text.includes("{") || p.text.includes("[")))
+          .map((p: any) => p.text)
+          .join("");
+
+        if (jsonParts) return jsonParts;
+
+        // Fallback: any text part
+        const anyText = parts
+          .filter((p: any) => p && typeof p.text === "string" && p.text.trim())
+          .map((p: any) => p.text)
+          .join("");
+
+        if (anyText) return anyText;
+      }
+    }
+  }
+
   return "";
 }
 
@@ -159,7 +207,7 @@ async function startServer() {
         - Color Assignment: Upper line = Blue Side (Chung), Lower line = Red Side (Hong).
         - Advancement: Winner of a previous match fills the slot (Upper=Blue, Lower=Red) in the next Bout ID box.
         - Player Names: Often start with "090 - ". Extract only the name.
-        - Club Names: Located directly BELOW the player's name.
+        - Club Names: Located directly BELOW or beside the player's name. CRITICAL: Always extract both blue_club (Chung) AND red_club (Hong). Never leave red_club blank if a club/team/state name or acronym is present for the Red/Hong corner competitor.
         - Ring Mapping: 
           - 1000s=Ring 1, 2000s=Ring 2, 3000s=Ring 3, 4000s=Ring 4, 5000s=Ring 5, 6000s=Ring 6, 
           - 7000s=Ring 7, 8000s=Ring 8, 9000s=Ring 9, 10000s=Ring 10, 11000s=Ring 11, 12000s=Ring 12.
@@ -230,7 +278,7 @@ async function startServer() {
                       red_name: { type: Type.STRING },
                       red_club: { type: Type.STRING },
                     },
-                    required: ["bout", "category", "blue_name"],
+                    required: ["bout", "category", "blue_name", "blue_club", "red_name", "red_club"],
                   },
                 },
                 mappings: {
@@ -297,6 +345,7 @@ async function startServer() {
         3. Mappings where sourceBout and nextBout are the same.
         4. Inconsistent capitalization (everything should be UPPERCASE).
         5. Missing categories or club names if they can be inferred from context.
+        6. Missing red_club: If red_name is present but red_club is empty, infer red_club from red_name (e.g. if name contains club in parentheses or dash) or from team context in the same category. Never leave red_club blank when red_name exists.
         
         ${isPoomsaeMode ? `
         POOMSAE MODE ACTIVE:

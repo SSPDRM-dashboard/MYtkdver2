@@ -208,6 +208,46 @@ interface AIBracketSetupProps {
   namingMode?: 'number' | 'alphabet';
 }
 
+function extractNameAndClub(fullName?: string, existingClub?: string) {
+  if (!fullName) return { cleanName: '', cleanClub: (existingClub || '').trim() };
+  
+  let str = fullName.trim();
+  let cleanName = str;
+  let cleanClub = (existingClub || '').trim();
+
+  // 1. Parentheses: "HELOISE SEOYOO REA (ZEN ACADEMY)"
+  const parenMatch = str.match(/^(.*?)\s*[\(\[\{](.*?)[\)\]\}]\s*$/);
+  if (parenMatch && parenMatch[1]) {
+    cleanName = parenMatch[1].trim();
+    if (!cleanClub || cleanClub === 'RED CLUB' || cleanClub === 'BLUE CLUB') {
+      cleanClub = parenMatch[2].trim();
+    }
+  } else if (str.includes(" - ")) {
+    // 2. Dash separation: "090 - HELOISE SEOYOO REA - ZEN ACADEMY"
+    const parts = str.split(" - ").map(p => p.trim());
+    if (parts.length === 2) {
+      cleanName = parts[0];
+      if (!cleanClub || cleanClub === 'RED CLUB' || cleanClub === 'BLUE CLUB') {
+        cleanClub = parts[1];
+      }
+    } else if (parts.length >= 3) {
+      if (/^\d+$/.test(parts[0])) { // e.g. "090 - HELOISE SEOYOO REA - ZEN ACADEMY"
+        cleanName = parts[1];
+        if (!cleanClub || cleanClub === 'RED CLUB' || cleanClub === 'BLUE CLUB') {
+          cleanClub = parts.slice(2).join(" - ");
+        }
+      } else {
+        cleanName = parts[0];
+        if (!cleanClub || cleanClub === 'RED CLUB' || cleanClub === 'BLUE CLUB') {
+          cleanClub = parts.slice(1).join(" - ");
+        }
+      }
+    }
+  }
+
+  return { cleanName, cleanClub };
+}
+
 export function AIBracketSetup({ 
   currentEventId, 
   events, 
@@ -528,15 +568,22 @@ export function AIBracketSetup({
               if (redNameIdx === -1) redNameIdx = 4; // fallback
             }
 
-            // Clubs are usually the column immediately following the name
-            let blueClubIdx = cleanHeaders.findIndex((h, idx) => h.includes('club') && idx < (redNameIdx !== -1 ? redNameIdx : 99));
-            if (blueClubIdx === -1 || blueClubIdx === blueNameIdx) {
-              blueClubIdx = blueNameIdx + 1;
+            // 3. Blue Club (Chung)
+            let blueClubIdx = cleanHeaders.findIndex(h => (h.includes('blue') || h.includes('chung')) && (h.includes('club') || h.includes('team') || h.includes('state') || h.includes('assoc') || h.includes('org')));
+            if (blueClubIdx === -1) {
+              blueClubIdx = cleanHeaders.findIndex((h, idx) => (h.includes('club') || h.includes('team') || h.includes('state') || h.includes('assoc')) && idx !== redNameIdx && idx !== blueNameIdx && (idx < redNameIdx || redNameIdx === -1));
+              if (blueClubIdx === -1) {
+                blueClubIdx = blueNameIdx + 1;
+              }
             }
 
-            let redClubIdx = cleanHeaders.findIndex((h, idx) => h.includes('club') && idx > blueClubIdx);
-            if (redClubIdx === -1 || redClubIdx === redNameIdx) {
-              redClubIdx = redNameIdx + 1;
+            // 4. Red Club (Hong)
+            let redClubIdx = cleanHeaders.findIndex(h => (h.includes('red') || h.includes('hong')) && (h.includes('club') || h.includes('team') || h.includes('state') || h.includes('assoc') || h.includes('org')));
+            if (redClubIdx === -1) {
+              redClubIdx = cleanHeaders.findIndex((h, idx) => (h.includes('club') || h.includes('team') || h.includes('state') || h.includes('assoc')) && idx !== blueNameIdx && idx !== blueClubIdx && idx !== redNameIdx);
+              if (redClubIdx === -1) {
+                redClubIdx = redNameIdx + 1;
+              }
             }
 
             const dataRows = rows.slice(1);
@@ -659,13 +706,21 @@ export function AIBracketSetup({
           finalCategory = finalCategory ? `${finalCategory} (INDIVIDUAL POOMSAE)` : 'INDIVIDUAL POOMSAE';
         }
 
+        const rawBlueName = (m.blue_name || '').toString().toUpperCase();
+        const rawBlueClub = (m.blue_club || '').toString().toUpperCase();
+        const rawRedName = isPoomsaeMode ? '' : (m.red_name || '').toString().toUpperCase();
+        const rawRedClub = isPoomsaeMode ? '' : (m.red_club || '').toString().toUpperCase();
+
+        const blueParsed = extractNameAndClub(rawBlueName, rawBlueClub);
+        const redParsed = extractNameAndClub(rawRedName, rawRedClub);
+
         return {
           ...m,
           ring: Number(inferredRing) || 1,
-          blue_name: (m.blue_name || '').toString().toUpperCase(),
-          blue_club: (m.blue_club || '').toString().toUpperCase(),
-          red_name: isPoomsaeMode ? '' : (m.red_name || '').toString().toUpperCase(),
-          red_club: isPoomsaeMode ? '' : (m.red_club || '').toString().toUpperCase(),
+          blue_name: blueParsed.cleanName,
+          blue_club: blueParsed.cleanClub,
+          red_name: isPoomsaeMode ? '' : redParsed.cleanName,
+          red_club: isPoomsaeMode ? '' : redParsed.cleanClub,
           category: finalCategory,
           bout: bout,
           privacy_mode: false,
@@ -827,14 +882,14 @@ export function AIBracketSetup({
         
         if (matchToUpdate) {
           const placeholderStr = `WINNER OF ${sourceBout}`;
-          if (slot === 'blue' || slot === 'chung') {
+          if (slot.includes('blue') || slot.includes('chung')) {
             // Check if current name is empty or currently looks like a placeholder
             const currName = (matchToUpdate.blue_name || '').toUpperCase().trim();
             if (!currName || currName === 'WINNER' || currName.includes('WINNER OF') || currName.includes('WINNER') || currName.match(/^[A-L]?\d+$/)) {
               matchToUpdate.blue_name = placeholderStr;
               matchToUpdate.blue_club = '';
             }
-          } else if (slot === 'red' || slot === 'hong') {
+          } else if (slot.includes('red') || slot.includes('hong')) {
             const currName = (matchToUpdate.red_name || '').toUpperCase().trim();
             if (!currName || currName === 'WINNER' || currName.includes('WINNER OF') || currName.includes('WINNER') || currName.match(/^[A-L]?\d+$/)) {
               matchToUpdate.red_name = placeholderStr;
@@ -1427,9 +1482,31 @@ export function AIBracketSetup({
             </div>
 
             {error && (
-              <div className="p-4 bg-red-50 border border-red-100 rounded-2xl flex items-center gap-3 text-red-600 text-sm font-bold">
-                <AlertCircle size={20} />
-                {error}
+              <div className="p-4 bg-red-50 border border-red-100 rounded-2xl flex flex-wrap items-center justify-between gap-3 text-red-600 text-sm font-bold">
+                <div className="flex items-center gap-3 flex-1 min-w-[240px]">
+                  <AlertCircle size={20} className="shrink-0" />
+                  <span>{error}</span>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  {(error.toLowerCase().includes("api key") || error.includes("403") || error.includes("PERMISSION_DENIED")) && (
+                    <button
+                      type="button"
+                      onClick={() => setShowApiKeyModal(true)}
+                      className="px-3.5 py-1.5 bg-red-600 text-white text-xs font-black rounded-xl hover:bg-red-700 transition-colors shadow-sm"
+                    >
+                      Enter API Key
+                    </button>
+                  )}
+                  {file && (
+                    <button
+                      type="button"
+                      onClick={() => processFile()}
+                      className="px-3.5 py-1.5 bg-slate-900 text-white text-xs font-black rounded-xl hover:bg-slate-800 transition-colors shadow-sm"
+                    >
+                      Process File Again
+                    </button>
+                  )}
+                </div>
               </div>
             )}
 

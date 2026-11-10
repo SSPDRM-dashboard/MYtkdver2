@@ -743,6 +743,29 @@ export default function App() {
     return parsed;
   })());
 
+  const isRingOperator = user?.role === 'user' || sessionStorage.getItem('user_role') === 'court_clerk';
+  const [isTouchOrTablet, setIsTouchOrTablet] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return (
+      window.innerWidth < 1280 ||
+      (typeof navigator !== 'undefined' && (navigator.maxTouchPoints > 0 && window.innerWidth <= 1366)) ||
+      (typeof navigator !== 'undefined' && /iPad|iPhone|Android|Tablet/i.test(navigator.userAgent))
+    );
+  });
+
+  useEffect(() => {
+    const handleDeviceResize = () => {
+      const isTouch = (
+        window.innerWidth < 1280 ||
+        (typeof navigator !== 'undefined' && (navigator.maxTouchPoints > 0 && window.innerWidth <= 1366)) ||
+        (typeof navigator !== 'undefined' && /iPad|iPhone|Android|Tablet/i.test(navigator.userAgent))
+      );
+      setIsTouchOrTablet(isTouch);
+    };
+    window.addEventListener('resize', handleDeviceResize);
+    return () => window.removeEventListener('resize', handleDeviceResize);
+  }, []);
+
   const [rings, setRings] = useSyncedState<RingStatus[]>('tkd_rings', INITIAL_RINGS);
   const [autoPullRings, setAutoPullRings] = useSyncedState<Record<number, boolean>>('tkd_autopull', {});
   const [isAutoUpdateNames, setIsAutoUpdateNames] = useSyncedState<boolean>('tkd_auto_update_names', true);
@@ -4668,27 +4691,40 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-[100dvh] bg-slate-50 flex flex-col md:flex-row text-slate-900 font-sans">
-      {/* Mobile Header */}
-      <header className="md:hidden bg-white border-b border-slate-200 p-4 flex items-center justify-between sticky top-0 z-[60] print:hidden">
+    <div className={cn("min-h-[100dvh] bg-slate-50 flex text-slate-900 font-sans", (isRingOperator && isTouchOrTablet) ? "flex-col" : (isRingOperator ? "flex-col xl:flex-row" : "flex-col md:flex-row"))}>
+      {/* Top Header (Visible on Mobile & iPad for Ring Operator) */}
+      <header className={cn("bg-white border-b border-slate-200 p-3.5 sm:p-4 flex items-center justify-between sticky top-0 z-[60] print:hidden", (isRingOperator && isTouchOrTablet) ? "flex" : (isRingOperator ? "xl:hidden" : "md:hidden"))}>
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-red-600 rounded-lg flex items-center justify-center text-white shadow-lg shadow-red-200">
+          <div className="w-8 h-8 sm:w-9 sm:h-9 bg-red-600 rounded-lg sm:rounded-xl flex items-center justify-center text-white shadow-lg shadow-red-200 shrink-0">
             <Trophy size={18} />
           </div>
-          <h1 className="font-bold text-base leading-tight">MY-TKD</h1>
+          <div>
+            <h1 className="font-bold text-sm sm:text-base leading-tight">MY-TKD</h1>
+            <p className="text-[10px] text-slate-500 font-black uppercase tracking-wider">
+              {isRingOperator ? `Ring ${getRingName(Number(user?.assignedRing) || 1)} Controller` : 'Tournament Manager'}
+            </p>
+          </div>
         </div>
         <div className="flex items-center gap-2">
+          {events.length > 0 && currentEventId && (
+            <span className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1 bg-slate-100 rounded-lg text-[10px] font-bold text-slate-600 uppercase tracking-wider border border-slate-200">
+              <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
+              {events.find(e => e.id === currentEventId)?.name || 'Event'}
+            </span>
+          )}
           <button 
             onClick={handleLogout}
-            className="p-2 text-slate-400 hover:text-red-600 transition-colors"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors text-xs font-bold"
+            title="Logout"
           >
-            <LogOut size={20} />
+            <LogOut size={16} />
+            <span className="hidden sm:inline">Logout</span>
           </button>
         </div>
       </header>
 
       {/* Sidebar (Desktop) */}
-      <aside className="w-64 bg-white border-r border-slate-200 flex flex-col hidden md:flex h-screen sticky top-0 print:hidden">
+      <aside className={cn("w-64 bg-white border-r border-slate-200 flex-col h-screen sticky top-0 print:hidden", (isRingOperator && isTouchOrTablet) ? "hidden" : (isRingOperator ? "hidden xl:flex" : "hidden md:flex"))}>
         <div className="p-6 flex items-center gap-3 border-b border-slate-100">
           <div className="w-10 h-10 bg-red-600 rounded-lg flex items-center justify-center text-white shadow-lg shadow-red-200">
             <Trophy size={24} />
@@ -4971,7 +5007,7 @@ export default function App() {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 flex flex-col md:h-screen overflow-hidden">
+      <main className={cn("flex-1 flex flex-col overflow-hidden", (isRingOperator && isTouchOrTablet) ? "h-auto min-h-screen" : (isRingOperator ? "xl:h-screen" : "md:h-screen"))}>
         {isQuotaExceeded && (
           <div className="bg-gradient-to-r from-red-600 to-amber-600 text-white px-4 py-2.5 text-center text-xs font-bold flex flex-col sm:flex-row items-center justify-center gap-2 relative z-50 border-b border-red-700 shadow-md">
             <div className="flex items-center gap-2 justify-center">
@@ -5000,9 +5036,12 @@ export default function App() {
         )}
 
         {/* Scrollable Area */}
-        <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 md:space-y-8 pb-24 md:pb-8">
+        <div className={cn(
+          "flex-1 overflow-y-auto",
+          (isRingOperator && activeTab === 'mats') ? "p-2 sm:p-4 md:p-8 space-y-2 sm:space-y-4 md:space-y-8 pb-28 xl:pb-8" : (isRingOperator ? "p-3 sm:p-4 md:p-8 space-y-4 md:space-y-8 pb-32 xl:pb-8" : "p-4 md:p-8 space-y-6 md:space-y-8 pb-24 md:pb-8")
+        )}>
           {/* Page Header */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4 md:mb-8 print:hidden">
+          <div className={cn("flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-2 sm:mb-4 md:mb-8 print:hidden", (isRingOperator && activeTab === 'mats') && "hidden sm:flex")}>
             <div className="flex items-center gap-4">
               <h2 className="text-xl md:text-2xl font-black text-slate-900 capitalize tracking-tight">{activeTab}</h2>
             </div>
@@ -5592,8 +5631,8 @@ export default function App() {
           )}
 
           {activeTab === 'mats' && (
-            <div className="space-y-6">
-              <div className="flex items-center justify-between">
+            <div className={cn("space-y-6", isRingOperator && "space-y-2 sm:space-y-6")}>
+              <div className={cn("flex items-center justify-between", isRingOperator ? "hidden sm:flex" : "flex")}>
                 <h3 className="text-lg font-bold flex items-center gap-2">
                   <LayoutDashboard size={20} className="text-red-600" />
                   {user?.role === 'admin' ? "Live Ring Control Center" : `Ring ${getRingName(Number(user?.assignedRing) || 1)} Controller`}
@@ -5619,7 +5658,7 @@ export default function App() {
                   </button>
                 )}
               </div>
-              <div className={user?.role === 'admin' ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" : "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"}>
+              <div className={user?.role === 'admin' ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" : cn("grid grid-cols-1 xl:grid-cols-3 gap-6", isRingOperator && "gap-2 sm:gap-6")}>
                 {user?.role === 'admin' ? (
                   currentRings.map((ring) => (
                     <RingCard 
@@ -5652,7 +5691,7 @@ export default function App() {
                   ))
                 ) : (
                   <>
-                    <div className="lg:col-span-2">
+                    <div className="col-span-1 xl:col-span-2">
                       {currentRings.filter(r => r.ringNumber === Number(user?.assignedRing)).map((ring) => (
                         <RingCard 
                           key={ring.ringNumber} 
@@ -5718,7 +5757,7 @@ export default function App() {
                       });
 
                       return (
-                        <div className="lg:col-span-2 space-y-6">
+                        <div className="col-span-1 xl:col-span-1 space-y-6" id="operator-upcoming-bouts">
                           <div className="space-y-4">
                             <div className="flex items-center justify-between">
                               <h3 className="text-lg font-bold flex items-center gap-2 text-slate-800">
@@ -7257,109 +7296,208 @@ export default function App() {
       />
 
 
-      {/* Mobile Bottom Navigation */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 px-6 py-3 flex items-center justify-between z-[60] shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
-        {user?.role === 'admin' && (
-          <>
-            <button 
-              onClick={() => setActiveTab('dashboard')}
-              className={cn("flex flex-col items-center gap-1 transition-colors", activeTab === 'dashboard' ? "text-red-600" : "text-slate-400")}
-            >
-              <LayoutDashboard size={20} />
-              <span className="text-[10px] font-bold">Home</span>
-            </button>
-            <button 
-              onClick={() => setActiveTab('mats')}
-              className={cn("flex flex-col items-center gap-1 transition-colors", activeTab === 'mats' ? "text-red-600" : "text-slate-400")}
-            >
-              <Monitor size={20} />
-              <span className="text-[10px] font-bold">Rings</span>
-            </button>
-
-            <button 
-              onClick={() => setActiveTab('ai-setup')}
-              className={cn("flex flex-col items-center gap-1 transition-colors", activeTab === 'ai-setup' ? "text-red-600" : "text-slate-400")}
-            >
-              <RefreshCw size={20} />
-              <span className="text-[10px] font-bold">AI Setup</span>
-            </button>
-            <button 
-              onClick={() => setActiveTab('search-winner')}
-              className={cn("flex flex-col items-center gap-1 transition-colors", activeTab === 'search-winner' ? "text-red-600" : "text-slate-400")}
-            >
-              <Search size={20} />
-              <span className="text-[10px] font-bold">Search</span>
-            </button>
-            <button 
-              onClick={() => setActiveTab('settings')}
-              className={cn("flex flex-col items-center gap-1 transition-colors", activeTab === 'settings' ? "text-red-600" : "text-slate-400")}
-            >
-              <Settings size={20} />
-              <span className="text-[10px] font-bold">System</span>
-            </button>
-          </>
-        )}
-        {user?.role === 'user' && (
-          <>
-            <button 
-              onClick={() => setActiveTab('mats')}
-              className={cn("flex flex-col items-center gap-1 transition-colors relative", activeTab === 'mats' ? "text-red-600" : "text-slate-400")}
-            >
-              <div className="relative">
-                <LayoutDashboard size={24} />
-                <span className="absolute -top-2 -right-2 bg-red-600 text-white text-[8px] font-black px-1.5 py-0.5 rounded-full">
-                  {rings.find(r => r.ringNumber === Number(user?.assignedRing))?.totalBouts || 0}
-                </span>
+      {/* Mobile & iPad Bottom Navigation / Dashboard Bar */}
+      <nav className={cn(
+        "fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-slate-200 z-[60] shadow-[0_-4px_25px_rgba(0,0,0,0.08)]",
+        (isRingOperator && isTouchOrTablet) ? "block" : (isRingOperator ? "xl:hidden" : "md:hidden")
+      )}>
+        {user?.role === 'user' ? (
+          <div className="max-w-5xl mx-auto px-4 py-2 flex items-center justify-between gap-2">
+            {/* Operator Ring Identity */}
+            <div className="flex items-center gap-2 pr-2 border-r border-slate-200">
+              <div className="w-9 h-9 rounded-xl bg-red-600 text-white font-black text-sm flex items-center justify-center shadow-md shadow-red-200 flex-shrink-0">
+                {getRingName(Number(user?.assignedRing) || 1)}
               </div>
-              <span className="text-[10px] font-bold">Ring {getRingName(Number(user?.assignedRing) || 1)}</span>
-            </button>
-            <button 
-              onClick={() => setActiveTab('search-winner')}
-              className={cn("flex flex-col items-center gap-1 transition-colors", activeTab === 'search-winner' ? "text-red-600" : "text-slate-400")}
-            >
-              <Search size={24} />
-              <span className="text-[10px] font-bold">Search</span>
-            </button>
-            <button 
-              onClick={() => setActiveTab('general')}
-              className={cn("flex flex-col items-center gap-1 transition-colors", activeTab === 'general' ? "text-red-600" : "text-slate-400")}
-            >
-              <Monitor size={24} />
-              <span className="text-[10px] font-bold">Live</span>
-            </button>
-          </>
-        )}
-        {user?.role === 'viewer' && (
-          <>
-            <button 
-              onClick={() => setActiveTab('general')}
-              className={cn("flex flex-col items-center gap-1 transition-colors", activeTab === 'general' ? "text-red-600" : "text-slate-400")}
-            >
-              <Monitor size={24} />
-              <span className="text-[10px] font-bold">Onsite</span>
-            </button>
-            <button 
-              onClick={() => setActiveTab('standby')}
-              className={cn("flex flex-col items-center gap-1 transition-colors", activeTab === 'standby' ? "text-red-600" : "text-slate-400")}
-            >
-              <LayoutDashboard size={24} />
-              <span className="text-[10px] font-bold">Standby</span>
-            </button>
-            <button 
-              onClick={() => setActiveTab('site_view')}
-              className={cn("flex flex-col items-center gap-1 transition-colors", activeTab === 'site_view' ? "text-red-600" : "text-slate-400")}
-            >
-              <LayoutDashboard size={24} />
-              <span className="text-[10px] font-bold">Site</span>
-            </button>
-            <button 
-              onClick={() => setActiveTab('points')}
-              className={cn("flex flex-col items-center gap-1 transition-colors", activeTab === 'points' ? "text-red-600" : "text-slate-400")}
-            >
-              <LayoutDashboard size={24} />
-              <span className="text-[10px] font-bold">Points</span>
-            </button>
-          </>
+              <div className="hidden sm:block text-left">
+                <p className="text-xs font-black text-slate-900 leading-tight">
+                  Ring {getRingName(Number(user?.assignedRing) || 1)}
+                </p>
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Controller</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Operator Nav Controls */}
+            <div className="flex items-center justify-around flex-1 gap-1 sm:gap-2">
+              <button 
+                onClick={() => {
+                  setActiveTab('mats');
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+                className={cn(
+                  "flex flex-col sm:flex-row items-center gap-1 sm:gap-2 px-3 py-1.5 rounded-xl transition-all font-bold text-xs min-h-[44px] justify-center",
+                  activeTab === 'mats' 
+                    ? "bg-red-50 text-red-600 shadow-sm" 
+                    : "text-slate-500 hover:text-slate-900 hover:bg-slate-50"
+                )}
+              >
+                <div className="relative flex items-center justify-center">
+                  <LayoutDashboard size={20} />
+                  <span className="absolute -top-2 -right-2 bg-red-600 text-white text-[9px] font-black px-1.5 py-0.2 rounded-full shadow-sm">
+                    {rings.find(r => r.ringNumber === Number(user?.assignedRing))?.totalBouts || 0}
+                  </span>
+                </div>
+                <span className="text-[10px] sm:text-xs">Ring Control</span>
+              </button>
+
+              <button 
+                onClick={() => {
+                  setActiveTab('mats');
+                  const el = document.getElementById('operator-upcoming-bouts');
+                  if (el) {
+                    el.scrollIntoView({ behavior: 'smooth' });
+                  }
+                }}
+                className="flex flex-col sm:flex-row items-center gap-1 sm:gap-2 px-3 py-1.5 rounded-xl transition-all font-bold text-xs min-h-[44px] justify-center text-slate-500 hover:text-slate-900 hover:bg-slate-50"
+                title="Upcoming Bouts Queue"
+              >
+                <Layers size={20} />
+                <span className="text-[10px] sm:text-xs">Queue</span>
+              </button>
+
+              <button 
+                onClick={() => setActiveTab('search-winner')}
+                className={cn(
+                  "flex flex-col sm:flex-row items-center gap-1 sm:gap-2 px-3 py-1.5 rounded-xl transition-all font-bold text-xs min-h-[44px] justify-center",
+                  activeTab === 'search-winner' 
+                    ? "bg-red-50 text-red-600 shadow-sm" 
+                    : "text-slate-500 hover:text-slate-900 hover:bg-slate-50"
+                )}
+              >
+                <Search size={20} />
+                <span className="text-[10px] sm:text-xs">Search</span>
+              </button>
+
+              <button 
+                onClick={() => setActiveTab('general')}
+                className={cn(
+                  "flex flex-col sm:flex-row items-center gap-1 sm:gap-2 px-3 py-1.5 rounded-xl transition-all font-bold text-xs min-h-[44px] justify-center",
+                  activeTab === 'general' 
+                    ? "bg-red-50 text-red-600 shadow-sm" 
+                    : "text-slate-500 hover:text-slate-900 hover:bg-slate-50"
+                )}
+              >
+                <Monitor size={20} />
+                <span className="text-[10px] sm:text-xs">Live Display</span>
+              </button>
+            </div>
+
+            {/* Operator Logout */}
+            <div className="flex items-center gap-1 pl-2 border-l border-slate-200">
+              <button 
+                onClick={handleLogout}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-slate-500 hover:text-red-600 hover:bg-red-50 transition-colors font-bold text-xs min-h-[44px]"
+                title="Logout"
+              >
+                <LogOut size={18} />
+                <span className="hidden sm:inline text-[11px]">Logout</span>
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="px-6 py-3 flex items-center justify-between">
+            {user?.role === 'admin' && (
+              <>
+                <button 
+                  onClick={() => setActiveTab('dashboard')}
+                  className={cn("flex flex-col items-center gap-1 transition-colors", activeTab === 'dashboard' ? "text-red-600" : "text-slate-400")}
+                >
+                  <LayoutDashboard size={20} />
+                  <span className="text-[10px] font-bold">Home</span>
+                </button>
+                <button 
+                  onClick={() => setActiveTab('mats')}
+                  className={cn("flex flex-col items-center gap-1 transition-colors", activeTab === 'mats' ? "text-red-600" : "text-slate-400")}
+                >
+                  <Monitor size={20} />
+                  <span className="text-[10px] font-bold">Rings</span>
+                </button>
+
+                <button 
+                  onClick={() => setActiveTab('ai-setup')}
+                  className={cn("flex flex-col items-center gap-1 transition-colors", activeTab === 'ai-setup' ? "text-red-600" : "text-slate-400")}
+                >
+                  <RefreshCw size={20} />
+                  <span className="text-[10px] font-bold">AI Setup</span>
+                </button>
+                <button 
+                  onClick={() => setActiveTab('search-winner')}
+                  className={cn("flex flex-col items-center gap-1 transition-colors", activeTab === 'search-winner' ? "text-red-600" : "text-slate-400")}
+                >
+                  <Search size={20} />
+                  <span className="text-[10px] font-bold">Search</span>
+                </button>
+                <button 
+                  onClick={() => setActiveTab('settings')}
+                  className={cn("flex flex-col items-center gap-1 transition-colors", activeTab === 'settings' ? "text-red-600" : "text-slate-400")}
+                >
+                  <Settings size={20} />
+                  <span className="text-[10px] font-bold">System</span>
+                </button>
+              </>
+            )}
+            {user?.role === 'viewer' && (
+              <>
+                <button 
+                  onClick={() => setActiveTab('general')}
+                  className={cn("flex flex-col items-center gap-1 transition-colors", activeTab === 'general' ? "text-red-600" : "text-slate-400")}
+                >
+                  <Monitor size={24} />
+                  <span className="text-[10px] font-bold">Onsite</span>
+                </button>
+                <button 
+                  onClick={() => setActiveTab('standby')}
+                  className={cn("flex flex-col items-center gap-1 transition-colors", activeTab === 'standby' ? "text-red-600" : "text-slate-400")}
+                >
+                  <LayoutDashboard size={24} />
+                  <span className="text-[10px] font-bold">Standby</span>
+                </button>
+                <button 
+                  onClick={() => setActiveTab('site_view')}
+                  className={cn("flex flex-col items-center gap-1 transition-colors", activeTab === 'site_view' ? "text-red-600" : "text-slate-400")}
+                >
+                  <LayoutDashboard size={24} />
+                  <span className="text-[10px] font-bold">Site</span>
+                </button>
+                <button 
+                  onClick={() => setActiveTab('points')}
+                  className={cn("flex flex-col items-center gap-1 transition-colors", activeTab === 'points' ? "text-red-600" : "text-slate-400")}
+                >
+                  <LayoutDashboard size={24} />
+                  <span className="text-[10px] font-bold">Points</span>
+                </button>
+              </>
+            )}
+            {user?.role === 'ta' && (
+              <>
+                <button 
+                  onClick={() => setActiveTab('inspection-logs')}
+                  className={cn("flex flex-col items-center gap-1 transition-colors", activeTab === 'inspection-logs' ? "text-red-600" : "text-slate-400")}
+                >
+                  <ClipboardCheck size={24} />
+                  <span className="text-[10px] font-bold">Logs</span>
+                </button>
+                <button 
+                  onClick={() => setActiveTab('search-winner')}
+                  className={cn("flex flex-col items-center gap-1 transition-colors", activeTab === 'search-winner' ? "text-red-600" : "text-slate-400")}
+                >
+                  <Search size={24} />
+                  <span className="text-[10px] font-bold">Search</span>
+                </button>
+              </>
+            )}
+            {user?.role === 'report' && (
+              <button 
+                onClick={() => setActiveTab('report')}
+                className={cn("flex flex-col items-center gap-1 transition-colors", activeTab === 'report' ? "text-red-600" : "text-slate-400")}
+              >
+                <Trophy size={24} />
+                <span className="text-[10px] font-bold">Report</span>
+              </button>
+            )}
+          </div>
         )}
       </nav>
 
@@ -8393,15 +8531,15 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
   const isRedWinDisabled = selectedWinType === 'PTF' ? !isRedMatchWinner : false;
 
   return (
-    <div className="relative bg-white border border-slate-200 rounded-[2.5rem] overflow-hidden shadow-sm hover:border-red-200 transition-colors">
-      <div className="p-5 bg-slate-900 flex items-center justify-between text-white border-b border-white/5">
-        <div className="flex items-center gap-4">
-          <div className="w-10 h-10 bg-red-600 rounded-xl flex items-center justify-center font-black text-lg shadow-lg shadow-red-900/40">
+    <div className="relative bg-white border border-slate-200 rounded-2xl sm:rounded-[2.5rem] overflow-hidden shadow-sm hover:border-red-200 transition-colors">
+      <div className="px-3 py-2 sm:px-5 sm:py-3.5 bg-slate-900 flex items-center justify-between text-white border-b border-white/5">
+        <div className="flex items-center gap-2.5 sm:gap-4 min-w-0">
+          <div className="w-8 h-8 sm:w-10 sm:h-10 bg-red-600 rounded-lg sm:rounded-xl flex items-center justify-center font-black text-sm sm:text-lg shadow-md shrink-0">
             {ringName}
           </div>
-          <div>
-            <div className="flex items-center gap-2 mt-1">
-              <span className="font-bold text-sm uppercase tracking-wider block leading-none">Ring {ringName}</span>
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <span className="font-bold text-xs sm:text-sm uppercase tracking-wider block leading-none truncate">Ring {ringName}</span>
               {current && (() => {
                 const isTransferred = (() => {
                   if (!current?.bout) return false;
@@ -8416,14 +8554,14 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
                 })();
                 const formBout = formatBoutNumber(ring.ringNumber, current.bout, boutNumberingMode);
                 return (
-                  <span className="text-[26px] font-black text-slate-300 uppercase tracking-widest border border-slate-700 bg-slate-800 rounded-lg px-3 py-1 leading-none">
+                  <span className="text-sm sm:text-2xl font-black text-slate-300 uppercase tracking-wider border border-slate-700 bg-slate-800 rounded-md sm:rounded-lg px-2 sm:px-3 py-0.5 sm:py-1 leading-none shrink-0">
                     {formBout}
                     {!isTransferred && ring.totalBouts ? ` / ${formatBoutNumber(ring.ringNumber, ring.totalBouts, boutNumberingMode)}` : ''}
                   </span>
                 );
               })()}
             </div>
-            <div className="flex items-center gap-2 mt-1.5">
+            <div className="flex items-center gap-2 mt-1">
               {ring.totalBouts && (
                 <span className="flex items-center gap-1">
                   {onUpdateTotalBouts && (
@@ -8456,18 +8594,18 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           {current && onReturnToQueue && (
             <button
               onClick={(e) => {
                 e.stopPropagation();
                 onReturnToQueue();
               }}
-              className="px-2.5 py-1 bg-amber-500/25 border border-amber-500/35 text-amber-400 hover:bg-amber-500/35 rounded text-[10px] font-black uppercase tracking-widest transition-all duration-200 flex items-center gap-1.5 active:scale-95 cursor-pointer shadow-sm text-center"
+              className="px-2 py-1 bg-amber-500/25 border border-amber-500/35 text-amber-400 hover:bg-amber-500/35 rounded text-[9px] sm:text-[10px] font-black uppercase tracking-wider transition-all duration-200 flex items-center gap-1 active:scale-95 cursor-pointer shadow-sm text-center"
               title="Return current active bout back to the upcoming bout standby queue"
             >
-              <RotateCcw size={11} strokeWidth={3} />
-              Return to Queue
+              <RotateCcw size={10} strokeWidth={3} />
+              <span className="hidden xs:inline">Return</span>
             </button>
           )}
           {current && onSuspendCurrentBout && (
@@ -8476,17 +8614,17 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
                 e.stopPropagation();
                 onSuspendCurrentBout();
               }}
-              className="px-2.5 py-1 bg-yellow-500/25 border border-yellow-500/35 text-yellow-500 hover:bg-yellow-500/35 rounded text-[10px] font-black uppercase tracking-widest transition-all duration-200 flex items-center gap-1.5 active:scale-95 cursor-pointer shadow-sm text-center"
+              className="px-2 py-1 bg-yellow-500/25 border border-yellow-500/35 text-yellow-500 hover:bg-yellow-500/35 rounded text-[9px] sm:text-[10px] font-black uppercase tracking-wider transition-all duration-200 flex items-center gap-1 active:scale-95 cursor-pointer shadow-sm text-center"
               title="Pause and suspend this match into the suspended list"
             >
-              <Pause size={11} strokeWidth={3} />
-              Suspend
+              <Pause size={10} strokeWidth={3} />
+              <span className="hidden xs:inline">Suspend</span>
             </button>
           )}
           {onToggleAutoPull && (
             <button
               onClick={onToggleAutoPull}
-              className={`px-2 py-1 rounded text-[10px] font-black uppercase tracking-widest transition-colors ${isAutoPull ? 'bg-green-500/20 text-green-400' : 'bg-slate-800 text-slate-400'}`}
+              className={`px-2 py-1 rounded text-[9px] sm:text-[10px] font-black uppercase tracking-wider transition-colors ${isAutoPull ? 'bg-green-500/20 text-green-400' : 'bg-slate-800 text-slate-400'}`}
               title={isAutoPull ? "Auto-pull is ON" : "Auto-pull is OFF"}
             >
               {isAutoPull ? "Auto" : "Manual"}
@@ -8512,10 +8650,10 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
               ) : (
                 <button 
                   onClick={() => setIsConfirmingDelete(true)}
-                  className="p-1.5 hover:bg-red-500/20 text-slate-400 hover:text-red-500 rounded transition-colors mr-1"
+                  className="p-1 hover:bg-red-500/20 text-slate-400 hover:text-red-500 rounded transition-colors mr-1"
                   title="Delete Ring"
                 >
-                  <Trash2 size={16} />
+                  <Trash2 size={14} />
                 </button>
               )}
             </div>
@@ -8523,9 +8661,9 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
           {!current && (
             <button 
               onClick={onStart}
-              className="px-3 py-1 bg-green-600 hover:bg-green-700 rounded text-[10px] font-bold uppercase transition-colors"
+              className="px-2.5 py-1 bg-green-600 hover:bg-green-700 rounded text-[9px] sm:text-[10px] font-bold uppercase transition-colors"
             >
-              Start Ring
+              Start
             </button>
           )}
         </div>
@@ -8534,10 +8672,10 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
       {activeTransfersForRing.map(t => (
         <div 
           key={t.id} 
-          className="bg-yellow-500 text-slate-950 px-5 py-3 flex items-center justify-between gap-3 font-bold text-xs uppercase border-b border-yellow-400"
+          className="bg-yellow-500 text-slate-950 px-4 py-2 flex items-center justify-between gap-2 font-bold text-xs uppercase border-b border-yellow-400"
         >
-          <span className="flex items-center gap-2">
-            <Bell size={14} className="shrink-0 text-slate-950 animate-bounce" />
+          <span className="flex items-center gap-1.5">
+            <Bell size={13} className="shrink-0 text-slate-950 animate-bounce" />
             <span>Bout Transfer Notice: Ring {t.fromRing} ➡️ Ring {t.toRing} - Bout {t.boutNumber}</span>
           </span>
         </div>
@@ -8553,30 +8691,30 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
         </div>
       )}
       
-      <div className="p-8 space-y-8 pt-0 mt-8">
+      <div className="p-3 sm:p-5 md:p-8 space-y-2.5 sm:space-y-4 md:space-y-6 pt-0 mt-2 sm:mt-3">
         {current ? (
           <>
-            <div className="space-y-6">
-              <div className="flex items-start justify-between pb-2">
-                <div className="flex flex-col gap-1.5">
-                  <div className="flex items-center gap-2">
-                    <Shield size={18} className={current.privacy_mode ? "text-red-500" : "text-green-500"} />
-                    <span className="text-[16px] font-bold text-slate-500 uppercase">{cleanPlaceholder(current.category)}</span>
+            <div className="space-y-2 sm:space-y-3">
+              <div className="flex items-start justify-between pb-1 sm:pb-2">
+                <div className="flex flex-col gap-1 min-w-0 pr-2">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <Shield size={16} className={cn("shrink-0", current.privacy_mode ? "text-red-500" : "text-green-500")} />
+                    <span className="text-xs sm:text-sm md:text-[15px] font-bold text-slate-600 uppercase leading-snug line-clamp-2">{cleanPlaceholder(current.category)}</span>
                   </div>
                   {current.privacy_mode && (
-                    <span className="text-[10px] font-bold text-red-600 bg-red-50 px-2 py-0.5 rounded w-fit inline-block">PDPA ACTIVE</span>
+                    <span className="text-[9px] font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded w-fit inline-block">PDPA ACTIVE</span>
                   )}
                 </div>
-                <span className="text-[10px] font-bold text-red-600 bg-red-50 border border-red-100 px-2 py-0.5 rounded uppercase flex items-center gap-1.5 shadow-sm">
+                <span className="text-[9px] sm:text-[10px] font-bold text-red-600 bg-red-50 border border-red-100 px-2 py-0.5 rounded uppercase flex items-center gap-1.5 shadow-sm shrink-0">
                   Live <div className="w-1.5 h-1.5 bg-red-600 rounded-full animate-pulse" />
                 </span>
               </div>
               
-              <div className="flex items-start gap-4">
+              <div className="flex items-start gap-2.5 sm:gap-4">
                 <FighterSide color="blue" name={cleanPlaceholder(current.blue_name)} club={cleanPlaceholder(current.blue_club)} privacy={current.privacy_mode} inspected={current.blue_inspected} activeNameFontScale={effectiveNameScale} activeClubFontScale={effectiveClubScale} />
                 {!isPoomsaeMode && (
                   <>
-                    <div className="text-xs font-black text-slate-300 italic mt-6">VS</div>
+                    <div className="text-[10px] sm:text-xs font-black text-slate-300 italic mt-4 sm:mt-6 shrink-0">VS</div>
                     <FighterSide color="red" name={cleanPlaceholder(current.red_name)} club={cleanPlaceholder(current.red_club)} privacy={current.privacy_mode} inspected={current.red_inspected} activeNameFontScale={effectiveNameScale} activeClubFontScale={effectiveClubScale} />
                   </>
                 )}
@@ -8966,40 +9104,48 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
                           </div>
                         </div>
                         {!isPoomsaeMode && (
-                          <div className="mt-4 mb-4 p-3 bg-slate-50 border border-slate-200 rounded-xl">
-                            <p className="text-center text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2.5">Select Win Method</p>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <div className="mt-2 mb-2 p-1.5 sm:p-2 bg-slate-50 border border-slate-200 rounded-xl">
+                            <div className="flex items-center justify-between mb-1 px-1">
+                              <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Win Method</span>
+                              <span className="text-[9px] font-bold text-slate-700 bg-slate-200/80 px-1.5 py-0.5 rounded">
+                                {selectedWinType === 'PTF' ? 'PTF (Final Score)' :
+                                 selectedWinType === 'RSC' ? 'RSC (Referee Stop)' :
+                                 selectedWinType === 'WDR' ? 'WDR (Withdrawal)' :
+                                 selectedWinType === 'DSQ' ? 'DSQ (Disqualify)' : 'DQB (Unsportsmanlike)'}
+                              </span>
+                            </div>
+                            <div className="grid grid-cols-5 gap-1">
                               {[
-                                { code: 'PTF', label: 'Win by Final Score (PTF)' },
-                                { code: 'RSC', label: 'Win by Referee Stops Contest (RSC)' },
-                                { code: 'WDR', label: 'Win by Withdrawal (WDR)' },
-                                { code: 'DSQ', label: 'Win by Disqualification (DSQ)' },
-                                { code: 'DQB', label: 'Win by Disqualification for unsportsmanlike behavior (DQB)' }
+                                { code: 'PTF', short: 'PTF', label: 'Win by Final Score (PTF)' },
+                                { code: 'RSC', short: 'RSC', label: 'Win by Referee Stops Contest (RSC)' },
+                                { code: 'WDR', short: 'WDR', label: 'Win by Withdrawal (WDR)' },
+                                { code: 'DSQ', short: 'DSQ', label: 'Win by Disqualification (DSQ)' },
+                                { code: 'DQB', short: 'DQB', label: 'Win by Disqualification for unsportsmanlike behavior (DQB)' }
                               ].map((item) => (
                                 <button
                                   key={item.code}
                                   type="button"
                                   onClick={() => setSelectedWinType(item.code)}
                                   className={cn(
-                                    "py-2 px-2.5 font-bold rounded-lg transition-all text-left flex items-center justify-between border text-[11px] leading-tight",
+                                    "py-1.5 px-0.5 font-bold rounded-lg transition-all text-center border text-[10px] sm:text-xs leading-none flex items-center justify-center min-h-[34px]",
                                     selectedWinType === item.code
-                                      ? "bg-slate-900 border-slate-900 text-white shadow-sm"
-                                      : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
+                                      ? "bg-slate-900 border-slate-900 text-white shadow-sm font-black ring-1 ring-slate-400/40"
+                                      : "bg-white border-slate-200 text-slate-700 hover:bg-slate-100"
                                   )}
+                                  title={item.label}
                                 >
-                                  <span>{item.label}</span>
-                                  {selectedWinType === item.code && <span className="w-1.5 h-1.5 rounded-full bg-lime-500 shrink-0 ml-1" />}
+                                  <span>{item.short}</span>
                                 </button>
                               ))}
                             </div>
                           </div>
                         )}
-                        <div className="flex gap-4">
+                        <div className="flex gap-2.5 sm:gap-4">
                           <button 
                             onClick={() => onWinnerSelect('Blue', selectedWinType)}
                             disabled={isBlueWinDisabled}
                             className={cn(
-                              "flex-[1] py-3 bg-[#00a2e8] text-white rounded-xl font-black text-sm uppercase transition-all shadow-md px-2 break-words text-center",
+                              "flex-[1] min-h-[44px] sm:min-h-[48px] py-2 bg-[#00a2e8] text-white rounded-xl font-black text-xs sm:text-sm uppercase transition-all shadow-md px-2 break-words text-center flex items-center justify-center",
                               isBlueWinDisabled 
                                 ? "opacity-30 cursor-not-allowed pointer-events-none" 
                                 : "hover:shadow-[#00a2e8]/20 hover:shadow-lg active:scale-95"
@@ -9011,7 +9157,7 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
                             onClick={() => onWinnerSelect('Red', selectedWinType)}
                             disabled={isRedWinDisabled}
                             className={cn(
-                              "flex-[1] py-3 bg-[#ed1c24] text-white rounded-xl font-black text-sm uppercase transition-all shadow-md px-2 break-words text-center",
+                              "flex-[1] min-h-[44px] sm:min-h-[48px] py-2 bg-[#ed1c24] text-white rounded-xl font-black text-xs sm:text-sm uppercase transition-all shadow-md px-2 break-words text-center flex items-center justify-center",
                               isRedWinDisabled 
                                 ? "opacity-30 cursor-not-allowed pointer-events-none" 
                                 : "hover:shadow-[#ed1c24]/20 hover:shadow-lg active:scale-95"
@@ -9023,46 +9169,59 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
                       </>
                     ) : (
                       <>
-                        <p className="text-center text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Select Winner</p>
+                        <div className="flex items-center justify-between mb-1 sm:mb-1.5">
+                          <p className="text-[9px] sm:text-[10px] font-black text-slate-400 uppercase tracking-widest">Select Winner</p>
+                          <span className="text-[9px] font-bold text-slate-500 uppercase">
+                            Method: <strong className="text-slate-800">{selectedWinType}</strong>
+                          </span>
+                        </div>
                         {!isPoomsaeMode && (
-                          <div className="mt-2 mb-4 p-3 bg-slate-50 border border-slate-200 rounded-xl">
-                            <p className="text-center text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2.5">Select Win Method</p>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <div className="mt-1 mb-2 sm:mb-2.5 p-1.5 sm:p-2 bg-slate-50 border border-slate-200 rounded-xl">
+                            <div className="flex items-center justify-between mb-1 px-1">
+                              <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Win Method</span>
+                              <span className="text-[9px] font-bold text-slate-700 bg-slate-200/80 px-1.5 py-0.5 rounded">
+                                {selectedWinType === 'PTF' ? 'PTF (Final Score)' :
+                                 selectedWinType === 'RSC' ? 'RSC (Referee Stop)' :
+                                 selectedWinType === 'WDR' ? 'WDR (Withdrawal)' :
+                                 selectedWinType === 'DSQ' ? 'DSQ (Disqualify)' : 'DQB (Unsportsmanlike)'}
+                              </span>
+                            </div>
+                            <div className="grid grid-cols-5 gap-1">
                               {[
-                                { code: 'PTF', label: 'Win by Final Score (PTF)' },
-                                { code: 'RSC', label: 'Win by Referee Stops Contest (RSC)' },
-                                { code: 'WDR', label: 'Win by Withdrawal (WDR)' },
-                                { code: 'DSQ', label: 'Win by Disqualification (DSQ)' },
-                                { code: 'DQB', label: 'Win by Disqualification for unsportsmanlike behavior (DQB)' }
+                                { code: 'PTF', short: 'PTF', label: 'Win by Final Score (PTF)' },
+                                { code: 'RSC', short: 'RSC', label: 'Win by Referee Stops Contest (RSC)' },
+                                { code: 'WDR', short: 'WDR', label: 'Win by Withdrawal (WDR)' },
+                                { code: 'DSQ', short: 'DSQ', label: 'Win by Disqualification (DSQ)' },
+                                { code: 'DQB', short: 'Win by Disqualification for unsportsmanlike behavior (DQB)' }
                               ].map((item) => (
                                 <button
                                   key={item.code}
                                   type="button"
                                   onClick={() => setSelectedWinType(item.code)}
                                   className={cn(
-                                    "py-2 px-2.5 font-bold rounded-lg transition-all text-left flex items-center justify-between border text-[11px] leading-tight",
+                                    "py-1.5 px-0.5 font-bold rounded-lg transition-all text-center border text-[10px] sm:text-xs leading-none flex items-center justify-center min-h-[34px]",
                                     selectedWinType === item.code
-                                      ? "bg-slate-900 border-slate-900 text-white shadow-sm"
-                                      : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
+                                      ? "bg-slate-900 border-slate-900 text-white shadow-sm font-black ring-1 ring-slate-400/40"
+                                      : "bg-white border-slate-200 text-slate-700 hover:bg-slate-100"
                                   )}
+                                  title={item.label}
                                 >
-                                  <span>{item.label}</span>
-                                  {selectedWinType === item.code && <span className="w-1.5 h-1.5 rounded-full bg-lime-500 shrink-0 ml-1" />}
+                                  <span>{item.short}</span>
                                 </button>
                               ))}
                             </div>
                           </div>
                         )}
-                        <div className="flex gap-4 mb-4">
+                        <div className="flex gap-2 sm:gap-4 mb-1 sm:mb-2">
                           <button 
                             onClick={() => onWinnerSelect('Blue', selectedWinType)}
-                            className="flex-[1.2] min-h-[4.5rem] sm:min-h-[6rem] py-3 sm:py-4 bg-blue-50 text-[#00a2e8] hover:bg-[#00a2e8] hover:text-white rounded-[1.5rem] font-black text-sm sm:text-lg md:text-[20px] uppercase transition-all border-2 border-blue-200 hover:border-[#00a2e8] active:scale-95 px-2 sm:px-4 break-words whitespace-normal flex items-center justify-center text-center leading-tight shadow-sm hover:shadow-xl hover:shadow-blue-200/50"
+                            className="flex-[1.2] min-h-[46px] sm:min-h-[56px] py-2 sm:py-3 bg-blue-50 text-[#00a2e8] hover:bg-[#00a2e8] hover:text-white rounded-xl sm:rounded-2xl font-black text-xs sm:text-base md:text-[18px] uppercase transition-all border-2 border-blue-200 hover:border-[#00a2e8] active:scale-95 px-2 sm:px-4 break-words whitespace-normal flex items-center justify-center text-center leading-tight shadow-sm hover:shadow-xl hover:shadow-blue-200/50"
                           >
                             <span>{cleanPlaceholder(current.blue_name) || 'Blue'} Wins</span>
                           </button>
                           <button 
                             onClick={() => onWinnerSelect('Red', selectedWinType)}
-                            className="flex-[1.2] min-h-[4.5rem] sm:min-h-[6rem] py-3 sm:py-4 bg-red-50 text-[#ed1c24] hover:bg-[#ed1c24] hover:text-white rounded-[1.5rem] font-black text-sm sm:text-lg md:text-[20px] uppercase transition-all border-2 border-red-200 hover:border-[#ed1c24] active:scale-95 px-2 sm:px-4 break-words whitespace-normal flex items-center justify-center text-center leading-tight shadow-sm hover:shadow-xl hover:shadow-red-200/50"
+                            className="flex-[1.2] min-h-[46px] sm:min-h-[56px] py-2 sm:py-3 bg-red-50 text-[#ed1c24] hover:bg-[#ed1c24] hover:text-white rounded-xl sm:rounded-2xl font-black text-xs sm:text-base md:text-[18px] uppercase transition-all border-2 border-red-200 hover:border-[#ed1c24] active:scale-95 px-2 sm:px-4 break-words whitespace-normal flex items-center justify-center text-center leading-tight shadow-sm hover:shadow-xl hover:shadow-red-200/50"
                           >
                             <span>{cleanPlaceholder(current.red_name) || 'Red'} Wins</span>
                           </button>
@@ -9269,34 +9428,34 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
 function FighterSide({ color, name, club, privacy, inspected, activeNameFontScale = 100, activeClubFontScale = 100 }: { color: 'blue' | 'red', name: string, club: string, privacy: boolean, inspected?: boolean, activeNameFontScale?: number, activeClubFontScale?: number }) {
   const getDynamicFontSize = (name: string) => {
     const len = name.length;
-    if (len <= 15) return 18;
-    if (len <= 25) return 16;
-    if (len <= 35) return 14;
+    if (len <= 15) return 17;
+    if (len <= 25) return 15;
+    if (len <= 35) return 13;
     return 12;
   };
   const baseSize = getDynamicFontSize(privacy ? "---" : cleanPlaceholder(name));
 
   return (
-    <div className="flex-1 space-y-1">
+    <div className="flex-1 space-y-0.5 sm:space-y-1 min-w-0">
       <div className={cn(
-        "flex items-center justify-between text-[11px] font-black uppercase tracking-widest mb-1",
+        "flex items-center justify-between text-[10px] sm:text-[11px] font-black uppercase tracking-wider mb-0.5 sm:mb-1",
         inspected 
           ? (color === 'blue' ? "text-[#00a2e8]" : "text-[#ed1c24]")
           : "text-slate-400"
       )}>
-        <span className="flex items-center gap-1">
-          INSPECTION {inspected ? <Check size={12} strokeWidth={4} /> : <X size={12} strokeWidth={4} />}
+        <span className="flex items-center gap-1 truncate">
+          INSPECTION {inspected ? <Check size={11} strokeWidth={4} /> : <X size={11} strokeWidth={4} />}
         </span>
       </div>
       <div className={cn(
-        "h-1 w-full rounded-full mb-2",
+        "h-1 w-full rounded-full mb-1 sm:mb-1.5",
         color === 'blue' ? "bg-[#00a2e8]" : "bg-[#ed1c24]"
       )} />
-      <div className="flex items-start gap-2.5">
-        <PlayerLogoBadge club={club} name={name} size="md" className="shrink-0 mt-0.5" />
+      <div className="flex items-start gap-1.5 sm:gap-2.5">
+        <PlayerLogoBadge club={club} name={name} size="sm" className="shrink-0 mt-0.5 sm:w-10 sm:h-10" />
         <div className="min-w-0 flex-1">
           <p 
-            className="font-black text-slate-800 leading-tight line-clamp-3 whitespace-normal break-words"
+            className="font-black text-slate-800 leading-tight line-clamp-2 sm:line-clamp-3 whitespace-normal break-words"
             style={{
               fontSize: `${baseSize * (activeNameFontScale / 100)}px`,
               lineHeight: 1.15
@@ -9306,11 +9465,11 @@ function FighterSide({ color, name, club, privacy, inspected, activeNameFontScal
           </p>
           <p 
             className={cn(
-              "font-bold uppercase",
+              "font-bold uppercase truncate sm:whitespace-normal",
               color === 'blue' ? "text-[#00a2e8]" : "text-[#ed1c24]"
             )}
             style={{
-              fontSize: `${15 * (activeClubFontScale / 100)}px`,
+              fontSize: `${Math.min(14, 15 * (activeClubFontScale / 100))}px`,
               lineHeight: 1.15
             }}
           >
