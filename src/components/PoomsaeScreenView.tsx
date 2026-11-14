@@ -17,6 +17,7 @@ interface PoomsaeScreenViewProps {
   onBack?: () => void;
   canSwitchRing?: boolean;
   isStandalone?: boolean;
+  winnerDisplaySeconds?: number;
 }
 
 function cleanText(text?: string | null): string {
@@ -134,7 +135,8 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
   onSelectRing,
   onBack,
   canSwitchRing = false,
-  isStandalone = false
+  isStandalone = false,
+  winnerDisplaySeconds = 5
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -145,6 +147,14 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
   const hasMountedRef = useRef<boolean>(false);
   const prevRingRef = useRef<number>(ring.ringNumber);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const winnerDisplaySecondsRef = useRef<number>(winnerDisplaySeconds);
+
+  useEffect(() => {
+    winnerDisplaySecondsRef.current = winnerDisplaySeconds;
+  }, [winnerDisplaySeconds]);
+
+  const effectiveDisplayMs =
+    winnerDisplaySeconds <= 0 ? 0 : Math.max(1000, Number(winnerDisplaySeconds) * 1000);
 
   const ringName =
     namingMode === 'number'
@@ -152,6 +162,10 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
       : String.fromCharCode(64 + ring.ringNumber);
 
   const triggerWinnerPopup = (banner: RingWinnerBroadcast) => {
+    const durationSec = Number(winnerDisplaySecondsRef.current ?? 5);
+    if (durationSec <= 0) return;
+    const durationMs = Math.max(1000, durationSec * 1000);
+
     if (!banner || Number(banner.ringNumber) !== Number(ring.ringNumber)) return;
     if (banner.confirmedAt <= lastShownConfirmedAtRef.current) return;
 
@@ -167,7 +181,7 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
     timerRef.current = setTimeout(() => {
       setActiveWinner(null);
       setWinnerProgressStarted(false);
-    }, 5000);
+    }, durationMs);
   };
 
   // Trigger 5-second winner popup window whenever a winner confirmation arrives via Firestore prop
@@ -699,13 +713,13 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
                 </p>
               )}
 
-              {/* 5-Second Countdown Bar */}
+              {/* Configurable Countdown Bar */}
               <div className="absolute bottom-0 left-0 right-0 h-2 bg-black/25">
                 <div
                   className="h-full bg-white transition-all ease-linear"
                   style={{
                     width: winnerProgressStarted ? '0%' : '100%',
-                    transitionDuration: '5000ms'
+                    transitionDuration: `${effectiveDisplayMs || 5000}ms`
                   }}
                 />
               </div>

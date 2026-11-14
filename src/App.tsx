@@ -1600,6 +1600,7 @@ export default function App() {
   const [backupData, setBackupData] = useLocalState<Record<string, { mappings: BoutMapping[], matches: MatchData[] }>>('tkd_backup_data_v3', {});
   const [teamLogos, setTeamLogos] = useSyncedState<Record<string, string>>('tkd_team_logos', {});
   const [ringWinnerBanners, setRingWinnerBanners] = useSyncedState<Record<number, RingWinnerBroadcast>>('tkd_ring_winner_banners', {});
+  const [winnerDisplaySeconds, setWinnerDisplaySeconds] = useSyncedState<number>('tkd_winner_display_seconds', 5);
   const [confirmedWinnerPopup, setConfirmedWinnerPopup] = useState<RingWinnerBroadcast | null>(null);
   const [winnerPopupProgressStarted, setWinnerPopupProgressStarted] = useState(false);
   const [winnerPopupSecondsLeft, setWinnerPopupSecondsLeft] = useState(5);
@@ -1642,7 +1643,12 @@ export default function App() {
 
   useEffect(() => {
     if (!confirmedWinnerPopup) return;
-    setWinnerPopupSecondsLeft(5);
+    if (winnerDisplaySeconds <= 0) {
+      setConfirmedWinnerPopup(null);
+      return;
+    }
+    const durationSec = Math.max(1, Number(winnerDisplaySeconds) || 5);
+    setWinnerPopupSecondsLeft(durationSec);
     setWinnerPopupProgressStarted(false);
 
     const rafId = requestAnimationFrame(() => {
@@ -1656,14 +1662,14 @@ export default function App() {
     const closeTimer = setTimeout(() => {
       setConfirmedWinnerPopup(null);
       setWinnerPopupProgressStarted(false);
-    }, 5000);
+    }, durationSec * 1000);
 
     return () => {
       cancelAnimationFrame(rafId);
       clearInterval(tickInterval);
       clearTimeout(closeTimer);
     };
-  }, [confirmedWinnerPopup?.confirmedAt]);
+  }, [confirmedWinnerPopup?.confirmedAt, winnerDisplaySeconds]);
 
   const handleConfirmReboot = () => {
     localStorage.removeItem('tkd_disable_firebase');
@@ -3403,7 +3409,9 @@ export default function App() {
       } catch {
         // ignore BroadcastChannel errors
       }
-      setConfirmedWinnerPopup(winnerBroadcast);
+      if (winnerDisplaySeconds > 0) {
+        setConfirmedWinnerPopup(winnerBroadcast);
+      }
     }
 
     if (activeUrl) {
@@ -4724,6 +4732,7 @@ export default function App() {
         onBack={user ? () => setIsStandalonePoomsae(false) : undefined}
         canSwitchRing={true}
         isStandalone={true}
+        winnerDisplaySeconds={winnerDisplaySeconds}
       />
     );
   }
@@ -5492,10 +5501,7 @@ export default function App() {
                         onRemoveSuspended={(boutNum) => removeSuspendedBout(selectedRingObj.ringNumber, boutNum)}
                         onSuspendCurrentBout={() => suspendActiveBout(selectedRingObj.ringNumber)}
                         transfers={boutTransfers}
-                        onOpenPoomsaeScreen={() => {
-                          setPoomsaeScreenRing(selectedRingObj.ringNumber);
-                          setActiveTab('poomsae_screen');
-                        }}
+                        getStageForBout={getStageForBout}
                       />
                     </div>
                   </div>
@@ -5848,6 +5854,7 @@ export default function App() {
                 onSelectRing={setPoomsaeScreenRing}
                 onBack={() => setActiveTab(user?.role === 'viewer' ? 'general' : 'mats')}
                 canSwitchRing={user?.role === 'admin' || user?.role === 'viewer'}
+                winnerDisplaySeconds={winnerDisplaySeconds}
               />
             );
           })()}
@@ -5909,10 +5916,7 @@ export default function App() {
                       onRemoveSuspended={(boutNum) => removeSuspendedBout(ring.ringNumber, boutNum)}
                       onSuspendCurrentBout={() => suspendActiveBout(ring.ringNumber)}
                       transfers={boutTransfers}
-                      onOpenPoomsaeScreen={() => {
-                        setPoomsaeScreenRing(ring.ringNumber);
-                        setActiveTab('poomsae_screen');
-                      }}
+                      getStageForBout={getStageForBout}
                     />
                   ))
                 ) : (
@@ -5944,10 +5948,7 @@ export default function App() {
                           onRemoveSuspended={(boutNum) => removeSuspendedBout(ring.ringNumber, boutNum)}
                           onSuspendCurrentBout={() => suspendActiveBout(ring.ringNumber)}
                           transfers={boutTransfers}
-                          onOpenPoomsaeScreen={() => {
-                            setPoomsaeScreenRing(ring.ringNumber);
-                            setActiveTab('poomsae_screen');
-                          }}
+                          getStageForBout={getStageForBout}
                         />
                       ))}
                     </div>
@@ -6750,6 +6751,24 @@ export default function App() {
                         </button>
                       </div>
                     </div>
+                    <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-bold text-slate-700 font-sans">Winner Display Duration</p>
+                        <p className="text-[10px] text-slate-500 font-sans">Set how many seconds to show the winner pop-up window after confirming a match winner</p>
+                      </div>
+                      <select
+                        value={winnerDisplaySeconds}
+                        onChange={(e) => setWinnerDisplaySeconds(Number(e.target.value))}
+                        className="px-4 py-2 bg-white rounded-xl text-[10px] md:text-xs font-black text-slate-600 border border-slate-200 focus:ring-2 focus:ring-red-500 outline-none w-full sm:w-auto min-w-[200px] cursor-pointer"
+                      >
+                        <option value={0}>Off (Do Not Show)</option>
+                        {[2, 3, 4, 5, 6, 7, 8, 10, 12, 15, 20, 30].map((sec) => (
+                          <option key={sec} value={sec}>
+                            {sec} seconds
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                     <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 col-span-1 md:col-span-2">
                       <div>
                         <p className="text-sm font-bold text-slate-700">Big LED Screen Font Sizing</p>
@@ -7020,13 +7039,13 @@ export default function App() {
                 Auto-closing in {winnerPopupSecondsLeft}s
               </p>
 
-              {/* 5-Second Countdown Bar */}
+              {/* Configurable Countdown Bar */}
               <div className="absolute bottom-0 left-0 right-0 h-2 bg-black/30">
                 <div
                   className="h-full bg-white/95 transition-all ease-linear"
                   style={{
                     width: winnerPopupProgressStarted ? '0%' : '100%',
-                    transitionDuration: '5000ms'
+                    transitionDuration: `${Math.max(1, Number(winnerDisplaySeconds) || 5) * 1000}ms`
                   }}
                 />
               </div>
@@ -8095,6 +8114,7 @@ interface RingCardProps {
   activeNameFontScale?: number;
   activeClubFontScale?: number;
   onOpenPoomsaeScreen?: () => void;
+  getStageForBout?: (boutId: string | number, categoryName: string) => string;
 }
 
 interface EditResultModalProps {
@@ -8778,7 +8798,7 @@ function AddRingModal({ onClose, onAdd, existingRings, namingMode }: AddRingModa
   );
 }
 
-function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdate, onPointsUpdate, onUpdateTotalBouts, onStart, onDelete, onWinnerSelect, currentEventId, onForceSync, isAutoPull, onToggleAutoPull, user, boutNumberingMode = 'alphanumeric', layout = 'winner', showInspectionPopupSetting = true, onReturnToQueue, onResumeSuspended, onRemoveSuspended, onSuspendCurrentBout, transfers = [], activeNameFontScale, activeClubFontScale, onOpenPoomsaeScreen }: RingCardProps & { currentEventId?: string | null, onForceSync?: (data: MatchData) => void }) {
+function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdate, onPointsUpdate, onUpdateTotalBouts, onStart, onDelete, onWinnerSelect, currentEventId, onForceSync, isAutoPull, onToggleAutoPull, user, boutNumberingMode = 'alphanumeric', layout = 'winner', showInspectionPopupSetting = true, onReturnToQueue, onResumeSuspended, onRemoveSuspended, onSuspendCurrentBout, transfers = [], activeNameFontScale, activeClubFontScale, getStageForBout }: RingCardProps & { currentEventId?: string | null, onForceSync?: (data: MatchData) => void }) {
   const [syncedNameScale] = useSyncedState<number>('tkd_active_name_font_scale', 100);
   const [syncedClubScale] = useSyncedState<number>('tkd_active_club_font_scale', 100);
   const effectiveNameScale = activeNameFontScale ?? syncedNameScale;
@@ -9013,31 +9033,17 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
           </div>
         </div>
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 flex-wrap justify-end">
-          {onOpenPoomsaeScreen && (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onOpenPoomsaeScreen();
-              }}
-              className="px-2 py-1 bg-blue-500/25 border border-blue-400/40 text-blue-300 hover:bg-blue-500/40 hover:text-white rounded text-[9px] sm:text-[10px] font-black uppercase tracking-wider transition-all duration-200 flex items-center gap-1 active:scale-95 cursor-pointer shadow-sm"
-              title={`Open Poomsae Screen View for Ring ${ringName}`}
-            >
-              <Monitor size={10} strokeWidth={3} />
-              <span>Poomsae</span>
-            </button>
-          )}
           {current && onReturnToQueue && (
             <button
               onClick={(e) => {
                 e.stopPropagation();
                 onReturnToQueue();
               }}
-              className="px-2 py-1 bg-amber-500/25 border border-amber-500/35 text-amber-400 hover:bg-amber-500/35 rounded text-[9px] sm:text-[10px] font-black uppercase tracking-wider transition-all duration-200 flex items-center gap-1 active:scale-95 cursor-pointer shadow-sm text-center"
+              className="px-3.5 sm:px-4 py-1.5 min-w-[84px] sm:min-w-[96px] bg-amber-500/25 border border-amber-500/35 text-amber-400 hover:bg-amber-500/35 rounded text-[10px] font-black uppercase tracking-wider transition-all duration-200 flex items-center justify-center gap-1.5 active:scale-95 cursor-pointer shadow-sm text-center"
               title="Return current active bout back to the upcoming bout standby queue"
             >
-              <RotateCcw size={10} strokeWidth={3} />
-              <span className="hidden xs:inline">Return</span>
+              <RotateCcw size={12} strokeWidth={2.5} />
+              <span>Return</span>
             </button>
           )}
           {current && onSuspendCurrentBout && (
@@ -9046,11 +9052,11 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
                 e.stopPropagation();
                 onSuspendCurrentBout();
               }}
-              className="px-2 py-1 bg-yellow-500/25 border border-yellow-500/35 text-yellow-500 hover:bg-yellow-500/35 rounded text-[9px] sm:text-[10px] font-black uppercase tracking-wider transition-all duration-200 flex items-center gap-1 active:scale-95 cursor-pointer shadow-sm text-center"
+              className="px-3.5 sm:px-4 py-1.5 min-w-[88px] sm:min-w-[100px] bg-yellow-500/25 border border-yellow-500/35 text-yellow-500 hover:bg-yellow-500/35 rounded text-[10px] font-black uppercase tracking-wider transition-all duration-200 flex items-center justify-center gap-1.5 active:scale-95 cursor-pointer shadow-sm text-center"
               title="Pause and suspend this match into the suspended list"
             >
-              <Pause size={10} strokeWidth={3} />
-              <span className="hidden xs:inline">Suspend</span>
+              <Pause size={12} strokeWidth={2.5} />
+              <span>Suspend</span>
             </button>
           )}
           {onToggleAutoPull && (
@@ -9126,6 +9132,16 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
       <div className="p-3 sm:p-5 md:p-8 space-y-2.5 sm:space-y-4 md:space-y-6 pt-0 mt-2 sm:mt-3">
         {current ? (
           <>
+            {(() => {
+              const boutStage = getStageForBout ? getStageForBout(current.bout, current.category || '') : '';
+              return boutStage ? (
+                <div className="flex justify-center">
+                  <div className="px-5 py-1 bg-slate-900 text-amber-300 border border-slate-800 rounded-lg text-[11px] sm:text-xs font-black uppercase tracking-[0.2em] shadow-sm">
+                    {boutStage}
+                  </div>
+                </div>
+              ) : null;
+            })()}
             <div className="space-y-2 sm:space-y-3">
               <div className="flex items-start justify-between pb-1 sm:pb-2">
                 <div className="flex flex-col gap-1 min-w-0 pr-2">
