@@ -7,10 +7,14 @@ export interface AdminFontSizeControlsProps {
   setActiveNameFontScale: (scale: number | ((prev: number) => number)) => void;
   activeClubFontScale: number;
   setActiveClubFontScale: (scale: number | ((prev: number) => number)) => void;
+  activeBoutFontScale?: number;
+  setActiveBoutFontScale?: (scale: number | ((prev: number) => number)) => void;
   standbyNameFontScale?: number;
   setStandbyNameFontScale?: (scale: number | ((prev: number) => number)) => void;
   standbyClubFontScale?: number;
   setStandbyClubFontScale?: (scale: number | ((prev: number) => number)) => void;
+  standbyBoutFontScale?: number;
+  setStandbyBoutFontScale?: (scale: number | ((prev: number) => number)) => void;
   initialTarget?: 'active' | 'standby';
   dark?: boolean;
   className?: string;
@@ -21,10 +25,14 @@ export function AdminFontSizeControls({
   setActiveNameFontScale,
   activeClubFontScale,
   setActiveClubFontScale,
+  activeBoutFontScale: propActiveBoutFontScale,
+  setActiveBoutFontScale: propSetActiveBoutFontScale,
   standbyNameFontScale: propStandbyNameFontScale,
   setStandbyNameFontScale: propSetStandbyNameFontScale,
   standbyClubFontScale: propStandbyClubFontScale,
   setStandbyClubFontScale: propSetStandbyClubFontScale,
+  standbyBoutFontScale: propStandbyBoutFontScale,
+  setStandbyBoutFontScale: propSetStandbyBoutFontScale,
   initialTarget = 'active',
   dark = true,
   className
@@ -33,6 +41,10 @@ export function AdminFontSizeControls({
   const [showPresets, setShowPresets] = useState(false);
 
   // Fallback state if props are not explicitly provided
+  const [localActiveBoutScale, setLocalActiveBoutScale] = useState<number>(() => {
+    const saved = localStorage.getItem('tkd_active_bout_font_scale');
+    return saved ? parseInt(saved, 10) : 100;
+  });
   const [localStandbyNameScale, setLocalStandbyNameScale] = useState<number>(() => {
     const saved = localStorage.getItem('tkd_standby_name_font_scale');
     return saved ? parseInt(saved, 10) : 100;
@@ -40,6 +52,19 @@ export function AdminFontSizeControls({
   const [localStandbyClubScale, setLocalStandbyClubScale] = useState<number>(() => {
     const saved = localStorage.getItem('tkd_standby_club_font_scale');
     return saved ? parseInt(saved, 10) : 100;
+  });
+  const [localStandbyBoutScale, setLocalStandbyBoutScale] = useState<number>(() => {
+    const saved = localStorage.getItem('tkd_standby_bout_font_scale');
+    return saved ? parseInt(saved, 10) : 100;
+  });
+
+  const activeBoutScale = propActiveBoutFontScale ?? localActiveBoutScale;
+  const setActiveBoutScale = propSetActiveBoutFontScale ?? ((val: number | ((prev: number) => number)) => {
+    setLocalActiveBoutScale(prev => {
+      const next = typeof val === 'function' ? val(prev) : val;
+      localStorage.setItem('tkd_active_bout_font_scale', next.toString());
+      return next;
+    });
   });
 
   const standbyNameScale = propStandbyNameFontScale ?? localStandbyNameScale;
@@ -60,27 +85,38 @@ export function AdminFontSizeControls({
     });
   });
 
+  const standbyBoutScale = propStandbyBoutFontScale ?? localStandbyBoutScale;
+  const setStandbyBoutScale = propSetStandbyBoutFontScale ?? ((val: number | ((prev: number) => number)) => {
+    setLocalStandbyBoutScale(prev => {
+      const next = typeof val === 'function' ? val(prev) : val;
+      localStorage.setItem('tkd_standby_bout_font_scale', next.toString());
+      return next;
+    });
+  });
+
   const currentNameScale = target === 'active' ? activeNameFontScale : standbyNameScale;
   const currentSetNameScale = target === 'active' ? setActiveNameFontScale : setStandbyNameScale;
   const currentClubScale = target === 'active' ? activeClubFontScale : standbyClubScale;
   const currentSetClubScale = target === 'active' ? setActiveClubFontScale : setStandbyClubScale;
+  const currentBoutScale = target === 'active' ? activeBoutScale : standbyBoutScale;
+  const currentSetBoutScale = target === 'active' ? setActiveBoutScale : setStandbyBoutScale;
 
   const presets = [
-    { label: 'Default (100%)', nameScale: 100, clubScale: 100 },
-    { label: 'Medium LED (+20%)', nameScale: 120, clubScale: 120 },
-    { label: 'Large LED (+40%)', nameScale: 140, clubScale: 140 },
-    { label: 'Extra Large LED (+60%)', nameScale: 160, clubScale: 150 },
-    { label: 'Huge LED (+80%)', nameScale: 180, clubScale: 160 },
-    { label: 'Maximum (+100%)', nameScale: 200, clubScale: 180 },
+    { label: 'Default (100%)', nameScale: 100, clubScale: 100, boutScale: 100 },
+    { label: 'Medium LED (+20%)', nameScale: 120, clubScale: 120, boutScale: 120 },
+    { label: 'Large LED (+40%)', nameScale: 140, clubScale: 140, boutScale: 140 },
+    { label: 'Extra Large LED (+60%)', nameScale: 160, clubScale: 150, boutScale: 150 },
+    { label: 'Huge LED (+80%)', nameScale: 180, clubScale: 160, boutScale: 160 },
+    { label: 'Maximum (+100%)', nameScale: 200, clubScale: 180, boutScale: 180 },
   ];
 
-  const hasActiveModified = activeNameFontScale !== 100 || activeClubFontScale !== 100;
-  const hasStandbyModified = standbyNameScale !== 100 || standbyClubScale !== 100;
+  const hasActiveModified = activeNameFontScale !== 100 || activeClubFontScale !== 100 || activeBoutScale !== 100;
+  const hasStandbyModified = standbyNameScale !== 100 || standbyClubScale !== 100 || standbyBoutScale !== 100;
   const hasCurrentModified = target === 'active' ? hasActiveModified : hasStandbyModified;
 
   return (
     <div className={cn(
-      "relative inline-flex items-center gap-1.5 px-2 py-1 rounded-2xl border text-xs font-bold transition-all select-none",
+      "relative inline-flex flex-wrap items-center gap-1.5 px-2 py-1 rounded-2xl border text-xs font-bold transition-all select-none",
       dark 
         ? "bg-[#0d1526]/95 border-white/15 text-white shadow-xl backdrop-blur-md" 
         : "bg-white border-slate-200 text-slate-800 shadow-sm",
@@ -129,6 +165,39 @@ export function AdminFontSizeControls({
         >
           <span>Standby</span>
           {hasStandbyModified && <span className="w-1.5 h-1.5 rounded-full bg-blue-400 shrink-0" />}
+        </button>
+      </div>
+
+      {/* Bout Number font size stepper */}
+      <div className={cn(
+        "flex items-center gap-1 px-1.5 py-0.5 rounded-lg border",
+        dark ? "bg-slate-900/80 border-slate-700/60" : "bg-slate-100 border-slate-200"
+      )}>
+        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tight">Bout</span>
+        <button
+          type="button"
+          onClick={() => currentSetBoutScale(prev => Math.max(70, prev - 10))}
+          className={cn(
+            "w-5 h-5 flex items-center justify-center rounded text-xs font-black transition-colors",
+            dark ? "bg-slate-800 hover:bg-slate-700 text-white" : "bg-white hover:bg-slate-200 text-slate-700 shadow-sm"
+          )}
+          title={`Decrease ${target === 'active' ? 'Active' : 'Standby'} Bout Number Font Size (-10%)`}
+        >
+          -
+        </button>
+        <span className="text-[11px] font-mono font-black text-amber-300 min-w-[34px] text-center">
+          {currentBoutScale}%
+        </span>
+        <button
+          type="button"
+          onClick={() => currentSetBoutScale(prev => Math.min(250, prev + 10))}
+          className={cn(
+            "w-5 h-5 flex items-center justify-center rounded text-xs font-black transition-colors",
+            dark ? "bg-slate-800 hover:bg-slate-700 text-white" : "bg-white hover:bg-slate-200 text-slate-700 shadow-sm"
+          )}
+          title={`Increase ${target === 'active' ? 'Active' : 'Standby'} Bout Number Font Size (+10%)`}
+        >
+          +
         </button>
       </div>
 
@@ -203,6 +272,7 @@ export function AdminFontSizeControls({
         <button
           type="button"
           onClick={() => {
+            currentSetBoutScale(100);
             currentSetNameScale(100);
             currentSetClubScale(100);
           }}
@@ -224,21 +294,22 @@ export function AdminFontSizeControls({
             onClick={() => setShowPresets(false)} 
           />
           <div className={cn(
-            "absolute top-full right-0 mt-2 w-64 p-2.5 rounded-2xl border shadow-2xl z-50 flex flex-col gap-1.5",
+            "absolute top-full right-0 mt-2 w-72 p-2.5 rounded-2xl border shadow-2xl z-50 flex flex-col gap-1.5",
             dark ? "bg-slate-900 border-slate-700 text-white" : "bg-white border-slate-200 text-slate-900"
           )}>
             <div className="px-2 py-1 text-[10px] font-black uppercase tracking-wider text-slate-400 border-b border-slate-700/50 mb-1 flex items-center justify-between">
               <span>LED Font Presets ({target.toUpperCase()})</span>
-              <span className="text-amber-400 font-mono">{currentNameScale}% / {currentClubScale}%</span>
+              <span className="text-amber-400 font-mono">{currentBoutScale}% / {currentNameScale}% / {currentClubScale}%</span>
             </div>
 
             {presets.map(p => {
-              const isActive = currentNameScale === p.nameScale && currentClubScale === p.clubScale;
+              const isActive = currentBoutScale === p.boutScale && currentNameScale === p.nameScale && currentClubScale === p.clubScale;
               return (
                 <button
                   key={p.label}
                   type="button"
                   onClick={() => {
+                    currentSetBoutScale(p.boutScale);
                     currentSetNameScale(p.nameScale);
                     currentSetClubScale(p.clubScale);
                     setShowPresets(false);
@@ -262,9 +333,11 @@ export function AdminFontSizeControls({
                 type="button"
                 onClick={() => {
                   if (target === 'active') {
+                    setStandbyBoutScale(activeBoutScale);
                     setStandbyNameScale(activeNameFontScale);
                     setStandbyClubScale(activeClubFontScale);
                   } else {
+                    setActiveBoutScale(standbyBoutScale);
                     setActiveNameFontScale(standbyNameScale);
                     setActiveClubFontScale(standbyClubScale);
                   }
@@ -281,8 +354,10 @@ export function AdminFontSizeControls({
                 <button
                   type="button"
                   onClick={() => {
+                    setActiveBoutScale(100);
                     setActiveNameFontScale(100);
                     setActiveClubFontScale(100);
+                    setStandbyBoutScale(100);
                     setStandbyNameScale(100);
                     setStandbyClubScale(100);
                     setShowPresets(false);

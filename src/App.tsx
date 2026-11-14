@@ -47,7 +47,8 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { QRCodeSVG } from 'qrcode.react';
-import { MatchData, RingStatus, EventData, BoutMapping, MatchHistoryItem, AdminBoutOverride } from './types';
+import { MatchData, RingStatus, EventData, BoutMapping, MatchHistoryItem, AdminBoutOverride, RingWinnerBroadcast } from './types';
+import { PoomsaeScreenView } from './components/PoomsaeScreenView';
 import { TASheet } from './components/TASheet';
 import { InspectionLogs } from './components/InspectionLogs';
 import { RingSummary } from './components/RingSummary';
@@ -1461,6 +1462,27 @@ export default function App() {
     const isPublicUrl = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('view') === 'public';
     return isPublicEnv || isPublicUrl;
   });
+  const [isStandalonePoomsae, setIsStandalonePoomsae] = useState(() => {
+    return typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('view') === 'poomsae';
+  });
+  const [poomsaeScreenRing, setPoomsaeScreenRing] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      const ringParam = new URLSearchParams(window.location.search).get('ring');
+      if (ringParam) {
+        return parseRingNumber(ringParam);
+      }
+    }
+    const savedUser = localStorage.getItem('tkd_user');
+    if (savedUser) {
+      try {
+        const parsed = JSON.parse(savedUser);
+        if (parsed?.assignedRing) return Number(parsed.assignedRing) || 1;
+      } catch {
+        // ignore
+      }
+    }
+    return 1;
+  });
   const [showLogin, setShowLogin] = useState(false);
   const [showNewBoutModal, setShowNewBoutModal] = useState(false);
   const [newBoutInitialRing, setNewBoutInitialRing] = useState<number | undefined>(undefined);
@@ -1571,10 +1593,16 @@ export default function App() {
   const [slideInterval, setSlideInterval] = useSyncedState<number>('tkd_slide_interval', 15);
   const [activeNameFontScale, setActiveNameFontScale] = useSyncedState<number>('tkd_active_name_font_scale', 100);
   const [activeClubFontScale, setActiveClubFontScale] = useSyncedState<number>('tkd_active_club_font_scale', 100);
+  const [activeBoutFontScale, setActiveBoutFontScale] = useSyncedState<number>('tkd_active_bout_font_scale', 100);
   const [standbyNameFontScale, setStandbyNameFontScale] = useSyncedState<number>('tkd_standby_name_font_scale', 100);
   const [standbyClubFontScale, setStandbyClubFontScale] = useSyncedState<number>('tkd_standby_club_font_scale', 100);
+  const [standbyBoutFontScale, setStandbyBoutFontScale] = useSyncedState<number>('tkd_standby_bout_font_scale', 100);
   const [backupData, setBackupData] = useLocalState<Record<string, { mappings: BoutMapping[], matches: MatchData[] }>>('tkd_backup_data_v3', {});
   const [teamLogos, setTeamLogos] = useSyncedState<Record<string, string>>('tkd_team_logos', {});
+  const [ringWinnerBanners, setRingWinnerBanners] = useSyncedState<Record<number, RingWinnerBroadcast>>('tkd_ring_winner_banners', {});
+  const [confirmedWinnerPopup, setConfirmedWinnerPopup] = useState<RingWinnerBroadcast | null>(null);
+  const [winnerPopupProgressStarted, setWinnerPopupProgressStarted] = useState(false);
+  const [winnerPopupSecondsLeft, setWinnerPopupSecondsLeft] = useState(5);
   const [showPlayerLogos, setShowPlayerLogos] = useSyncedState<boolean>('tkd_show_player_logos', true);
   const [isTeamLogosModalOpen, setIsTeamLogosModalOpen] = useState(false);
   const [isQuotaExceeded, setIsQuotaExceeded] = useState(false);
@@ -1611,6 +1639,31 @@ export default function App() {
       window.removeEventListener('request-reboot', handleRequestReboot);
     };
   }, []);
+
+  useEffect(() => {
+    if (!confirmedWinnerPopup) return;
+    setWinnerPopupSecondsLeft(5);
+    setWinnerPopupProgressStarted(false);
+
+    const rafId = requestAnimationFrame(() => {
+      setWinnerPopupProgressStarted(true);
+    });
+
+    const tickInterval = setInterval(() => {
+      setWinnerPopupSecondsLeft((prev) => (prev > 1 ? prev - 1 : 0));
+    }, 1000);
+
+    const closeTimer = setTimeout(() => {
+      setConfirmedWinnerPopup(null);
+      setWinnerPopupProgressStarted(false);
+    }, 5000);
+
+    return () => {
+      cancelAnimationFrame(rafId);
+      clearInterval(tickInterval);
+      clearTimeout(closeTimer);
+    };
+  }, [confirmedWinnerPopup?.confirmedAt]);
 
   const handleConfirmReboot = () => {
     localStorage.removeItem('tkd_disable_firebase');
@@ -3317,6 +3370,42 @@ export default function App() {
       ? (currentBout?.blue_club || currentBout?.red_club || '-') 
       : (winner === 'Blue' ? currentBout?.blue_club : (winner === 'Red' ? currentBout?.red_club : '-'));
 
+    if (currentBout) {
+      const winnerBroadcast: RingWinnerBroadcast = {
+        ringNumber,
+        eventId: currentBout.eventId || currentEventId || null,
+        boutNumber: currentBout.bout || boutNumber,
+        category: currentBout.category || '',
+        stage: getStageForBout(currentBout.bout || boutNumber, currentBout.category || ''),
+        winnerSide: isCompleted ? 'Completed' : (winner === 'Red' ? 'Red' : 'Blue'),
+        winnerName: winnerName || winner,
+        winnerClub: winnerClub && winnerClub !== '-' ? winnerClub : '',
+        blueName: currentBout.blue_name || '',
+        blueClub: currentBout.blue_club || '',
+        blueLogo: currentBout.blue_logo || currentBout.blue_flag || '',
+        redName: currentBout.red_name || '',
+        redClub: currentBout.red_club || '',
+        redLogo: currentBout.red_logo || currentBout.red_flag || '',
+        privacyMode: Boolean(currentBout.privacy_mode),
+        winType: winType || 'PTF',
+        confirmedAt: Date.now()
+      };
+      setRingWinnerBanners(prev => ({
+        ...(prev || {}),
+        [ringNumber]: winnerBroadcast
+      }));
+      try {
+        if (typeof BroadcastChannel !== 'undefined') {
+          const ch = new BroadcastChannel('tkd_winner_popup');
+          ch.postMessage(winnerBroadcast);
+          ch.close();
+        }
+      } catch {
+        // ignore BroadcastChannel errors
+      }
+      setConfirmedWinnerPopup(winnerBroadcast);
+    }
+
     if (activeUrl) {
       setIsSyncing(true);
       setLastSyncError(null);
@@ -4613,6 +4702,32 @@ export default function App() {
     return event ? event.name : '';
   }, [events, effectivePublicEventId]);
 
+  if (isStandalonePoomsae) {
+    const standaloneRings = publicRings.length > 0 ? publicRings : currentRings;
+    const selectedRingObj = standaloneRings.find(r => r.ringNumber === poomsaeScreenRing) || standaloneRings[0] || {
+      ringNumber: poomsaeScreenRing || 1,
+      currentBout: null,
+      onDeck: null,
+      inTheHole: null
+    };
+    return (
+      <PoomsaeScreenView
+        ring={selectedRingObj}
+        availableRings={standaloneRings}
+        namingMode={ringNamingMode}
+        boutNumberingMode={boutNumberingMode}
+        currentEventId={effectivePublicEventId || currentEventId}
+        teamLogos={teamLogos}
+        winnerBanner={ringWinnerBanners?.[selectedRingObj.ringNumber] || null}
+        getStageForBout={getStageForBout}
+        onSelectRing={setPoomsaeScreenRing}
+        onBack={user ? () => setIsStandalonePoomsae(false) : undefined}
+        canSwitchRing={true}
+        isStandalone={true}
+      />
+    );
+  }
+
   if (!user && showLogin && !isPublicView) {
     return <LoginScreen onLogin={handleLogin} events={events} onBack={() => setShowLogin(false)} />;
   }
@@ -4650,10 +4765,14 @@ export default function App() {
           setActiveNameFontScale={setActiveNameFontScale}
           activeClubFontScale={activeClubFontScale}
           setActiveClubFontScale={setActiveClubFontScale}
+          activeBoutFontScale={activeBoutFontScale}
+          setActiveBoutFontScale={setActiveBoutFontScale}
           standbyNameFontScale={standbyNameFontScale}
           setStandbyNameFontScale={setStandbyNameFontScale}
           standbyClubFontScale={standbyClubFontScale}
           setStandbyClubFontScale={setStandbyClubFontScale}
+          standbyBoutFontScale={standbyBoutFontScale}
+          setStandbyBoutFontScale={setStandbyBoutFontScale}
         />
       </PublicViewErrorBoundary>
     );
@@ -4691,10 +4810,14 @@ export default function App() {
           setActiveNameFontScale={setActiveNameFontScale}
           activeClubFontScale={activeClubFontScale}
           setActiveClubFontScale={setActiveClubFontScale}
+          activeBoutFontScale={activeBoutFontScale}
+          setActiveBoutFontScale={setActiveBoutFontScale}
           standbyNameFontScale={standbyNameFontScale}
           setStandbyNameFontScale={setStandbyNameFontScale}
           standbyClubFontScale={standbyClubFontScale}
           setStandbyClubFontScale={setStandbyClubFontScale}
+          standbyBoutFontScale={standbyBoutFontScale}
+          setStandbyBoutFontScale={setStandbyBoutFontScale}
         />
       </PublicViewErrorBoundary>
     );
@@ -4757,7 +4880,7 @@ export default function App() {
               <NavGroup
                 icon={<Monitor size={20} />}
                 label="Views"
-                isActive={['general', 'standby', 'site_view', 'points'].includes(activeTab)}
+                isActive={['general', 'standby', 'site_view', 'points', 'poomsae_screen'].includes(activeTab)}
               >
                 <NavItem 
                   icon={<Monitor size={18} />} 
@@ -4782,6 +4905,12 @@ export default function App() {
                   label="Point View" 
                   active={activeTab === 'points'} 
                   onClick={() => setActiveTab('points')} 
+                />
+                <NavItem 
+                  icon={<Monitor size={18} />} 
+                  label="Poomsae Screen" 
+                  active={activeTab === 'poomsae_screen'} 
+                  onClick={() => setActiveTab('poomsae_screen')} 
                 />
               </NavGroup>
               <NavItem 
@@ -4826,6 +4955,15 @@ export default function App() {
                 badge={rings.find(r => r.ringNumber === Number(user?.assignedRing))?.totalBouts || 0}
               />
               <NavItem 
+                icon={<Monitor size={20} />} 
+                label="Poomsae Screen" 
+                active={activeTab === 'poomsae_screen'} 
+                onClick={() => {
+                  setPoomsaeScreenRing(Number(user?.assignedRing) || 1);
+                  setActiveTab('poomsae_screen');
+                }} 
+              />
+              <NavItem 
                 icon={<Search size={20} />} 
                 label="Search Winner" 
                 active={activeTab === 'search-winner'} 
@@ -4838,7 +4976,7 @@ export default function App() {
               <NavGroup
                 icon={<Monitor size={20} />}
                 label="Views"
-                isActive={['general', 'standby', 'site_view', 'points'].includes(activeTab)}
+                isActive={['general', 'standby', 'site_view', 'points', 'poomsae_screen'].includes(activeTab)}
               >
                 <NavItem 
                   icon={<Monitor size={18} />} 
@@ -4863,6 +5001,12 @@ export default function App() {
                   label="Point View" 
                   active={activeTab === 'points'} 
                   onClick={() => setActiveTab('points')} 
+                />
+                <NavItem 
+                  icon={<Monitor size={18} />} 
+                  label="Poomsae Screen" 
+                  active={activeTab === 'poomsae_screen'} 
+                  onClick={() => setActiveTab('poomsae_screen')} 
                 />
                 <NavItem 
                   icon={<QrCode size={18} />} 
@@ -5348,6 +5492,10 @@ export default function App() {
                         onRemoveSuspended={(boutNum) => removeSuspendedBout(selectedRingObj.ringNumber, boutNum)}
                         onSuspendCurrentBout={() => suspendActiveBout(selectedRingObj.ringNumber)}
                         transfers={boutTransfers}
+                        onOpenPoomsaeScreen={() => {
+                          setPoomsaeScreenRing(selectedRingObj.ringNumber);
+                          setActiveTab('poomsae_screen');
+                        }}
                       />
                     </div>
                   </div>
@@ -5559,10 +5707,14 @@ export default function App() {
               setActiveNameFontScale={setActiveNameFontScale}
               activeClubFontScale={activeClubFontScale}
               setActiveClubFontScale={setActiveClubFontScale}
+              activeBoutFontScale={activeBoutFontScale}
+              setActiveBoutFontScale={setActiveBoutFontScale}
               standbyNameFontScale={standbyNameFontScale}
               setStandbyNameFontScale={setStandbyNameFontScale}
               standbyClubFontScale={standbyClubFontScale}
               setStandbyClubFontScale={setStandbyClubFontScale}
+              standbyBoutFontScale={standbyBoutFontScale}
+              setStandbyBoutFontScale={setStandbyBoutFontScale}
             />
           )}
 
@@ -5592,10 +5744,14 @@ export default function App() {
               setActiveNameFontScale={setActiveNameFontScale}
               activeClubFontScale={activeClubFontScale}
               setActiveClubFontScale={setActiveClubFontScale}
+              activeBoutFontScale={activeBoutFontScale}
+              setActiveBoutFontScale={setActiveBoutFontScale}
               standbyNameFontScale={standbyNameFontScale}
               setStandbyNameFontScale={setStandbyNameFontScale}
               standbyClubFontScale={standbyClubFontScale}
               setStandbyClubFontScale={setStandbyClubFontScale}
+              standbyBoutFontScale={standbyBoutFontScale}
+              setStandbyBoutFontScale={setStandbyBoutFontScale}
             />
           )}
 
@@ -5624,10 +5780,14 @@ export default function App() {
               setActiveNameFontScale={setActiveNameFontScale}
               activeClubFontScale={activeClubFontScale}
               setActiveClubFontScale={setActiveClubFontScale}
+              activeBoutFontScale={activeBoutFontScale}
+              setActiveBoutFontScale={setActiveBoutFontScale}
               standbyNameFontScale={standbyNameFontScale}
               setStandbyNameFontScale={setStandbyNameFontScale}
               standbyClubFontScale={standbyClubFontScale}
               setStandbyClubFontScale={setStandbyClubFontScale}
+              standbyBoutFontScale={standbyBoutFontScale}
+              setStandbyBoutFontScale={setStandbyBoutFontScale}
             />
           )}
 
@@ -5656,12 +5816,41 @@ export default function App() {
               setActiveNameFontScale={setActiveNameFontScale}
               activeClubFontScale={activeClubFontScale}
               setActiveClubFontScale={setActiveClubFontScale}
+              activeBoutFontScale={activeBoutFontScale}
+              setActiveBoutFontScale={setActiveBoutFontScale}
               standbyNameFontScale={standbyNameFontScale}
               setStandbyNameFontScale={setStandbyNameFontScale}
               standbyClubFontScale={standbyClubFontScale}
               setStandbyClubFontScale={setStandbyClubFontScale}
+              standbyBoutFontScale={standbyBoutFontScale}
+              setStandbyBoutFontScale={setStandbyBoutFontScale}
             />
           )}
+
+          {activeTab === 'poomsae_screen' && (() => {
+            const targetRingNum = user?.role === 'user' ? (Number(user?.assignedRing) || 1) : poomsaeScreenRing;
+            const ringObj = currentRings.find(r => r.ringNumber === targetRingNum) || currentRings[0] || {
+              ringNumber: targetRingNum || 1,
+              currentBout: null,
+              onDeck: null,
+              inTheHole: null
+            };
+            return (
+              <PoomsaeScreenView
+                ring={ringObj}
+                availableRings={currentRings}
+                namingMode={ringNamingMode}
+                boutNumberingMode={boutNumberingMode}
+                currentEventId={currentEventId}
+                teamLogos={teamLogos}
+                winnerBanner={ringWinnerBanners?.[ringObj.ringNumber] || null}
+                getStageForBout={getStageForBout}
+                onSelectRing={setPoomsaeScreenRing}
+                onBack={() => setActiveTab(user?.role === 'viewer' ? 'general' : 'mats')}
+                canSwitchRing={user?.role === 'admin' || user?.role === 'viewer'}
+              />
+            );
+          })()}
 
           {activeTab === 'mats' && (
             <div className={cn("space-y-6", isRingOperator && "space-y-2 sm:space-y-6")}>
@@ -5720,6 +5909,10 @@ export default function App() {
                       onRemoveSuspended={(boutNum) => removeSuspendedBout(ring.ringNumber, boutNum)}
                       onSuspendCurrentBout={() => suspendActiveBout(ring.ringNumber)}
                       transfers={boutTransfers}
+                      onOpenPoomsaeScreen={() => {
+                        setPoomsaeScreenRing(ring.ringNumber);
+                        setActiveTab('poomsae_screen');
+                      }}
                     />
                   ))
                 ) : (
@@ -5751,6 +5944,10 @@ export default function App() {
                           onRemoveSuspended={(boutNum) => removeSuspendedBout(ring.ringNumber, boutNum)}
                           onSuspendCurrentBout={() => suspendActiveBout(ring.ringNumber)}
                           transfers={boutTransfers}
+                          onOpenPoomsaeScreen={() => {
+                            setPoomsaeScreenRing(ring.ringNumber);
+                            setActiveTab('poomsae_screen');
+                          }}
                         />
                       ))}
                     </div>
@@ -6563,10 +6760,14 @@ export default function App() {
                         setActiveNameFontScale={setActiveNameFontScale}
                         activeClubFontScale={activeClubFontScale}
                         setActiveClubFontScale={setActiveClubFontScale}
+                        activeBoutFontScale={activeBoutFontScale}
+                        setActiveBoutFontScale={setActiveBoutFontScale}
                         standbyNameFontScale={standbyNameFontScale}
                         setStandbyNameFontScale={setStandbyNameFontScale}
                         standbyClubFontScale={standbyClubFontScale}
                         setStandbyClubFontScale={setStandbyClubFontScale}
+                        standbyBoutFontScale={standbyBoutFontScale}
+                        setStandbyBoutFontScale={setStandbyBoutFontScale}
                         dark={false}
                       />
                     </div>
@@ -6726,6 +6927,108 @@ export default function App() {
                 >
                   Confirm & Submit
                 </button>
+              </div>
+            </motion.div>
+          </div>
+        );
+      })()}
+
+      {confirmedWinnerPopup && activeTab !== 'poomsae_screen' && (() => {
+        const isRedWinner = confirmedWinnerPopup.winnerSide === 'Red';
+        const isCompletedResult = confirmedWinnerPopup.winnerSide === 'Completed';
+        const popupRingLabel = ringNamingMode === 'alphabet'
+          ? String.fromCharCode(64 + confirmedWinnerPopup.ringNumber)
+          : String(confirmedWinnerPopup.ringNumber);
+        const popupBoutLabel = formatBoutNumber(confirmedWinnerPopup.ringNumber, confirmedWinnerPopup.boutNumber, boutNumberingMode);
+        const winnerLogoDirect = isRedWinner
+          ? confirmedWinnerPopup.redLogo
+          : confirmedWinnerPopup.blueLogo;
+
+        return (
+          <div className="fixed inset-0 z-[260] bg-slate-950/75 backdrop-blur-sm flex items-center justify-center p-4">
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className={cn(
+                'relative w-full max-w-2xl rounded-3xl border-2 p-6 sm:p-10 text-center text-white overflow-hidden shadow-[0_25px_90px_rgba(0,0,0,0.8)]',
+                isRedWinner
+                  ? 'bg-gradient-to-b from-[#ef4444] via-[#dc2626] to-[#7f1d1d] border-red-300/80 shadow-[0_0_60px_rgba(239,68,68,0.55)]'
+                  : isCompletedResult
+                    ? 'bg-gradient-to-b from-[#059669] via-[#047857] to-[#064e3b] border-emerald-300/80 shadow-[0_0_60px_rgba(16,185,129,0.55)]'
+                    : 'bg-gradient-to-b from-[#0284c7] via-[#1d4ed8] to-[#1e3a8a] border-cyan-300/80 shadow-[0_0_60px_rgba(56,189,248,0.55)]'
+              )}
+            >
+              <button
+                type="button"
+                onClick={() => setConfirmedWinnerPopup(null)}
+                className="absolute top-3 right-3 p-2 rounded-xl bg-black/25 hover:bg-black/45 text-white/80 hover:text-white transition-colors cursor-pointer"
+                title="Close"
+              >
+                <X size={18} />
+              </button>
+
+              <div className="flex flex-wrap items-center justify-center gap-2 text-xs font-black uppercase tracking-[0.2em] text-white/90 mb-4">
+                <span>Ring {popupRingLabel}</span>
+                <span aria-hidden="true">•</span>
+                <span>Bout {popupBoutLabel}</span>
+                {confirmedWinnerPopup.winType && (
+                  <>
+                    <span aria-hidden="true">•</span>
+                    <span>{confirmedWinnerPopup.winType}</span>
+                  </>
+                )}
+              </div>
+
+              {confirmedWinnerPopup.category && (
+                <p className="text-xs sm:text-sm font-bold uppercase tracking-wider text-white/85 mb-5 line-clamp-2">
+                  {confirmedWinnerPopup.category}
+                </p>
+              )}
+
+              <div className="flex flex-col items-center justify-center gap-4 my-2">
+                <div className="flex items-center justify-center gap-3">
+                  <PlayerLogoBadge
+                    club={confirmedWinnerPopup.winnerClub}
+                    name={confirmedWinnerPopup.winnerName}
+                    customLogos={teamLogos}
+                    directLogo={winnerLogoDirect}
+                    size="xl"
+                    showOverride={true}
+                  />
+                  <Trophy className="w-10 h-10 sm:w-12 sm:h-12 text-amber-300 drop-shadow-lg" />
+                </div>
+
+                <div>
+                  <p className="text-xs font-black uppercase tracking-[0.25em] text-amber-200 mb-1">
+                    {isCompletedResult ? 'Match Completed' : `${confirmedWinnerPopup.winnerSide} Winner`}
+                  </p>
+                  <h2 className="text-3xl sm:text-5xl font-black italic uppercase tracking-wide text-white drop-shadow-[0_4px_14px_rgba(0,0,0,0.6)] break-words leading-tight">
+                    {confirmedWinnerPopup.privacyMode
+                      ? '---'
+                      : `${confirmedWinnerPopup.winnerName}${isCompletedResult ? ' COMPLETE' : ' WIN'}`}
+                  </h2>
+                  {confirmedWinnerPopup.winnerClub && (
+                    <p className="mt-2 text-base sm:text-xl font-extrabold uppercase tracking-widest text-amber-200 drop-shadow">
+                      {confirmedWinnerPopup.winnerClub}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <p className="mt-6 text-[11px] font-bold uppercase tracking-widest text-white/80">
+                Auto-closing in {winnerPopupSecondsLeft}s
+              </p>
+
+              {/* 5-Second Countdown Bar */}
+              <div className="absolute bottom-0 left-0 right-0 h-2 bg-black/30">
+                <div
+                  className="h-full bg-white/95 transition-all ease-linear"
+                  style={{
+                    width: winnerPopupProgressStarted ? '0%' : '100%',
+                    transitionDuration: '5000ms'
+                  }}
+                />
               </div>
             </motion.div>
           </div>
@@ -7469,6 +7772,22 @@ export default function App() {
               </button>
 
               <button 
+                onClick={() => {
+                  setPoomsaeScreenRing(Number(user?.assignedRing) || 1);
+                  setActiveTab('poomsae_screen');
+                }}
+                className={cn(
+                  "flex flex-col sm:flex-row items-center gap-1 sm:gap-2 px-3 py-1.5 rounded-xl transition-all font-bold text-xs min-h-[44px] justify-center",
+                  activeTab === 'poomsae_screen' 
+                    ? "bg-blue-50 text-blue-600 shadow-sm" 
+                    : "text-slate-500 hover:text-slate-900 hover:bg-slate-50"
+                )}
+              >
+                <Monitor size={20} />
+                <span className="text-[10px] sm:text-xs">Poomsae</span>
+              </button>
+
+              <button 
                 onClick={() => setActiveTab('general')}
                 className={cn(
                   "flex flex-col sm:flex-row items-center gap-1 sm:gap-2 px-3 py-1.5 rounded-xl transition-all font-bold text-xs min-h-[44px] justify-center",
@@ -7775,6 +8094,7 @@ interface RingCardProps {
   transfers?: BoutTransferBroadcast[];
   activeNameFontScale?: number;
   activeClubFontScale?: number;
+  onOpenPoomsaeScreen?: () => void;
 }
 
 interface EditResultModalProps {
@@ -8458,7 +8778,7 @@ function AddRingModal({ onClose, onAdd, existingRings, namingMode }: AddRingModa
   );
 }
 
-function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdate, onPointsUpdate, onUpdateTotalBouts, onStart, onDelete, onWinnerSelect, currentEventId, onForceSync, isAutoPull, onToggleAutoPull, user, boutNumberingMode = 'alphanumeric', layout = 'winner', showInspectionPopupSetting = true, onReturnToQueue, onResumeSuspended, onRemoveSuspended, onSuspendCurrentBout, transfers = [], activeNameFontScale, activeClubFontScale }: RingCardProps & { currentEventId?: string | null, onForceSync?: (data: MatchData) => void }) {
+function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdate, onPointsUpdate, onUpdateTotalBouts, onStart, onDelete, onWinnerSelect, currentEventId, onForceSync, isAutoPull, onToggleAutoPull, user, boutNumberingMode = 'alphanumeric', layout = 'winner', showInspectionPopupSetting = true, onReturnToQueue, onResumeSuspended, onRemoveSuspended, onSuspendCurrentBout, transfers = [], activeNameFontScale, activeClubFontScale, onOpenPoomsaeScreen }: RingCardProps & { currentEventId?: string | null, onForceSync?: (data: MatchData) => void }) {
   const [syncedNameScale] = useSyncedState<number>('tkd_active_name_font_scale', 100);
   const [syncedClubScale] = useSyncedState<number>('tkd_active_club_font_scale', 100);
   const effectiveNameScale = activeNameFontScale ?? syncedNameScale;
@@ -8692,7 +9012,21 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 flex-wrap justify-end">
+          {onOpenPoomsaeScreen && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenPoomsaeScreen();
+              }}
+              className="px-2 py-1 bg-blue-500/25 border border-blue-400/40 text-blue-300 hover:bg-blue-500/40 hover:text-white rounded text-[9px] sm:text-[10px] font-black uppercase tracking-wider transition-all duration-200 flex items-center gap-1 active:scale-95 cursor-pointer shadow-sm"
+              title={`Open Poomsae Screen View for Ring ${ringName}`}
+            >
+              <Monitor size={10} strokeWidth={3} />
+              <span>Poomsae</span>
+            </button>
+          )}
           {current && onReturnToQueue && (
             <button
               onClick={(e) => {
@@ -9981,8 +10315,10 @@ interface PublicRingCardProps {
   transfers?: BoutTransferBroadcast[];
   activeNameFontScale?: number;
   activeClubFontScale?: number;
+  activeBoutFontScale?: number;
   standbyNameFontScale?: number;
   standbyClubFontScale?: number;
+  standbyBoutFontScale?: number;
   getStageForBout?: (boutId: string | number, categoryName: string) => string;
 }
 
@@ -10010,10 +10346,14 @@ function StandbyView({
   setActiveNameFontScale,
   activeClubFontScale,
   setActiveClubFontScale,
+  activeBoutFontScale,
+  setActiveBoutFontScale,
   standbyNameFontScale,
   setStandbyNameFontScale,
   standbyClubFontScale,
   setStandbyClubFontScale,
+  standbyBoutFontScale,
+  setStandbyBoutFontScale,
   getStageForBout
 }: { 
   rings: RingStatus[], 
@@ -10039,26 +10379,36 @@ function StandbyView({
   setActiveNameFontScale?: (val: number | ((prev: number) => number)) => void,
   activeClubFontScale?: number,
   setActiveClubFontScale?: (val: number | ((prev: number) => number)) => void,
+  activeBoutFontScale?: number,
+  setActiveBoutFontScale?: (val: number | ((prev: number) => number)) => void,
   standbyNameFontScale?: number,
   setStandbyNameFontScale?: (val: number | ((prev: number) => number)) => void,
   standbyClubFontScale?: number,
   setStandbyClubFontScale?: (val: number | ((prev: number) => number)) => void,
+  standbyBoutFontScale?: number,
+  setStandbyBoutFontScale?: (val: number | ((prev: number) => number)) => void,
   getStageForBout?: (boutId: string | number, categoryName: string) => string
 
 }) {
   const [syncedNameFontScale, setSyncedNameFontScale] = useSyncedState<number>('tkd_active_name_font_scale', 100);
   const [syncedClubFontScale, setSyncedClubFontScale] = useSyncedState<number>('tkd_active_club_font_scale', 100);
+  const [syncedBoutFontScale, setSyncedBoutFontScale] = useSyncedState<number>('tkd_active_bout_font_scale', 100);
   const [syncedStandbyNameFontScale, setSyncedStandbyNameFontScale] = useSyncedState<number>('tkd_standby_name_font_scale', 100);
   const [syncedStandbyClubFontScale, setSyncedStandbyClubFontScale] = useSyncedState<number>('tkd_standby_club_font_scale', 100);
+  const [syncedStandbyBoutFontScale, setSyncedStandbyBoutFontScale] = useSyncedState<number>('tkd_standby_bout_font_scale', 100);
   const [teamLogos] = useSyncedState<Record<string, string>>('tkd_team_logos', {});
   const effectiveNameScale = activeNameFontScale ?? syncedNameFontScale;
   const effectiveSetNameScale = setActiveNameFontScale ?? setSyncedNameFontScale;
   const effectiveClubScale = activeClubFontScale ?? syncedClubFontScale;
   const effectiveSetClubScale = setActiveClubFontScale ?? setSyncedClubFontScale;
+  const effectiveBoutScale = activeBoutFontScale ?? syncedBoutFontScale;
+  const effectiveSetBoutScale = setActiveBoutFontScale ?? setSyncedBoutFontScale;
   const effectiveStandbyNameScale = standbyNameFontScale ?? syncedStandbyNameFontScale;
   const effectiveSetStandbyNameScale = setStandbyNameFontScale ?? setSyncedStandbyNameFontScale;
   const effectiveStandbyClubScale = standbyClubFontScale ?? syncedStandbyClubFontScale;
   const effectiveSetStandbyClubScale = setStandbyClubFontScale ?? setSyncedStandbyClubFontScale;
+  const effectiveStandbyBoutScale = standbyBoutFontScale ?? syncedStandbyBoutFontScale;
+  const effectiveSetStandbyBoutScale = setStandbyBoutFontScale ?? setSyncedStandbyBoutFontScale;
 
   const containerRef = React.useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = React.useState(false);
@@ -10216,10 +10566,14 @@ function StandbyView({
                 setActiveNameFontScale={effectiveSetNameScale}
                 activeClubFontScale={effectiveClubScale}
                 setActiveClubFontScale={effectiveSetClubScale}
+                activeBoutFontScale={effectiveBoutScale}
+                setActiveBoutFontScale={effectiveSetBoutScale}
                 standbyNameFontScale={effectiveStandbyNameScale}
                 setStandbyNameFontScale={effectiveSetStandbyNameScale}
                 standbyClubFontScale={effectiveStandbyClubScale}
                 setStandbyClubFontScale={effectiveSetStandbyClubScale}
+                standbyBoutFontScale={effectiveStandbyBoutScale}
+                setStandbyBoutFontScale={effectiveSetStandbyBoutScale}
                 dark={true}
               />
             )}
@@ -10321,7 +10675,10 @@ function StandbyView({
                   ) : (
                     <>
                       {/* Bout Num */}
-                      <div className="col-span-2 flex items-center justify-center text-3xl font-black text-white border-r border-white/10 bg-[#161f33]">
+                      <div
+                        className="col-span-2 flex items-center justify-center text-3xl font-black text-white border-r border-white/10 bg-[#161f33] overflow-hidden px-1 whitespace-nowrap"
+                        style={effectiveBoutScale !== 100 ? { fontSize: `calc(30px * ${effectiveBoutScale / 100})`, lineHeight: 1 } : undefined}
+                      >
                         {current ? formatBoutNumber(ring.ringNumber, current.bout, boutNumberingMode) : "---"}
                       </div>
                       {/* Players */}
@@ -10399,7 +10756,10 @@ function StandbyView({
                   const isRingInactive = showEmptyBoutAsInactive && (!current || !hasPlayers(current));
                   return (
                     <div key={idx} className="flex-1 grid grid-cols-12 bg-[#0d1526] border border-white/10 rounded overflow-hidden">
-                      <div className="col-span-2 flex items-center justify-center text-xl font-black text-white bg-[#161f33] border-r border-white/10">
+                      <div
+                        className="col-span-2 flex items-center justify-center text-xl font-black text-white bg-[#161f33] border-r border-white/10 overflow-hidden px-1 whitespace-nowrap"
+                        style={effectiveStandbyBoutScale !== 100 ? { fontSize: `calc(20px * ${effectiveStandbyBoutScale / 100})`, lineHeight: 1 } : undefined}
+                      >
                         {b?.data?.bout ? formatBoutNumber(ring.ringNumber, b.data.bout, boutNumberingMode) : "---"}
                       </div>
                       <div className={cn(
@@ -10549,10 +10909,14 @@ function SiteView({
   setActiveNameFontScale,
   activeClubFontScale,
   setActiveClubFontScale,
+  activeBoutFontScale,
+  setActiveBoutFontScale,
   standbyNameFontScale,
   setStandbyNameFontScale,
   standbyClubFontScale,
   setStandbyClubFontScale,
+  standbyBoutFontScale,
+  setStandbyBoutFontScale,
   getStageForBout
 }: { 
   rings: RingStatus[], 
@@ -10578,26 +10942,36 @@ function SiteView({
   setActiveNameFontScale?: (val: number | ((prev: number) => number)) => void,
   activeClubFontScale?: number,
   setActiveClubFontScale?: (val: number | ((prev: number) => number)) => void,
+  activeBoutFontScale?: number,
+  setActiveBoutFontScale?: (val: number | ((prev: number) => number)) => void,
   standbyNameFontScale?: number,
   setStandbyNameFontScale?: (val: number | ((prev: number) => number)) => void,
   standbyClubFontScale?: number,
   setStandbyClubFontScale?: (val: number | ((prev: number) => number)) => void,
+  standbyBoutFontScale?: number,
+  setStandbyBoutFontScale?: (val: number | ((prev: number) => number)) => void,
   getStageForBout?: (boutId: string | number, categoryName: string) => string
 
 }) {
   const [syncedNameFontScale, setSyncedNameFontScale] = useSyncedState<number>('tkd_active_name_font_scale', 100);
   const [syncedClubFontScale, setSyncedClubFontScale] = useSyncedState<number>('tkd_active_club_font_scale', 100);
+  const [syncedBoutFontScale, setSyncedBoutFontScale] = useSyncedState<number>('tkd_active_bout_font_scale', 100);
   const [syncedStandbyNameFontScale, setSyncedStandbyNameFontScale] = useSyncedState<number>('tkd_standby_name_font_scale', 100);
   const [syncedStandbyClubFontScale, setSyncedStandbyClubFontScale] = useSyncedState<number>('tkd_standby_club_font_scale', 100);
+  const [syncedStandbyBoutFontScale, setSyncedStandbyBoutFontScale] = useSyncedState<number>('tkd_standby_bout_font_scale', 100);
   const [teamLogos] = useSyncedState<Record<string, string>>('tkd_team_logos', {});
   const effectiveNameScale = activeNameFontScale ?? syncedNameFontScale;
   const effectiveSetNameScale = setActiveNameFontScale ?? setSyncedNameFontScale;
   const effectiveClubScale = activeClubFontScale ?? syncedClubFontScale;
   const effectiveSetClubScale = setActiveClubFontScale ?? setSyncedClubFontScale;
+  const effectiveBoutScale = activeBoutFontScale ?? syncedBoutFontScale;
+  const effectiveSetBoutScale = setActiveBoutFontScale ?? setSyncedBoutFontScale;
   const effectiveStandbyNameScale = standbyNameFontScale ?? syncedStandbyNameFontScale;
   const effectiveSetStandbyNameScale = setStandbyNameFontScale ?? setSyncedStandbyNameFontScale;
   const effectiveStandbyClubScale = standbyClubFontScale ?? syncedStandbyClubFontScale;
   const effectiveSetStandbyClubScale = setStandbyClubFontScale ?? setSyncedStandbyClubFontScale;
+  const effectiveStandbyBoutScale = standbyBoutFontScale ?? syncedStandbyBoutFontScale;
+  const effectiveSetStandbyBoutScale = setStandbyBoutFontScale ?? setSyncedStandbyBoutFontScale;
 
   const containerRef = React.useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = React.useState(false);
@@ -10755,10 +11129,14 @@ function SiteView({
                 setActiveNameFontScale={effectiveSetNameScale}
                 activeClubFontScale={effectiveClubScale}
                 setActiveClubFontScale={effectiveSetClubScale}
+                activeBoutFontScale={effectiveBoutScale}
+                setActiveBoutFontScale={effectiveSetBoutScale}
                 standbyNameFontScale={effectiveStandbyNameScale}
                 setStandbyNameFontScale={effectiveSetStandbyNameScale}
                 standbyClubFontScale={effectiveStandbyClubScale}
                 setStandbyClubFontScale={effectiveSetStandbyClubScale}
+                standbyBoutFontScale={effectiveStandbyBoutScale}
+                setStandbyBoutFontScale={effectiveSetStandbyBoutScale}
                 dark={true}
               />
             )}
@@ -10837,7 +11215,10 @@ function SiteView({
                   ) : (
                     <>
                       {/* Bout Num */}
-                      <div className="col-span-2 flex items-center justify-center text-3xl font-black text-white border-r border-[#1a1f2e] bg-[#161f33]">
+                      <div
+                        className="col-span-2 flex items-center justify-center text-3xl font-black text-white border-r border-[#1a1f2e] bg-[#161f33] overflow-hidden px-1 whitespace-nowrap"
+                        style={effectiveBoutScale !== 100 ? { fontSize: `calc(30px * ${effectiveBoutScale / 100})`, lineHeight: 1 } : undefined}
+                      >
                         {current ? formatBoutNumber(ring.ringNumber, current.bout, boutNumberingMode) : "---"}
                       </div>
                       {/* Players */}
@@ -10915,7 +11296,10 @@ function SiteView({
                   const isRingInactive = showEmptyBoutAsInactive && (!current || !hasPlayers(current));
                   return (
                     <div key={idx} className="flex-1 grid grid-cols-12 bg-[#0d1526] border border-white/10 rounded overflow-hidden">
-                      <div className="col-span-2 flex items-center justify-center text-xl font-black text-white bg-[#161f33] border-r border-[#1a1f2e]">
+                      <div
+                        className="col-span-2 flex items-center justify-center text-xl font-black text-white bg-[#161f33] border-r border-[#1a1f2e] overflow-hidden px-1 whitespace-nowrap"
+                        style={effectiveStandbyBoutScale !== 100 ? { fontSize: `calc(20px * ${effectiveStandbyBoutScale / 100})`, lineHeight: 1 } : undefined}
+                      >
                         {b?.data?.bout ? formatBoutNumber(ring.ringNumber, b.data.bout, boutNumberingMode) : "---"}
                       </div>
                       <div className={cn(
@@ -11016,10 +11400,14 @@ function PointsView({
   setActiveNameFontScale,
   activeClubFontScale,
   setActiveClubFontScale,
+  activeBoutFontScale,
+  setActiveBoutFontScale,
   standbyNameFontScale,
   setStandbyNameFontScale,
   standbyClubFontScale,
   setStandbyClubFontScale,
+  standbyBoutFontScale,
+  setStandbyBoutFontScale,
   getStageForBout
 }: { 
   rings: RingStatus[], 
@@ -11044,26 +11432,36 @@ function PointsView({
   setActiveNameFontScale?: (val: number | ((prev: number) => number)) => void,
   activeClubFontScale?: number,
   setActiveClubFontScale?: (val: number | ((prev: number) => number)) => void,
+  activeBoutFontScale?: number,
+  setActiveBoutFontScale?: (val: number | ((prev: number) => number)) => void,
   standbyNameFontScale?: number,
   setStandbyNameFontScale?: (val: number | ((prev: number) => number)) => void,
   standbyClubFontScale?: number,
   setStandbyClubFontScale?: (val: number | ((prev: number) => number)) => void,
+  standbyBoutFontScale?: number,
+  setStandbyBoutFontScale?: (val: number | ((prev: number) => number)) => void,
   getStageForBout?: (boutId: string | number, categoryName: string) => string
 
 }) {
   const [syncedNameFontScale, setSyncedNameFontScale] = useSyncedState<number>('tkd_active_name_font_scale', 100);
   const [syncedClubFontScale, setSyncedClubFontScale] = useSyncedState<number>('tkd_active_club_font_scale', 100);
+  const [syncedBoutFontScale, setSyncedBoutFontScale] = useSyncedState<number>('tkd_active_bout_font_scale', 100);
   const [syncedStandbyNameFontScale, setSyncedStandbyNameFontScale] = useSyncedState<number>('tkd_standby_name_font_scale', 100);
   const [syncedStandbyClubFontScale, setSyncedStandbyClubFontScale] = useSyncedState<number>('tkd_standby_club_font_scale', 100);
+  const [syncedStandbyBoutFontScale, setSyncedStandbyBoutFontScale] = useSyncedState<number>('tkd_standby_bout_font_scale', 100);
   const [teamLogos] = useSyncedState<Record<string, string>>('tkd_team_logos', {});
   const effectiveNameScale = activeNameFontScale ?? syncedNameFontScale;
   const effectiveSetNameScale = setActiveNameFontScale ?? setSyncedNameFontScale;
   const effectiveClubScale = activeClubFontScale ?? syncedClubFontScale;
   const effectiveSetClubScale = setActiveClubFontScale ?? setSyncedClubFontScale;
+  const effectiveBoutScale = activeBoutFontScale ?? syncedBoutFontScale;
+  const effectiveSetBoutScale = setActiveBoutFontScale ?? setSyncedBoutFontScale;
   const effectiveStandbyNameScale = standbyNameFontScale ?? syncedStandbyNameFontScale;
   const effectiveSetStandbyNameScale = setStandbyNameFontScale ?? setSyncedStandbyNameFontScale;
   const effectiveStandbyClubScale = standbyClubFontScale ?? syncedStandbyClubFontScale;
   const effectiveSetStandbyClubScale = setStandbyClubFontScale ?? setSyncedStandbyClubFontScale;
+  const effectiveStandbyBoutScale = standbyBoutFontScale ?? syncedStandbyBoutFontScale;
+  const effectiveSetStandbyBoutScale = setStandbyBoutFontScale ?? setSyncedStandbyBoutFontScale;
 
   const containerRef = React.useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = React.useState(false);
@@ -11221,10 +11619,14 @@ function PointsView({
                 setActiveNameFontScale={effectiveSetNameScale}
                 activeClubFontScale={effectiveClubScale}
                 setActiveClubFontScale={effectiveSetClubScale}
+                activeBoutFontScale={effectiveBoutScale}
+                setActiveBoutFontScale={effectiveSetBoutScale}
                 standbyNameFontScale={effectiveStandbyNameScale}
                 setStandbyNameFontScale={effectiveSetStandbyNameScale}
                 standbyClubFontScale={effectiveStandbyClubScale}
                 setStandbyClubFontScale={effectiveSetStandbyClubScale}
+                standbyBoutFontScale={effectiveStandbyBoutScale}
+                setStandbyBoutFontScale={effectiveSetStandbyBoutScale}
                 dark={true}
               />
             )}
@@ -11297,7 +11699,10 @@ function PointsView({
                   ) : (
                     <>
                       {/* Bout Num */}
-                      <div className="col-span-2 flex items-center justify-center text-3xl font-black text-white border-r border-white/10 bg-[#161f33]">
+                      <div
+                        className="col-span-2 flex items-center justify-center text-3xl font-black text-white border-r border-white/10 bg-[#161f33] overflow-hidden px-1 whitespace-nowrap"
+                        style={effectiveBoutScale !== 100 ? { fontSize: `calc(30px * ${effectiveBoutScale / 100})`, lineHeight: 1 } : undefined}
+                      >
                         {current ? formatBoutNumber(ring.ringNumber, current.bout, boutNumberingMode) : "---"}
                       </div>
                       {/* Players & Points */}
@@ -11461,7 +11866,10 @@ function PointsView({
                   const isRingInactive = showEmptyBoutAsInactive && (!current || !hasPlayers(current));
                   return (
                     <div key={idx} className="flex-1 grid grid-cols-12 bg-[#0d1526] border border-white/10 rounded overflow-hidden">
-                      <div className="col-span-3 flex items-center justify-center text-xl font-black text-white bg-[#161f33] border-r border-white/10">
+                      <div
+                        className="col-span-3 flex items-center justify-center text-xl font-black text-white bg-[#161f33] border-r border-white/10 overflow-hidden px-1 whitespace-nowrap"
+                        style={effectiveStandbyBoutScale !== 100 ? { fontSize: `calc(20px * ${effectiveStandbyBoutScale / 100})`, lineHeight: 1 } : undefined}
+                      >
                         {b?.data?.bout ? formatBoutNumber(ring.ringNumber, b.data.bout, boutNumberingMode) : "---"}
                       </div>
                       <div className={cn(
@@ -11556,10 +11964,14 @@ function OnsiteView({
   setActiveNameFontScale,
   activeClubFontScale,
   setActiveClubFontScale,
+  activeBoutFontScale,
+  setActiveBoutFontScale,
   standbyNameFontScale,
   setStandbyNameFontScale,
   standbyClubFontScale,
   setStandbyClubFontScale,
+  standbyBoutFontScale,
+  setStandbyBoutFontScale,
   getStageForBout
 }: { 
   rings: RingStatus[], 
@@ -11584,26 +11996,36 @@ function OnsiteView({
   setActiveNameFontScale?: (val: number | ((prev: number) => number)) => void,
   activeClubFontScale?: number,
   setActiveClubFontScale?: (val: number | ((prev: number) => number)) => void,
+  activeBoutFontScale?: number,
+  setActiveBoutFontScale?: (val: number | ((prev: number) => number)) => void,
   standbyNameFontScale?: number,
   setStandbyNameFontScale?: (val: number | ((prev: number) => number)) => void,
   standbyClubFontScale?: number,
   setStandbyClubFontScale?: (val: number | ((prev: number) => number)) => void,
+  standbyBoutFontScale?: number,
+  setStandbyBoutFontScale?: (val: number | ((prev: number) => number)) => void,
   getStageForBout?: (boutId: string | number, categoryName: string) => string
 
 }) {
   const [syncedNameFontScale, setSyncedNameFontScale] = useSyncedState<number>('tkd_active_name_font_scale', 100);
   const [syncedClubFontScale, setSyncedClubFontScale] = useSyncedState<number>('tkd_active_club_font_scale', 100);
+  const [syncedBoutFontScale, setSyncedBoutFontScale] = useSyncedState<number>('tkd_active_bout_font_scale', 100);
   const [syncedStandbyNameFontScale, setSyncedStandbyNameFontScale] = useSyncedState<number>('tkd_standby_name_font_scale', 100);
   const [syncedStandbyClubFontScale, setSyncedStandbyClubFontScale] = useSyncedState<number>('tkd_standby_club_font_scale', 100);
+  const [syncedStandbyBoutFontScale, setSyncedStandbyBoutFontScale] = useSyncedState<number>('tkd_standby_bout_font_scale', 100);
   const [teamLogos] = useSyncedState<Record<string, string>>('tkd_team_logos', {});
   const effectiveNameScale = activeNameFontScale ?? syncedNameFontScale;
   const effectiveSetNameScale = setActiveNameFontScale ?? setSyncedNameFontScale;
   const effectiveClubScale = activeClubFontScale ?? syncedClubFontScale;
   const effectiveSetClubScale = setActiveClubFontScale ?? setSyncedClubFontScale;
+  const effectiveBoutScale = activeBoutFontScale ?? syncedBoutFontScale;
+  const effectiveSetBoutScale = setActiveBoutFontScale ?? setSyncedBoutFontScale;
   const effectiveStandbyNameScale = standbyNameFontScale ?? syncedStandbyNameFontScale;
   const effectiveSetStandbyNameScale = setStandbyNameFontScale ?? setSyncedStandbyNameFontScale;
   const effectiveStandbyClubScale = standbyClubFontScale ?? syncedStandbyClubFontScale;
   const effectiveSetStandbyClubScale = setStandbyClubFontScale ?? setSyncedStandbyClubFontScale;
+  const effectiveStandbyBoutScale = standbyBoutFontScale ?? syncedStandbyBoutFontScale;
+  const effectiveSetStandbyBoutScale = setStandbyBoutFontScale ?? setSyncedStandbyBoutFontScale;
 
   const containerRef = React.useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = React.useState(false);
@@ -11784,10 +12206,14 @@ function OnsiteView({
                     setActiveNameFontScale={effectiveSetNameScale}
                     activeClubFontScale={effectiveClubScale}
                     setActiveClubFontScale={effectiveSetClubScale}
+                    activeBoutFontScale={effectiveBoutScale}
+                    setActiveBoutFontScale={effectiveSetBoutScale}
                     standbyNameFontScale={effectiveStandbyNameScale}
                     setStandbyNameFontScale={effectiveSetStandbyNameScale}
                     standbyClubFontScale={effectiveStandbyClubScale}
                     setStandbyClubFontScale={effectiveSetStandbyClubScale}
+                    standbyBoutFontScale={effectiveStandbyBoutScale}
+                    setStandbyBoutFontScale={effectiveSetStandbyBoutScale}
                     dark={true}
                   />
                 )}
@@ -11815,10 +12241,14 @@ function OnsiteView({
                 setActiveNameFontScale={effectiveSetNameScale}
                 activeClubFontScale={effectiveClubScale}
                 setActiveClubFontScale={effectiveSetClubScale}
+                activeBoutFontScale={effectiveBoutScale}
+                setActiveBoutFontScale={effectiveSetBoutScale}
                 standbyNameFontScale={effectiveStandbyNameScale}
                 setStandbyNameFontScale={effectiveSetStandbyNameScale}
                 standbyClubFontScale={effectiveStandbyClubScale}
                 setStandbyClubFontScale={effectiveSetStandbyClubScale}
+                standbyBoutFontScale={effectiveStandbyBoutScale}
+                setStandbyBoutFontScale={effectiveSetStandbyBoutScale}
                 dark={true}
               />
             </div>
@@ -11950,7 +12380,10 @@ function OnsiteView({
                           "z-20 w-[120px] h-[120px] bg-white rounded-full border-[10px] border-slate-800 flex items-center justify-center shadow-2xl transform hover:scale-105 transition-all",
                           isPoomsaeModeCurrent ? "ml-auto mr-10" : "-mx-10"
                         )}>
-                          <span className="text-[36px] font-black text-slate-900 leading-none">
+                          <span
+                            className="text-[36px] font-black text-slate-900 leading-none"
+                            style={effectiveBoutScale !== 100 ? { fontSize: `calc(36px * ${effectiveBoutScale / 100})`, lineHeight: 1 } : undefined}
+                          >
                             {current ? formatBoutNumber(ring.ringNumber, current.bout, boutNumberingMode) : "---"}
                           </span>
                         </div>
@@ -12054,7 +12487,10 @@ function OnsiteView({
                            "z-10 w-10 h-10 bg-white rounded-full border-4 border-slate-900 flex items-center justify-center flex-shrink-0 shadow-xl group-hover:scale-110 transition-transform",
                            isPoomsaeItem ? "ml-auto mr-1" : "-mx-4"
                         )}>
-                          <span className="text-[10px] font-black text-slate-900">
+                          <span
+                            className="text-[10px] font-black text-slate-900"
+                            style={effectiveStandbyBoutScale !== 100 ? { fontSize: `calc(10px * ${effectiveStandbyBoutScale / 100})`, lineHeight: 1 } : undefined}
+                          >
                             {bout?.data?.bout ? formatBoutNumber(ring.ringNumber, bout.data.bout, boutNumberingMode) : "---"}
                           </span>
                         </div>
@@ -12155,10 +12591,14 @@ function PublicDashboardView({
   setActiveNameFontScale,
   activeClubFontScale,
   setActiveClubFontScale,
+  activeBoutFontScale,
+  setActiveBoutFontScale,
   standbyNameFontScale,
   setStandbyNameFontScale,
   standbyClubFontScale,
   setStandbyClubFontScale,
+  standbyBoutFontScale,
+  setStandbyBoutFontScale,
   getStageForBout
 }: { 
   rings: RingStatus[], 
@@ -12189,16 +12629,22 @@ function PublicDashboardView({
   setActiveNameFontScale?: (scale: number | ((prev: number) => number)) => void,
   activeClubFontScale?: number,
   setActiveClubFontScale?: (scale: number | ((prev: number) => number)) => void,
+  activeBoutFontScale?: number,
+  setActiveBoutFontScale?: (scale: number | ((prev: number) => number)) => void,
   standbyNameFontScale?: number,
   setStandbyNameFontScale?: (scale: number | ((prev: number) => number)) => void,
   standbyClubFontScale?: number,
   setStandbyClubFontScale?: (val: number | ((prev: number) => number)) => void,
+  standbyBoutFontScale?: number,
+  setStandbyBoutFontScale?: (val: number | ((prev: number) => number)) => void,
   getStageForBout?: (boutId: string | number, categoryName: string) => string
 }) {
   const [syncedNameScale, setSyncedNameScale] = useSyncedState<number>('tkd_active_name_font_scale', 100);
   const [syncedClubScale, setSyncedClubScale] = useSyncedState<number>('tkd_active_club_font_scale', 100);
+  const [syncedBoutScale, setSyncedBoutScale] = useSyncedState<number>('tkd_active_bout_font_scale', 100);
   const [syncedStandbyNameScale, setSyncedStandbyNameScale] = useSyncedState<number>('tkd_standby_name_font_scale', 100);
   const [syncedStandbyClubScale, setSyncedStandbyClubScale] = useSyncedState<number>('tkd_standby_club_font_scale', 100);
+  const [syncedStandbyBoutScale, setSyncedStandbyBoutScale] = useSyncedState<number>('tkd_standby_bout_font_scale', 100);
   const [syncedPublicQueueCount, setSyncedPublicQueueCount] = useSyncedState<number>('tkd_public_standby_queue_count', 3);
   const [syncedPublicPoomsaeQueueCount, setSyncedPublicPoomsaeQueueCount] = useSyncedState<number>('tkd_public_standby_queue_poomsae_count', 8);
   const effectivePublicQueueCount = publicStandbyQueueCount ?? syncedPublicQueueCount;
@@ -12209,10 +12655,14 @@ function PublicDashboardView({
   const effectiveSetNameScale = setActiveNameFontScale ?? setSyncedNameScale;
   const effectiveClubScale = activeClubFontScale ?? syncedClubScale;
   const effectiveSetClubScale = setActiveClubFontScale ?? setSyncedClubScale;
+  const effectiveBoutScale = activeBoutFontScale ?? syncedBoutScale;
+  const effectiveSetBoutScale = setActiveBoutFontScale ?? setSyncedBoutScale;
   const effectiveStandbyNameScale = standbyNameFontScale ?? syncedStandbyNameScale;
   const effectiveSetStandbyNameScale = setStandbyNameFontScale ?? setSyncedStandbyNameScale;
   const effectiveStandbyClubScale = standbyClubFontScale ?? syncedStandbyClubScale;
   const effectiveSetStandbyClubScale = setStandbyClubFontScale ?? setSyncedStandbyClubScale;
+  const effectiveStandbyBoutScale = standbyBoutFontScale ?? syncedStandbyBoutScale;
+  const effectiveSetStandbyBoutScale = setStandbyBoutFontScale ?? setSyncedStandbyBoutScale;
   const [logoClicks, setLogoClicks] = React.useState(0);
   const clickTimer = React.useRef<NodeJS.Timeout | null>(null);
   const [isQuotaExceeded, setIsQuotaExceeded] = React.useState(false);
@@ -12376,10 +12826,14 @@ function PublicDashboardView({
               setActiveNameFontScale={effectiveSetNameScale}
               activeClubFontScale={effectiveClubScale}
               setActiveClubFontScale={effectiveSetClubScale}
+              activeBoutFontScale={effectiveBoutScale}
+              setActiveBoutFontScale={effectiveSetBoutScale}
               standbyNameFontScale={effectiveStandbyNameScale}
               setStandbyNameFontScale={effectiveSetStandbyNameScale}
               standbyClubFontScale={effectiveStandbyClubScale}
               setStandbyClubFontScale={effectiveSetStandbyClubScale}
+              standbyBoutFontScale={effectiveStandbyBoutScale}
+              setStandbyBoutFontScale={effectiveSetStandbyBoutScale}
               dark={true}
             />
           </div>
@@ -12463,8 +12917,10 @@ function PublicDashboardView({
                       transfers={boutTransfers}
                       activeNameFontScale={effectiveNameScale}
                       activeClubFontScale={effectiveClubScale}
+                      activeBoutFontScale={effectiveBoutScale}
                       standbyNameFontScale={effectiveStandbyNameScale}
                       standbyClubFontScale={effectiveStandbyClubScale}
+                      standbyBoutFontScale={effectiveStandbyBoutScale}
                       getStageForBout={getStageForBout}
                     />
                   </PublicViewErrorBoundary>
@@ -12509,15 +12965,19 @@ function PublicDashboardView({
   );
 }
 
-function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, boutNumberingMode = 'alphanumeric', ringQueue, showPublicStandbyQueue = true, showEmptyBoutAsInactive = false, publicViewLayout = 'standard', transfers = [], activeNameFontScale, activeClubFontScale, standbyNameFontScale, standbyClubFontScale, getStageForBout }: PublicRingCardProps) {
+function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, boutNumberingMode = 'alphanumeric', ringQueue, showPublicStandbyQueue = true, showEmptyBoutAsInactive = false, publicViewLayout = 'standard', transfers = [], activeNameFontScale, activeClubFontScale, activeBoutFontScale, standbyNameFontScale, standbyClubFontScale, standbyBoutFontScale, getStageForBout }: PublicRingCardProps) {
   const [syncedNameScale] = useSyncedState<number>('tkd_active_name_font_scale', 100);
   const [syncedClubScale] = useSyncedState<number>('tkd_active_club_font_scale', 100);
+  const [syncedBoutScale] = useSyncedState<number>('tkd_active_bout_font_scale', 100);
   const [syncedStandbyNameScale] = useSyncedState<number>('tkd_standby_name_font_scale', 100);
   const [syncedStandbyClubScale] = useSyncedState<number>('tkd_standby_club_font_scale', 100);
+  const [syncedStandbyBoutScale] = useSyncedState<number>('tkd_standby_bout_font_scale', 100);
   const effectiveNameScale = activeNameFontScale ?? syncedNameScale;
   const effectiveClubScale = activeClubFontScale ?? syncedClubScale;
+  const effectiveBoutScale = activeBoutFontScale ?? syncedBoutScale;
   const effectiveStandbyNameScale = standbyNameFontScale ?? syncedStandbyNameScale;
   const effectiveStandbyClubScale = standbyClubFontScale ?? syncedStandbyClubScale;
+  const effectiveStandbyBoutScale = standbyBoutFontScale ?? syncedStandbyBoutScale;
   const [now, setNow] = React.useState(new Date());
 
   React.useEffect(() => {
@@ -12592,7 +13052,10 @@ function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, b
         </div>
         {current && (
           <div className="absolute top-0 left-0 right-0 bottom-0 flex items-center justify-center pointer-events-none">
-            <p className="text-xl sm:text-3xl md:text-[40px] font-black text-white leading-none drop-shadow-md pointer-events-auto translate-x-10">
+            <p
+              className="text-xl sm:text-3xl md:text-[40px] font-black text-white leading-none drop-shadow-md pointer-events-auto translate-x-10"
+              style={effectiveBoutScale !== 100 ? { fontSize: `calc(clamp(20px, 2.8vw, 40px) * ${effectiveBoutScale / 100})`, lineHeight: 1 } : undefined}
+            >
               {(() => {
                 const isTransferred = (() => {
                   if (!current?.bout) return false;
@@ -12615,7 +13078,12 @@ function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, b
                     {showTotalBouts && (
                       <>
                         <span className="mx-1 sm:mx-2 text-white/40">/</span>
-                        <span className="text-xs sm:text-2xl md:text-[30px]">{ring.totalBouts ? formatBoutNumber(ring.ringNumber, ring.totalBouts, boutNumberingMode) : (queueCount || 0)}</span>
+                        <span
+                          className="text-xs sm:text-2xl md:text-[30px]"
+                          style={effectiveBoutScale !== 100 ? { fontSize: `calc(clamp(12px, 2vw, 30px) * ${effectiveBoutScale / 100})`, lineHeight: 1 } : undefined}
+                        >
+                          {ring.totalBouts ? formatBoutNumber(ring.ringNumber, ring.totalBouts, boutNumberingMode) : (queueCount || 0)}
+                        </span>
                       </>
                     )}
                   </>
@@ -12891,8 +13359,11 @@ function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, b
 
                     <div className="flex items-center min-h-[2.5rem] sm:min-h-[3rem]">
                       {/* Bout Num */}
-                      <div className="w-10 sm:w-12 self-stretch bg-slate-800/80 flex items-center justify-center border-r border-slate-700 flex-shrink-0">
-                        <span className="text-[12px] sm:text-[14px] font-black text-white">
+                      <div className="w-10 sm:w-12 self-stretch bg-slate-800/80 flex items-center justify-center border-r border-slate-700 flex-shrink-0 overflow-hidden px-1">
+                        <span
+                          className="text-[12px] sm:text-[14px] font-black text-white whitespace-nowrap"
+                          style={effectiveStandbyBoutScale !== 100 ? { fontSize: `calc(14px * ${effectiveStandbyBoutScale / 100})`, lineHeight: 1 } : undefined}
+                        >
                           {bout?.data?.bout ? formatBoutNumber(ring.ringNumber, bout.data.bout, boutNumberingMode) : "---"}
                         </span>
                       </div>

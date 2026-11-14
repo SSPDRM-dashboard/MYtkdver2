@@ -115,3 +115,23 @@ export interface MatchHistoryItem {
   winType?: string;
   points?: any;
 }
+
+export interface RingWinnerBroadcast {
+  ringNumber: number;
+  eventId?: string | null;
+  boutNumber: string | number;
+  category: string;
+  stage?: string;
+  winnerSide: 'Blue' | 'Red' | 'Completed';
+  winnerName: string;
+  winnerClub: string;
+  blueName: string;
+  blueClub: string;
+  blueLogo?: string;
+  redName: string;
+  redClub: string;
+  redLogo?: string;
+  privacyMode?: boolean;
+  winType?: string;
+  confirmedAt: number;
+}
