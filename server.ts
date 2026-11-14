@@ -33,19 +33,18 @@ async function callWithTimeout<T>(promise: Promise<T>, timeoutMs = 90000, modelN
   }
 }
 
-// Resilient helper to handle temporary 503 / high demand spikes / 404s with model fallbacks
+// Resilient helper to handle temporary 503 / high demand spikes / 404s / empty outputs with model fallbacks
 async function generateWithRetry(
   ai: GoogleGenAI,
   primaryModel: string,
   params: any,
-  timeoutMs = 90000
+  timeoutMs = 75000
 ) {
-  // Ordered fallback models: start with primary, then fast & high-quota gemini-3.8-flash, gemini-3.1-flash-lite, gemini-flash-latest
+  // Ordered fallback models: start with primary (gemini-4-hydrogen), then fast gemini-3.1-flash-lite
   const candidateModels = [
     primaryModel,
-    "gemini-3.8-flash",
+    "gemini-4-hydrogen",
     "gemini-3.1-flash-lite",
-    "gemini-flash-latest",
   ];
   const modelsToTry = Array.from(new Set(candidateModels));
 
@@ -57,8 +56,10 @@ async function generateWithRetry(
       
       const modelParams = JSON.parse(JSON.stringify(params));
       
-      // If model does not support thinkingConfig (only gemini-3* and gemini-4*), remove it
-      if (modelParams.config?.thinkingConfig && !model.startsWith("gemini-3") && !model.startsWith("gemini-4")) {
+      // Only use thinkingConfig on gemini-4-hydrogen/argon/carbon or gemini-3-pro; strip for flash-lite fallback for maximum speed
+      if (model === "gemini-3.1-flash-lite" && modelParams.config?.thinkingConfig) {
+        delete modelParams.config.thinkingConfig;
+      } else if (modelParams.config?.thinkingConfig && !model.startsWith("gemini-3") && !model.startsWith("gemini-4")) {
         delete modelParams.config.thinkingConfig;
       }
 
@@ -74,9 +75,10 @@ async function generateWithRetry(
 
         let txt = extractResponseText(response);
 
-        // If high thinking caused token exhaustion without returning JSON, retry with LOW thinking level
-        if ((!txt || !txt.includes("{")) && modelParams.config?.thinkingConfig?.thinkingLevel === ThinkingLevel.HIGH) {
-          console.warn(`[Gemini Server] Output lacked JSON structure with HIGH thinking. Retrying ${model} with LOW thinking level...`);
+        // If high thinking caused token exhaustion without returning text/JSON, retry with LOW thinking level
+        if ((!txt || !txt.trim() || (modelParams.config?.responseMimeType === "application/json" && !txt.includes("{"))) &&
+            modelParams.config?.thinkingConfig?.thinkingLevel === ThinkingLevel.HIGH) {
+          console.warn(`[Gemini Server] Output lacked expected JSON with HIGH thinking. Retrying ${model} with LOW thinking level...`);
           modelParams.config.thinkingConfig = { thinkingLevel: ThinkingLevel.LOW };
           response = await callWithTimeout(
             ai.models.generateContent({
@@ -89,16 +91,22 @@ async function generateWithRetry(
           txt = extractResponseText(response);
         }
 
-        if (txt) {
+        if (txt && txt.trim()) {
           return response;
         }
+
+        throw new Error(`Model ${model} returned an empty analysis.`);
       } catch (innerErr: any) {
         const innerMsg = (innerErr?.message || "").toLowerCase();
-        // If responseSchema caused a 400/404 on this model, attempt fallback without responseSchema
-        if ((innerMsg.includes("schema") || innerMsg.includes("400") || innerMsg.includes("404")) && modelParams.config?.responseSchema) {
-          console.warn(`[Gemini Server] Retrying ${model} without responseSchema constraint...`);
+        // If responseSchema or thinkingConfig caused a 400/404 on this model, attempt fallback without those constraints
+        if (
+          (innerMsg.includes("schema") || innerMsg.includes("thinking") || innerMsg.includes("400") || innerMsg.includes("404")) &&
+          (modelParams.config?.responseSchema || modelParams.config?.thinkingConfig)
+        ) {
+          console.warn(`[Gemini Server] Retrying ${model} without strict responseSchema/thinkingConfig constraints...`);
           delete modelParams.config.responseSchema;
           delete modelParams.config.responseMimeType;
+          delete modelParams.config.thinkingConfig;
           const fallbackResp = await callWithTimeout(
             ai.models.generateContent({
               ...modelParams,
@@ -107,7 +115,11 @@ async function generateWithRetry(
             timeoutMs,
             model
           );
-          return fallbackResp;
+          const fallbackTxt = extractResponseText(fallbackResp);
+          if (fallbackTxt && fallbackTxt.trim()) {
+            return fallbackResp;
+          }
+          throw new Error(`Fallback retry on ${model} returned an empty analysis.`);
         }
         throw innerErr;
       }
@@ -126,7 +138,7 @@ async function generateWithRetry(
     }
   }
 
-  throw lastError;
+  throw lastError || new Error("All AI models failed to return a valid analysis.");
 }
 
 function extractResponseText(response: any): string {
@@ -237,7 +249,7 @@ async function startServer() {
         - Do not include unescaped double quotes inside string values under any circumstances.
       `;
 
-      const requestedModel = "gemini-3.8-flash";
+      const requestedModel = "gemini-4-hydrogen";
 
       const response = await generateWithRetry(
         ai,
@@ -297,7 +309,7 @@ async function startServer() {
             },
           },
         },
-        120000 // 120s timeout for complete multimodal bracket processing
+        75000 // 75s timeout per model attempt so fallback can run cleanly within request limits
       );
 
       const rawText = extractResponseText(response);
@@ -317,7 +329,7 @@ async function startServer() {
       if (is503) {
         userMsg = "The AI service is currently experiencing high demand. Please wait a moment and try again.";
       } else if (isTimeout) {
-        userMsg = "Bracket analysis took longer than 120 seconds. If uploading a multi-page PDF, consider processing 1-2 pages at a time or ensure 'Deep Thinking Mode' is toggled off for fastest extraction.";
+        userMsg = "Bracket analysis timed out while processing the document. If uploading a large or multi-page PDF, try splitting it into 1-2 pages at a time or turn off 'Deep Thinking Mode' for faster extraction.";
       } else if (is403) {
         userMsg = "Gemini API Key Permission Denied (403). Please check your API key configuration in the Settings > Secrets panel.";
       }
@@ -366,7 +378,7 @@ async function startServer() {
 
       const response = await generateWithRetry(
         ai,
-        "gemini-3.8-flash",
+        "gemini-4-hydrogen",
         {
           contents: prompt,
           config: {
@@ -460,7 +472,7 @@ async function startServer() {
 
       const response = await generateWithRetry(
         ai,
-        "gemini-3.8-flash",
+        "gemini-4-hydrogen",
         {
           contents: formattedContents,
           config: {

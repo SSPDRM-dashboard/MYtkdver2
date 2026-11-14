@@ -5472,8 +5472,31 @@ export default function App() {
                                             </select>
                                           </div>
                                         </div>
-                                        <p className="text-sm font-bold text-slate-800">{cleanPlaceholder(item.data.blue_name)} vs {cleanPlaceholder(item.data.red_name)}</p>
-                                        <p className="text-[10px] font-bold text-slate-400 uppercase mt-0.5">{cleanPlaceholder(item.data.category)}</p>
+                                        {(item.data.category?.toUpperCase().includes('INDIVIDUAL POOMSAE') || item.data.category?.toUpperCase().includes('FREESTYLE') || (item.data.category?.toUpperCase().includes('POOMSAE') && !cleanPlaceholder(item.data.red_name) && !!cleanPlaceholder(item.data.blue_name))) ? (
+                                          <div>
+                                            <p className="text-sm font-bold text-slate-800 leading-snug">{item.data.privacy_mode ? "---" : (cleanPlaceholder(item.data.blue_name) || "-")}</p>
+                                            {cleanPlaceholder(item.data.blue_club) && (
+                                              <p className="text-[11px] font-bold text-[#00a2e8] uppercase leading-tight mt-0.5">{cleanPlaceholder(item.data.blue_club)}</p>
+                                            )}
+                                          </div>
+                                        ) : (
+                                          <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-start gap-x-2">
+                                            <div className="min-w-0">
+                                              <p className="text-sm font-bold text-slate-800 leading-snug break-words">{item.data.privacy_mode ? "---" : (cleanPlaceholder(item.data.blue_name) || "-")}</p>
+                                              {cleanPlaceholder(item.data.blue_club) && (
+                                                <p className="text-[11px] font-bold text-[#00a2e8] uppercase leading-tight mt-0.5 break-words">{cleanPlaceholder(item.data.blue_club)}</p>
+                                              )}
+                                            </div>
+                                            <span className="text-[11px] font-black text-slate-400 uppercase pt-0.5 shrink-0">vs</span>
+                                            <div className="min-w-0">
+                                              <p className="text-sm font-bold text-slate-800 leading-snug break-words">{item.data.privacy_mode ? "---" : (cleanPlaceholder(item.data.red_name) || "-")}</p>
+                                              {cleanPlaceholder(item.data.red_club) && (
+                                                <p className="text-[11px] font-bold text-[#ed1c24] uppercase leading-tight mt-0.5 break-words">{cleanPlaceholder(item.data.red_club)}</p>
+                                              )}
+                                            </div>
+                                          </div>
+                                        )}
+                                        <p className="text-[10px] font-bold text-slate-400 uppercase mt-1">{cleanPlaceholder(item.data.category)}</p>
                                       </div>
                                       
                                       <div className="flex flex-col items-end gap-2 shrink-0">
@@ -5860,8 +5883,31 @@ export default function App() {
                                               </select>
                                             </div>
                                           </div>
-                                          <p className="text-sm font-bold text-slate-800">{cleanPlaceholder(item.data.blue_name)} vs {cleanPlaceholder(item.data.red_name)}</p>
-                                          <p className="text-[10px] font-bold text-slate-400 uppercase mt-0.5">{cleanPlaceholder(item.data.category)}</p>
+                                          {(item.data.category?.toUpperCase().includes('INDIVIDUAL POOMSAE') || item.data.category?.toUpperCase().includes('FREESTYLE') || (item.data.category?.toUpperCase().includes('POOMSAE') && !cleanPlaceholder(item.data.red_name) && !!cleanPlaceholder(item.data.blue_name))) ? (
+                                            <div>
+                                              <p className="text-sm font-bold text-slate-800 leading-snug">{item.data.privacy_mode ? "---" : (cleanPlaceholder(item.data.blue_name) || "-")}</p>
+                                              {cleanPlaceholder(item.data.blue_club) && (
+                                                <p className="text-[11px] font-bold text-[#00a2e8] uppercase leading-tight mt-0.5">{cleanPlaceholder(item.data.blue_club)}</p>
+                                              )}
+                                            </div>
+                                          ) : (
+                                            <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-start gap-x-2">
+                                              <div className="min-w-0">
+                                                <p className="text-sm font-bold text-slate-800 leading-snug break-words">{item.data.privacy_mode ? "---" : (cleanPlaceholder(item.data.blue_name) || "-")}</p>
+                                                {cleanPlaceholder(item.data.blue_club) && (
+                                                  <p className="text-[11px] font-bold text-[#00a2e8] uppercase leading-tight mt-0.5 break-words">{cleanPlaceholder(item.data.blue_club)}</p>
+                                                )}
+                                              </div>
+                                              <span className="text-[11px] font-black text-slate-400 uppercase pt-0.5 shrink-0">vs</span>
+                                              <div className="min-w-0">
+                                                <p className="text-sm font-bold text-slate-800 leading-snug break-words">{item.data.privacy_mode ? "---" : (cleanPlaceholder(item.data.red_name) || "-")}</p>
+                                                {cleanPlaceholder(item.data.red_club) && (
+                                                  <p className="text-[11px] font-bold text-[#ed1c24] uppercase leading-tight mt-0.5 break-words">{cleanPlaceholder(item.data.red_club)}</p>
+                                                )}
+                                              </div>
+                                            </div>
+                                          )}
+                                          <p className="text-[10px] font-bold text-slate-400 uppercase mt-1">{cleanPlaceholder(item.data.category)}</p>
                                         </div>
                                       </div>
                                       <div className="flex flex-col items-end gap-2 shrink-0">
