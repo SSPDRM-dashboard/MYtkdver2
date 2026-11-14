@@ -1560,6 +1560,8 @@ export default function App() {
   const [ringControlLayout, setRingControlLayout] = useSyncedState<'winner' | 'point'>('tkd_ring_control_layout', 'winner');
   const [publicViewLayout, setPublicViewLayout] = useSyncedState<'standard' | 'point'>('tkd_public_view_layout', 'standard');
   const [showPublicStandbyQueue, setShowPublicStandbyQueue] = useSyncedState<boolean>('tkd_show_public_standby_queue', true);
+  const [publicStandbyQueueCount, setPublicStandbyQueueCount] = useSyncedState<number>('tkd_public_standby_queue_count', 3);
+  const [publicStandbyQueuePoomsaeCount, setPublicStandbyQueuePoomsaeCount] = useSyncedState<number>('tkd_public_standby_queue_poomsae_count', 8);
   const [showSponsorFooter, setShowSponsorFooter] = useSyncedState<boolean>('tkd_show_sponsor_footer', true);
   const [showInspectionPopupSetting, setShowInspectionPopupSetting] = useSyncedState<boolean>('tkd_show_inspection_popup_setting', true);
   const [confirmResultSubmission, setConfirmResultSubmission] = useSyncedState<boolean>('tkd_confirm_result_submission', false);
@@ -4630,6 +4632,10 @@ export default function App() {
           showOnlyActiveRings={showOnlyActiveRings}
           showEmptyBoutAsInactive={showEmptyBoutAsInactive}
           showPublicStandbyQueue={showPublicStandbyQueue}
+          publicStandbyQueueCount={publicStandbyQueueCount}
+          setPublicStandbyQueueCount={setPublicStandbyQueueCount}
+          publicStandbyQueuePoomsaeCount={publicStandbyQueuePoomsaeCount}
+          setPublicStandbyQueuePoomsaeCount={setPublicStandbyQueuePoomsaeCount}
           publicViewLayout={publicViewLayout}
           selectedEventName={publicEventName}
           boutTransfers={boutTransfers}
@@ -4667,6 +4673,10 @@ export default function App() {
           showOnlyActiveRings={showOnlyActiveRings}
           showEmptyBoutAsInactive={showEmptyBoutAsInactive}
           showPublicStandbyQueue={showPublicStandbyQueue}
+          publicStandbyQueueCount={publicStandbyQueueCount}
+          setPublicStandbyQueueCount={setPublicStandbyQueueCount}
+          publicStandbyQueuePoomsaeCount={publicStandbyQueuePoomsaeCount}
+          setPublicStandbyQueuePoomsaeCount={setPublicStandbyQueuePoomsaeCount}
           publicViewLayout={publicViewLayout}
           selectedEventName={publicEventName}
           boutTransfers={boutTransfers}
@@ -6349,6 +6359,48 @@ export default function App() {
                         >
                           Hide
                         </button>
+                      </div>
+                    </div>
+                    <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-bold text-slate-700">Public View Standby Queue Quantity</p>
+                        <p className="text-[10px] text-slate-500">Set how many upcoming bouts or players are shown in the public standby queue</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <select
+                          value={publicStandbyQueueCount >= 999 ? 'all' : publicStandbyQueueCount}
+                          onChange={(e) => {
+                            const val = e.target.value === 'all' ? 999 : parseInt(e.target.value, 10);
+                            setPublicStandbyQueueCount(val);
+                          }}
+                          className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-bold text-slate-800 shadow-sm outline-none focus:ring-2 focus:ring-red-500 cursor-pointer"
+                        >
+                          {[1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 15, 20].map(n => (
+                            <option key={n} value={n}>{n} Bout{n > 1 ? 's' : ''} ({n * 2} Players)</option>
+                          ))}
+                          <option value="all">All Available Bouts</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-bold text-slate-700">Poomsae Standby Queue Quantity</p>
+                        <p className="text-[10px] text-slate-500">Set upcoming player count specifically for Poomsae courts in public view</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <select
+                          value={publicStandbyQueuePoomsaeCount >= 999 ? 'all' : publicStandbyQueuePoomsaeCount}
+                          onChange={(e) => {
+                            const val = e.target.value === 'all' ? 999 : parseInt(e.target.value, 10);
+                            setPublicStandbyQueuePoomsaeCount(val);
+                          }}
+                          className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-bold text-slate-800 shadow-sm outline-none focus:ring-2 focus:ring-red-500 cursor-pointer"
+                        >
+                          {[2, 3, 4, 5, 6, 7, 8, 10, 12, 15, 16, 20].map(n => (
+                            <option key={n} value={n}>{n} Players / Bouts</option>
+                          ))}
+                          <option value="all">All Available Players</option>
+                        </select>
                       </div>
                     </div>
                     <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-between">
@@ -12039,6 +12091,10 @@ function PublicDashboardView({
   showOnlyActiveRings = false, 
   showEmptyBoutAsInactive = false, 
   showPublicStandbyQueue = true, 
+  publicStandbyQueueCount,
+  setPublicStandbyQueueCount,
+  publicStandbyQueuePoomsaeCount,
+  setPublicStandbyQueuePoomsaeCount,
   publicViewLayout = 'standard', 
   selectedEventName = '',
   boutTransfers = [],
@@ -12069,6 +12125,10 @@ function PublicDashboardView({
   showOnlyActiveRings?: boolean, 
   showEmptyBoutAsInactive?: boolean, 
   showPublicStandbyQueue?: boolean, 
+  publicStandbyQueueCount?: number,
+  setPublicStandbyQueueCount?: (count: number) => void,
+  publicStandbyQueuePoomsaeCount?: number,
+  setPublicStandbyQueuePoomsaeCount?: (count: number) => void,
   publicViewLayout?: 'standard' | 'point', 
   selectedEventName?: string,
   boutTransfers?: BoutTransferBroadcast[],
@@ -12093,6 +12153,12 @@ function PublicDashboardView({
   const [syncedClubScale, setSyncedClubScale] = useSyncedState<number>('tkd_active_club_font_scale', 100);
   const [syncedStandbyNameScale, setSyncedStandbyNameScale] = useSyncedState<number>('tkd_standby_name_font_scale', 100);
   const [syncedStandbyClubScale, setSyncedStandbyClubScale] = useSyncedState<number>('tkd_standby_club_font_scale', 100);
+  const [syncedPublicQueueCount, setSyncedPublicQueueCount] = useSyncedState<number>('tkd_public_standby_queue_count', 3);
+  const [syncedPublicPoomsaeQueueCount, setSyncedPublicPoomsaeQueueCount] = useSyncedState<number>('tkd_public_standby_queue_poomsae_count', 8);
+  const effectivePublicQueueCount = publicStandbyQueueCount ?? syncedPublicQueueCount;
+  const effectiveSetPublicQueueCount = setPublicStandbyQueueCount ?? setSyncedPublicQueueCount;
+  const effectivePublicPoomsaeQueueCount = publicStandbyQueuePoomsaeCount ?? syncedPublicPoomsaeQueueCount;
+  const effectiveSetPublicPoomsaeQueueCount = setPublicStandbyQueuePoomsaeCount ?? setSyncedPublicPoomsaeQueueCount;
   const effectiveNameScale = activeNameFontScale ?? syncedNameScale;
   const effectiveSetNameScale = setActiveNameFontScale ?? setSyncedNameScale;
   const effectiveClubScale = activeClubFontScale ?? syncedClubScale;
@@ -12218,8 +12284,8 @@ function PublicDashboardView({
       {/* Selection Controls Sub-bar */}
       {isAdmin && (
         <div className="flex flex-wrap items-center justify-between px-4 sm:px-8 py-1.5 gap-4 flex-shrink-0 z-20">
-          {/* Green Place on Left: Admin button to set how many rings/courts per row */}
-          <div>
+          {/* Controls on Left */}
+          <div className="flex items-center gap-3 flex-wrap">
             <div className="flex items-center gap-2 bg-slate-900 text-white rounded-xl border border-emerald-500/40 px-3 py-1.5 shadow-sm">
               <LayoutGrid size={15} className="text-emerald-400" />
               <span className="text-[10px] font-black uppercase text-emerald-400 tracking-widest select-none">Grid Layout:</span>
@@ -12234,6 +12300,25 @@ function PublicDashboardView({
                 {[1, 2, 3, 4, 5, 6, 8].map(n => (
                   <option key={n} value={n} className="bg-slate-800 text-white">{n} Courts / Row</option>
                 ))}
+              </select>
+            </div>
+
+            <div className="flex items-center gap-2 bg-slate-900 text-white rounded-xl border border-amber-500/40 px-3 py-1.5 shadow-sm">
+              <Layers size={15} className="text-amber-400" />
+              <span className="text-[10px] font-black uppercase text-amber-400 tracking-widest select-none">Standby Queue:</span>
+              <select
+                value={effectivePublicQueueCount >= 999 ? 'all' : effectivePublicQueueCount}
+                onChange={(e) => {
+                  const val = e.target.value === 'all' ? 999 : parseInt(e.target.value, 10);
+                  effectiveSetPublicQueueCount(val);
+                }}
+                className="bg-[#1a2235] text-white text-xs font-black outline-none border border-white/10 rounded-lg px-2.5 py-1 focus:ring-1 focus:ring-amber-500 cursor-pointer"
+                title="Set how many upcoming bouts/players to show in the Standby Queue on Public View"
+              >
+                {[1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 15, 20].map(n => (
+                  <option key={n} value={n} className="bg-slate-800 text-white font-bold">{n} Bout{n > 1 ? 's' : ''} ({n * 2} Players)</option>
+                ))}
+                <option value="all" className="bg-slate-800 text-white font-bold">All Available Bouts</option>
               </select>
             </div>
           </div>
@@ -12313,7 +12398,8 @@ function PublicDashboardView({
                                         standbyRaw[0].data.category.toUpperCase().includes('FREESTYLE')
                                       ));
 
-                const queueLimit = isPoomsaeRing ? 8 : 3;
+                const targetLimit = isPoomsaeRing ? effectivePublicPoomsaeQueueCount : effectivePublicQueueCount;
+                const queueLimit = targetLimit >= 999 ? standbyRaw.length : targetLimit;
                 const rQueue = standbyRaw.slice(0, queueLimit);
                 
                 return (
@@ -12735,7 +12821,7 @@ function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, b
                 <div className="w-1.5 h-1.5 bg-yellow-500 rounded-full" />
                 Standby Queue
               </span>
-              <span className="text-[8px] sm:text-[9px] font-bold text-slate-500 uppercase tracking-widest">Next {ringQueue.length} Bouts By Sequence</span>
+              <span className="text-[8px] sm:text-[9px] font-bold text-slate-500 uppercase tracking-widest">Next {ringQueue.length} {ringQueue.length === 1 ? 'Bout' : 'Bouts'} By Sequence</span>
             </div>
             <div className="space-y-3 sm:space-y-4">
               {ringQueue.map((bout, idx) => {
