@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Check, Copy, Maximize, Minimize, Monitor } from 'lucide-react';
-import { RingStatus, RingWinnerBroadcast } from '../types';
+import { ArrowLeft, Check, Clock, Copy, Maximize, Minimize, Monitor } from 'lucide-react';
+import { RingPoomsaeSelection, RingStatus, RingTimerState, RingWinnerBroadcast } from '../types';
 import { cn, formatBoutNumber } from '../lib/utils';
 import { getPlayerLogoOrFlag } from '../lib/teamLogos';
 
@@ -12,12 +12,22 @@ interface PoomsaeScreenViewProps {
   currentEventId?: string | null;
   teamLogos?: Record<string, string>;
   winnerBanner?: RingWinnerBroadcast | null;
+  timerState?: RingTimerState | null;
+  defaultTimerSeconds?: number;
+  poomsaeSelection?: RingPoomsaeSelection | null;
   getStageForBout?: (boutId: string | number, categoryName: string) => string;
   onSelectRing?: (ringNumber: number) => void;
   onBack?: () => void;
   canSwitchRing?: boolean;
   isStandalone?: boolean;
   winnerDisplaySeconds?: number;
+}
+
+function formatTimerMMSS(totalSeconds: number): string {
+  const safe = Math.max(0, Math.ceil(totalSeconds));
+  const mins = Math.floor(safe / 60);
+  const secs = safe % 60;
+  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 }
 
 function cleanText(text?: string | null): string {
@@ -131,6 +141,9 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
   currentEventId,
   teamLogos = {},
   winnerBanner,
+  timerState,
+  defaultTimerSeconds = 90,
+  poomsaeSelection,
   getStageForBout,
   onSelectRing,
   onBack,
@@ -143,6 +156,10 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
   const [copiedUrl, setCopiedUrl] = useState(false);
   const [activeWinner, setActiveWinner] = useState<RingWinnerBroadcast | null>(null);
   const [winnerProgressStarted, setWinnerProgressStarted] = useState(false);
+  const [liveTimerOverride, setLiveTimerOverride] = useState<RingTimerState | null>(null);
+  const [livePoomsaeOverride, setLivePoomsaeOverride] = useState<RingPoomsaeSelection | null>(null);
+  const [liveDefaultSeconds, setLiveDefaultSeconds] = useState<number>(defaultTimerSeconds);
+  const [timerTickNow, setTimerTickNow] = useState<number>(() => Date.now());
   const lastShownConfirmedAtRef = useRef<number>(0);
   const hasMountedRef = useRef<boolean>(false);
   const prevRingRef = useRef<number>(ring.ringNumber);
@@ -152,6 +169,18 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
   useEffect(() => {
     winnerDisplaySecondsRef.current = winnerDisplaySeconds;
   }, [winnerDisplaySeconds]);
+
+  useEffect(() => {
+    setLiveDefaultSeconds(defaultTimerSeconds);
+  }, [defaultTimerSeconds]);
+
+  useEffect(() => {
+    setLiveTimerOverride(timerState ?? null);
+  }, [timerState, ring.ringNumber]);
+
+  useEffect(() => {
+    setLivePoomsaeOverride(poomsaeSelection ?? null);
+  }, [poomsaeSelection, ring.ringNumber]);
 
   const effectiveDisplayMs =
     winnerDisplaySeconds <= 0 ? 0 : Math.max(1000, Number(winnerDisplaySeconds) * 1000);
@@ -238,6 +267,71 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
     return () => {
       if (channel) channel.close();
       window.removeEventListener('storage', handleStorage);
+    };
+  }, [ring.ringNumber]);
+
+  // Listen for instant same-browser timer updates, poomsae selection & default duration changes
+  useEffect(() => {
+    let timerChannel: BroadcastChannel | null = null;
+    let settingChannel: BroadcastChannel | null = null;
+    let poomsaeChannel: BroadcastChannel | null = null;
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        timerChannel = new BroadcastChannel('tkd_ring_timers');
+        timerChannel.onmessage = (event) => {
+          const payload = event.data as Record<string, RingTimerState> | undefined;
+          const nextForRing = payload?.[String(ring.ringNumber)];
+          if (nextForRing) {
+            setLiveTimerOverride(nextForRing);
+          }
+        };
+        settingChannel = new BroadcastChannel('tkd_match_timer_setting');
+        settingChannel.onmessage = (event) => {
+          const secs = Number(event.data);
+          if (!isNaN(secs) && secs > 0) {
+            setLiveDefaultSeconds(secs);
+          }
+        };
+        poomsaeChannel = new BroadcastChannel('tkd_ring_poomsae_selection');
+        poomsaeChannel.onmessage = (event) => {
+          const payload = event.data as Record<string, RingPoomsaeSelection> | undefined;
+          const nextForRing = payload?.[String(ring.ringNumber)];
+          if (nextForRing) {
+            setLivePoomsaeOverride(nextForRing);
+          }
+        };
+      }
+    } catch {
+      // ignore BroadcastChannel errors
+    }
+
+    const handleTimerStorage = (e: StorageEvent) => {
+      if (e.key === 'tkd_ring_timers' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue) as Record<string, RingTimerState>;
+          const nextForRing = parsed?.[String(ring.ringNumber)];
+          if (nextForRing) setLiveTimerOverride(nextForRing);
+        } catch {}
+      } else if (e.key === 'tkd_match_timer_seconds' && e.newValue) {
+        try {
+          const secs = Number(JSON.parse(e.newValue));
+          if (!isNaN(secs) && secs > 0) setLiveDefaultSeconds(secs);
+        } catch {}
+      } else if (e.key === 'tkd_ring_poomsae_selection' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue) as Record<string, RingPoomsaeSelection>;
+          const nextForRing = parsed?.[String(ring.ringNumber)];
+          if (nextForRing) setLivePoomsaeOverride(nextForRing);
+        } catch {}
+      }
+    };
+    window.addEventListener('storage', handleTimerStorage);
+
+    return () => {
+      if (timerChannel) timerChannel.close();
+      if (settingChannel) settingChannel.close();
+      if (poomsaeChannel) poomsaeChannel.close();
+      window.removeEventListener('storage', handleTimerStorage);
     };
   }, [ring.ringNumber]);
 
@@ -355,6 +449,36 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
   const winnerIsRed = activeWinner?.winnerSide === 'Red';
   const hasActiveMatch = Boolean(current || activeWinner);
 
+  const effectiveTimer = liveTimerOverride ?? timerState ?? null;
+  const currentBoutKey = current ? `${current.eventId || ''}_${current.bout}` : 'idle';
+  const isTimerForCurrentBout =
+    !effectiveTimer?.boutKey ||
+    effectiveTimer.boutKey === 'idle' ||
+    effectiveTimer.boutKey === currentBoutKey;
+  const isTimerRunning = Boolean(
+    effectiveTimer && isTimerForCurrentBout && effectiveTimer.isRunning && effectiveTimer.startedAt
+  );
+
+  useEffect(() => {
+    if (!isTimerRunning) return;
+    setTimerTickNow(Date.now());
+    const id = setInterval(() => {
+      setTimerTickNow(Date.now());
+    }, 200);
+    return () => clearInterval(id);
+  }, [isTimerRunning]);
+
+  const displayedTimerSeconds = (() => {
+    const fallback = Math.max(1, Number(liveDefaultSeconds) || 90);
+    if (!effectiveTimer || !isTimerForCurrentBout) return fallback;
+    if (effectiveTimer.isRunning && effectiveTimer.startedAt) {
+      const elapsedSec = (timerTickNow - effectiveTimer.startedAt) / 1000;
+      return Math.max(0, Math.ceil(effectiveTimer.remainingSeconds - elapsedSec));
+    }
+    return Math.max(0, Math.ceil(effectiveTimer.remainingSeconds));
+  })();
+  const isTimerExpired = Boolean(effectiveTimer && isTimerForCurrentBout && displayedTimerSeconds === 0);
+
   return (
     <div
       ref={containerRef}
@@ -469,24 +593,33 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
           }}
         />
 
-        <div className="relative z-10 grid grid-cols-12 items-center gap-2">
+        <div className="relative z-10 flex items-center justify-between gap-3 sm:gap-5">
           {/* Left: RING */}
-          <div className="col-span-3 sm:col-span-3 flex items-center gap-3 min-w-0 pl-1 sm:pl-6">
+          <div className="shrink-0 flex items-center pl-1 sm:pl-6">
             <span className="text-sm sm:text-xl md:text-2xl font-black uppercase tracking-wider text-white whitespace-nowrap drop-shadow">
               RING {ringName}
             </span>
           </div>
 
-          {/* Center: CATEGORY */}
-          <div className="col-span-6 sm:col-span-6 text-center min-w-0 px-2">
-            <span className="text-sm sm:text-xl md:text-2xl font-black uppercase tracking-wider text-white truncate block drop-shadow">
+          {/* Center: FULL CATEGORY NAME */}
+          <div className="flex-1 text-center min-w-0 px-1 sm:px-2">
+            <span
+              className={cn(
+                'font-black uppercase tracking-wider text-white block break-words whitespace-normal leading-tight drop-shadow',
+                (displayCategory || '').length > 55
+                  ? 'text-xs sm:text-base md:text-lg'
+                  : (displayCategory || '').length > 35
+                    ? 'text-xs sm:text-lg md:text-xl'
+                    : 'text-sm sm:text-xl md:text-2xl'
+              )}
+            >
               {displayCategory || 'WAITING FOR MATCH'}
             </span>
           </div>
 
           {/* Right: STAGE */}
-          <div className="col-span-3 sm:col-span-3 text-right min-w-0 pr-1 sm:pr-6">
-            <span className="text-xs sm:text-lg md:text-xl font-black uppercase tracking-wider text-amber-300 truncate block drop-shadow">
+          <div className="shrink-0 text-right pr-1 sm:pr-6">
+            <span className="text-xs sm:text-lg md:text-xl font-black uppercase tracking-wider text-amber-300 whitespace-nowrap block drop-shadow">
               {displayStage || ''}
             </span>
           </div>
@@ -500,23 +633,65 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
           isSoloPoomsae ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2'
         )}
       >
-        {/* TOP-CENTER BOUT NUMBER PLAQUE (Moved down from header bar to top-center of arena as requested) */}
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
+        {/* TOP-CENTER BOUT NUMBER PLAQUE + SELECTED POOMSAE DISPLAY */}
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 z-30 pointer-events-none flex flex-col items-center w-full max-w-[92%] sm:max-w-[78%]">
           <div
-            className="px-6 sm:px-10 md:px-12 py-1.5 sm:py-2 bg-[#070f22]/95 border-x border-b border-amber-400/70 shadow-[0_6px_28px_rgba(0,0,0,0.85),0_0_20px_rgba(251,191,36,0.22)] flex items-center justify-center"
+            className="px-8 sm:px-14 md:px-18 py-2 sm:py-3 bg-[#070f22]/95 border-x border-b border-amber-400/70 shadow-[0_6px_28px_rgba(0,0,0,0.85),0_0_20px_rgba(251,191,36,0.22)] flex items-center justify-center"
             style={{
-              clipPath: 'polygon(0% 0%, 100% 0%, 88% 100%, 12% 100%)'
+              clipPath: 'polygon(0% 0%, 100% 0%, 90% 100%, 10% 100%)'
             }}
           >
-            <span className="text-base sm:text-xl md:text-2xl font-black uppercase tracking-widest text-amber-400 whitespace-nowrap drop-shadow-[0_2px_8px_rgba(251,191,36,0.45)]">
-              {displayBoutNumber !== '---' ? `BOUT ${displayBoutNumber}` : 'BOUT ---'}
+            <span className="text-2xl sm:text-4xl md:text-5xl font-black uppercase tracking-widest text-amber-400 whitespace-nowrap leading-none drop-shadow-[0_2px_8px_rgba(251,191,36,0.45)]">
+              {displayBoutNumber}
             </span>
           </div>
+
+          {(() => {
+            const effectiveSel = livePoomsaeOverride ?? poomsaeSelection ?? null;
+            const currentBoutKeySel = current ? `${current.eventId || ''}_${current.bout}` : 'idle';
+            const isSelValid =
+              effectiveSel &&
+              (!effectiveSel.boutKey || effectiveSel.boutKey === 'idle' || effectiveSel.boutKey === currentBoutKeySel);
+            const p1 = isSelValid ? cleanText(effectiveSel?.poomsae1) : '';
+            const p2 = isSelValid ? cleanText(effectiveSel?.poomsae2) : '';
+            if (!p1 && !p2) return null;
+            return (
+              <div className="mt-2 sm:mt-2.5 px-6 sm:px-10 py-2 sm:py-3 bg-[#060f24]/92 border border-cyan-300/60 shadow-[0_8px_32px_rgba(0,0,0,0.75),0_0_22px_rgba(34,211,238,0.25)] backdrop-blur-md flex flex-col items-center justify-center gap-1.5 sm:gap-2 text-center"
+                style={{
+                  clipPath: 'polygon(2% 0%, 98% 0%, 100% 22%, 100% 78%, 98% 100%, 2% 100%, 0% 78%, 0% 22%)'
+                }}
+              >
+                {p1 && (
+                  <div className="flex flex-wrap items-center justify-center gap-x-2.5 gap-y-0.5">
+                    <span className="text-xs sm:text-base md:text-xl font-black uppercase tracking-widest text-cyan-300">
+                      Poomsae 1:
+                    </span>
+                    <span className="text-lg sm:text-2xl md:text-3xl lg:text-4xl font-black uppercase tracking-wide text-white break-words whitespace-normal drop-shadow leading-tight">
+                      {p1}
+                    </span>
+                  </div>
+                )}
+                {p1 && p2 && (
+                  <div aria-hidden="true" className="w-3/4 h-[1px] bg-gradient-to-r from-transparent via-white/30 to-transparent" />
+                )}
+                {p2 && (
+                  <div className="flex flex-wrap items-center justify-center gap-x-2.5 gap-y-0.5">
+                    <span className="text-xs sm:text-base md:text-xl font-black uppercase tracking-widest text-amber-300">
+                      Poomsae 2:
+                    </span>
+                    <span className="text-lg sm:text-2xl md:text-3xl lg:text-4xl font-black uppercase tracking-wide text-white break-words whitespace-normal drop-shadow leading-tight">
+                      {p2}
+                    </span>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </div>
 
         {/* CHUNG / BLUE SIDE */}
         <div
-          className="relative flex flex-col items-center justify-center px-4 sm:px-8 pt-14 pb-6 sm:pt-14 sm:pb-8 text-center overflow-hidden"
+          className="relative flex flex-col items-center justify-center px-4 sm:px-8 pt-36 pb-20 sm:pt-44 sm:pb-24 text-center overflow-hidden"
           style={{
             background:
               'radial-gradient(circle at 80% 50%, #0ea5e9 0%, #0369c4 32%, #023b88 68%, #021d52 100%)'
@@ -560,14 +735,23 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
             />
 
             {/* Club Name Angled Bar */}
-            <div className="w-full max-w-md sm:max-w-lg px-2 shrink-0">
+            <div className="w-full max-w-lg sm:max-w-xl px-2 shrink-0">
               <div
-                className="relative h-10 sm:h-12 md:h-14 flex items-center justify-center px-6 sm:px-10 bg-gradient-to-r from-[#04183b] via-[#093275] to-[#04183b] border border-cyan-300/70 shadow-[0_0_24px_rgba(6,182,212,0.45)]"
+                className="relative min-h-[3.25rem] sm:min-h-[3.75rem] md:min-h-[4.25rem] py-1.5 flex items-center justify-center px-7 sm:px-11 bg-gradient-to-r from-[#04183b] via-[#093275] to-[#04183b] border border-cyan-300/70 shadow-[0_0_24px_rgba(6,182,212,0.45)]"
                 style={{
-                  clipPath: 'polygon(5% 0%, 100% 0%, 95% 100%, 0% 100%)'
+                  clipPath: 'polygon(4% 0%, 100% 0%, 96% 100%, 0% 100%)'
                 }}
               >
-                <p className="w-full text-sm sm:text-xl md:text-2xl font-black text-white uppercase tracking-wider truncate drop-shadow">
+                <p
+                  className={cn(
+                    'w-full font-black text-white uppercase tracking-wider break-words whitespace-normal leading-tight drop-shadow',
+                    (blueClub || '').length > 32
+                      ? 'text-xs sm:text-base md:text-lg'
+                      : (blueClub || '').length > 22
+                        ? 'text-xs sm:text-lg md:text-xl'
+                        : 'text-sm sm:text-xl md:text-2xl'
+                  )}
+                >
                   {blueClub || (hasActiveMatch ? '---' : 'CHUNG CLUB')}
                 </p>
               </div>
@@ -578,17 +762,19 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
             {/* Player Name Chamfered Frame */}
             <div className="w-full max-w-lg sm:max-w-xl px-1 shrink-0">
               <div
-                className="relative h-24 sm:h-28 md:h-36 lg:h-40 flex items-center justify-center px-5 sm:px-10 bg-gradient-to-b from-[#031538]/95 via-[#052359]/90 to-[#020d26]/95 border-2 border-cyan-400/80 shadow-[0_0_32px_rgba(34,211,238,0.4),inset_0_0_22px_rgba(14,165,233,0.28)]"
+                className="relative min-h-[6.5rem] sm:min-h-[7.5rem] md:min-h-[9.5rem] lg:min-h-[10.5rem] py-3 flex items-center justify-center px-6 sm:px-10 bg-gradient-to-b from-[#031538]/95 via-[#052359]/90 to-[#020d26]/95 border-2 border-cyan-400/80 shadow-[0_0_32px_rgba(34,211,238,0.4),inset_0_0_22px_rgba(14,165,233,0.28)]"
                 style={{
                   clipPath: 'polygon(4% 0%, 96% 0%, 100% 22%, 100% 78%, 96% 100%, 4% 100%, 0% 78%, 0% 22%)'
                 }}
               >
                 <h2
                   className={cn(
-                    'font-black italic text-white uppercase tracking-wide break-words leading-tight line-clamp-2 drop-shadow-[0_4px_12px_rgba(0,0,0,0.8)]',
-                    (blueName || '').length > 22
-                      ? 'text-lg sm:text-2xl md:text-3xl lg:text-4xl'
-                      : 'text-2xl sm:text-4xl md:text-5xl lg:text-[3.25rem]'
+                    'font-black italic text-white uppercase tracking-wide break-words whitespace-normal leading-tight drop-shadow-[0_4px_12px_rgba(0,0,0,0.8)]',
+                    (blueName || '').length > 36
+                      ? 'text-base sm:text-xl md:text-2xl lg:text-3xl'
+                      : (blueName || '').length > 22
+                        ? 'text-lg sm:text-2xl md:text-3xl lg:text-4xl'
+                        : 'text-2xl sm:text-4xl md:text-5xl lg:text-[3.25rem]'
                   )}
                 >
                   {blueName || (hasActiveMatch ? '---' : 'READY')}
@@ -601,7 +787,7 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
         {/* HONG / RED SIDE */}
         {!isSoloPoomsae && (
           <div
-            className="relative flex flex-col items-center justify-center px-4 sm:px-8 pt-14 pb-6 sm:pt-14 sm:pb-8 text-center overflow-hidden"
+            className="relative flex flex-col items-center justify-center px-4 sm:px-8 pt-36 pb-20 sm:pt-44 sm:pb-24 text-center overflow-hidden"
             style={{
               background:
                 'radial-gradient(circle at 20% 50%, #ef4444 0%, #b91c1c 34%, #7f090d 68%, #450306 100%)'
@@ -645,14 +831,23 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
               />
 
               {/* Club Name Angled Bar */}
-              <div className="w-full max-w-md sm:max-w-lg px-2 shrink-0">
+              <div className="w-full max-w-lg sm:max-w-xl px-2 shrink-0">
                 <div
-                  className="relative h-10 sm:h-12 md:h-14 flex items-center justify-center px-6 sm:px-10 bg-gradient-to-r from-[#450609] via-[#8c0c14] to-[#450609] border border-red-300/70 shadow-[0_0_24px_rgba(239,68,68,0.45)]"
+                  className="relative min-h-[3.25rem] sm:min-h-[3.75rem] md:min-h-[4.25rem] py-1.5 flex items-center justify-center px-7 sm:px-11 bg-gradient-to-r from-[#450609] via-[#8c0c14] to-[#450609] border border-red-300/70 shadow-[0_0_24px_rgba(239,68,68,0.45)]"
                   style={{
-                    clipPath: 'polygon(5% 0%, 100% 0%, 95% 100%, 0% 100%)'
+                    clipPath: 'polygon(4% 0%, 100% 0%, 96% 100%, 0% 100%)'
                   }}
                 >
-                  <p className="w-full text-sm sm:text-xl md:text-2xl font-black text-white uppercase tracking-wider truncate drop-shadow">
+                  <p
+                    className={cn(
+                      'w-full font-black text-white uppercase tracking-wider break-words whitespace-normal leading-tight drop-shadow',
+                      (redClub || '').length > 32
+                        ? 'text-xs sm:text-base md:text-lg'
+                        : (redClub || '').length > 22
+                          ? 'text-xs sm:text-lg md:text-xl'
+                          : 'text-sm sm:text-xl md:text-2xl'
+                    )}
+                  >
                     {redClub || (hasActiveMatch ? '---' : 'HONG CLUB')}
                   </p>
                 </div>
@@ -663,17 +858,19 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
               {/* Player Name Chamfered Frame */}
               <div className="w-full max-w-lg sm:max-w-xl px-1 shrink-0">
                 <div
-                  className="relative h-24 sm:h-28 md:h-36 lg:h-40 flex items-center justify-center px-5 sm:px-10 bg-gradient-to-b from-[#3d0307]/95 via-[#68070e]/90 to-[#240103]/95 border-2 border-red-400/80 shadow-[0_0_32px_rgba(248,113,113,0.4),inset_0_0_22px_rgba(239,68,68,0.28)]"
+                  className="relative min-h-[6.5rem] sm:min-h-[7.5rem] md:min-h-[9.5rem] lg:min-h-[10.5rem] py-3 flex items-center justify-center px-6 sm:px-10 bg-gradient-to-b from-[#3d0307]/95 via-[#68070e]/90 to-[#240103]/95 border-2 border-red-400/80 shadow-[0_0_32px_rgba(248,113,113,0.4),inset_0_0_22px_rgba(239,68,68,0.28)]"
                   style={{
                     clipPath: 'polygon(4% 0%, 96% 0%, 100% 22%, 100% 78%, 96% 100%, 4% 100%, 0% 78%, 0% 22%)'
                   }}
                 >
                   <h2
                     className={cn(
-                      'font-black italic text-white uppercase tracking-wide break-words leading-tight line-clamp-2 drop-shadow-[0_4px_12px_rgba(0,0,0,0.8)]',
-                      (redName || '').length > 22
-                        ? 'text-lg sm:text-2xl md:text-3xl lg:text-4xl'
-                        : 'text-2xl sm:text-4xl md:text-5xl lg:text-[3.25rem]'
+                      'font-black italic text-white uppercase tracking-wide break-words whitespace-normal leading-tight drop-shadow-[0_4px_12px_rgba(0,0,0,0.8)]',
+                      (redName || '').length > 36
+                        ? 'text-base sm:text-xl md:text-2xl lg:text-3xl'
+                        : (redName || '').length > 22
+                          ? 'text-lg sm:text-2xl md:text-3xl lg:text-4xl'
+                          : 'text-2xl sm:text-4xl md:text-5xl lg:text-[3.25rem]'
                     )}
                   >
                     {redName || (hasActiveMatch ? '---' : 'READY')}
@@ -692,6 +889,47 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
           />
         )}
 
+        {/* BOTTOM-CENTER TIMER PLAQUE (Straddling divider right above MY-TKD footer) */}
+        <div className="absolute bottom-0 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
+          <div
+            className={cn(
+              'px-8 sm:px-14 md:px-16 py-2 sm:py-3 bg-[#060f24]/95 border-x-2 border-t-2 flex items-center justify-center gap-2.5 sm:gap-3.5 transition-colors',
+              isTimerExpired
+                ? 'border-red-400/90 shadow-[0_-6px_30px_rgba(239,68,68,0.45),0_0_24px_rgba(239,68,68,0.35)]'
+                : isTimerRunning
+                  ? 'border-emerald-400/85 shadow-[0_-6px_30px_rgba(16,185,129,0.35),0_0_24px_rgba(34,211,238,0.28)]'
+                  : 'border-cyan-400/75 shadow-[0_-6px_28px_rgba(0,0,0,0.85),0_0_20px_rgba(34,211,238,0.22)]'
+            )}
+            style={{
+              clipPath: 'polygon(10% 0%, 90% 0%, 100% 100%, 0% 100%)'
+            }}
+          >
+            <Clock
+              size={22}
+              className={cn(
+                'hidden sm:block shrink-0',
+                isTimerExpired
+                  ? 'text-red-400 animate-pulse'
+                  : isTimerRunning
+                    ? 'text-emerald-400 animate-pulse'
+                    : 'text-cyan-300'
+              )}
+            />
+            <span
+              className={cn(
+                'font-mono text-2xl sm:text-4xl md:text-5xl font-black tabular-nums tracking-[0.08em] leading-none whitespace-nowrap drop-shadow-[0_3px_12px_rgba(0,0,0,0.85)]',
+                isTimerExpired
+                  ? 'text-red-400 animate-pulse'
+                  : isTimerRunning
+                    ? 'text-emerald-300'
+                    : 'text-white'
+              )}
+            >
+              {formatTimerMMSS(displayedTimerSeconds)}
+            </span>
+          </div>
+        </div>
+
         {/* 5-SECOND WINNER POPUP WINDOW (Matches bright winner color box across lower-center arena, leaving logos visible above) */}
         {activeWinner && (
           <div className="absolute inset-x-4 sm:inset-x-12 md:inset-x-24 lg:inset-x-36 top-[40%] bottom-[13%] z-40 flex items-center justify-center pointer-events-none">
@@ -703,12 +941,28 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
                   : 'bg-gradient-to-b from-[#1e88ff] via-[#0066ff] to-[#0044cc] border-white/85 shadow-[0_0_65px_rgba(0,102,255,0.65)]'
               )}
             >
-              <h1 className="text-2xl sm:text-4xl md:text-5xl lg:text-[3.5rem] font-black text-white uppercase tracking-wide drop-shadow-[0_4px_12px_rgba(0,0,0,0.65)] leading-tight break-words max-w-full">
+              <h1
+                className={cn(
+                  'font-black text-white uppercase tracking-wide drop-shadow-[0_4px_12px_rgba(0,0,0,0.65)] leading-tight break-words whitespace-normal max-w-full',
+                  winnerDisplayText.length > 34
+                    ? 'text-lg sm:text-2xl md:text-3xl lg:text-4xl'
+                    : winnerDisplayText.length > 22
+                      ? 'text-xl sm:text-3xl md:text-4xl lg:text-5xl'
+                      : 'text-2xl sm:text-4xl md:text-5xl lg:text-[3.5rem]'
+                )}
+              >
                 {winnerDisplayText}
               </h1>
 
               {cleanText(activeWinner.winnerClub) && (
-                <p className="mt-2 sm:mt-4 text-lg sm:text-3xl md:text-4xl font-black text-white uppercase tracking-wider drop-shadow-[0_3px_10px_rgba(0,0,0,0.6)] break-words max-w-full">
+                <p
+                  className={cn(
+                    'mt-2 sm:mt-4 font-black text-white uppercase tracking-wider drop-shadow-[0_3px_10px_rgba(0,0,0,0.6)] break-words whitespace-normal max-w-full leading-tight',
+                    cleanText(activeWinner.winnerClub).length > 30
+                      ? 'text-base sm:text-2xl md:text-3xl'
+                      : 'text-lg sm:text-3xl md:text-4xl'
+                  )}
+                >
                   {cleanText(activeWinner.winnerClub)}
                 </p>
               )}

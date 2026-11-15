@@ -135,3 +135,23 @@ export interface RingWinnerBroadcast {
   winType?: string;
   confirmedAt: number;
 }
+
+export interface RingTimerState {
+  ringNumber: number;
+  durationSeconds: number;
+  remainingSeconds: number;
+  isRunning: boolean;
+  startedAt?: number | null;
+  boutKey?: string;
+  updatedAt: number;
+}
+
+export interface RingPoomsaeSelection {
+  ringNumber: number;
+  poomsae1: string;
+  poomsae2: string;
+  boutKey?: string;
+  updatedAt: number;
+}
+
+

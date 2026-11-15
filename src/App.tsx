@@ -43,11 +43,13 @@ import {
   Image,
   ChevronDown,
   ChevronRight,
-  LayoutGrid
+  LayoutGrid,
+  Clock,
+  Square
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { QRCodeSVG } from 'qrcode.react';
-import { MatchData, RingStatus, EventData, BoutMapping, MatchHistoryItem, AdminBoutOverride, RingWinnerBroadcast } from './types';
+import { MatchData, RingStatus, EventData, BoutMapping, MatchHistoryItem, AdminBoutOverride, RingWinnerBroadcast, RingTimerState, RingPoomsaeSelection } from './types';
 import { PoomsaeScreenView } from './components/PoomsaeScreenView';
 import { TASheet } from './components/TASheet';
 import { InspectionLogs } from './components/InspectionLogs';
@@ -113,6 +115,33 @@ function hasPlayers(bout: MatchData | null | undefined): boolean {
   if (!bout) return false;
   return cleanPlaceholder(bout.blue_name) !== "---" || cleanPlaceholder(bout.red_name) !== "---";
 }
+
+function formatTimerMMSS(totalSeconds: number): string {
+  const safe = Math.max(0, Math.ceil(totalSeconds));
+  const mins = Math.floor(safe / 60);
+  const secs = safe % 60;
+  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+}
+
+const POOMSAE_FORMS = [
+  'Taegeuk Il Jang (1)',
+  'Taegeuk Ee Jang (2)',
+  'Taegeuk Sam Jang (3)',
+  'Taegeuk Sa Jang (4)',
+  'Taegeuk Oh Jang (5)',
+  'Taegeuk Yuk Jang (6)',
+  'Taegeuk Chil Jang (7)',
+  'Taegeuk Pal Jang (8)',
+  'Koryo',
+  'Keumgang',
+  'Taebaek',
+  'Pyongwon',
+  'Sipjin',
+  'Jitae',
+  'Chonkwon',
+  'Hansu',
+  'Ilyeo'
+] as const;
 
 export let isFirestoreQuotaExceeded = localStorage.getItem('tkd_disable_firebase') === 'true';
 
@@ -1601,6 +1630,10 @@ export default function App() {
   const [teamLogos, setTeamLogos] = useSyncedState<Record<string, string>>('tkd_team_logos', {});
   const [ringWinnerBanners, setRingWinnerBanners] = useSyncedState<Record<number, RingWinnerBroadcast>>('tkd_ring_winner_banners', {});
   const [winnerDisplaySeconds, setWinnerDisplaySeconds] = useSyncedState<number>('tkd_winner_display_seconds', 5);
+  const [matchTimerSeconds, setMatchTimerSeconds] = useSyncedState<number>('tkd_match_timer_seconds', 90);
+  const [ringTimers, setRingTimers] = useSyncedState<Record<number, RingTimerState>>('tkd_ring_timers', {});
+  const [ringControllerModes, setRingControllerModes] = useSyncedState<Record<number, 'kyorugi' | 'poomsae'>>('tkd_ring_controller_modes', {});
+  const [ringPoomsaeSelections, setRingPoomsaeSelections] = useSyncedState<Record<number, RingPoomsaeSelection>>('tkd_ring_poomsae_selection', {});
   const [confirmedWinnerPopup, setConfirmedWinnerPopup] = useState<RingWinnerBroadcast | null>(null);
   const [winnerPopupProgressStarted, setWinnerPopupProgressStarted] = useState(false);
   const [winnerPopupSecondsLeft, setWinnerPopupSecondsLeft] = useState(5);
@@ -1623,6 +1656,220 @@ export default function App() {
       delete next[key];
       return next;
     });
+  };
+
+  const broadcastRingTimers = (timersMap: Record<number, RingTimerState>) => {
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        const ch = new BroadcastChannel('tkd_ring_timers');
+        ch.postMessage(timersMap);
+        ch.close();
+      }
+    } catch {
+      // ignore BroadcastChannel errors
+    }
+  };
+
+  const broadcastRingPoomsaeSelections = (selectionsMap: Record<number, RingPoomsaeSelection>) => {
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        const ch = new BroadcastChannel('tkd_ring_poomsae_selection');
+        ch.postMessage(selectionsMap);
+        ch.close();
+      }
+    } catch {
+      // ignore BroadcastChannel errors
+    }
+  };
+
+  const handleUpdateRingPoomsaeSelection = (ringNumber: number, field: 'poomsae1' | 'poomsae2', value: string) => {
+    const boutKey = getRingBoutKey(ringNumber);
+    const nowMs = Date.now();
+    setRingPoomsaeSelections(prev => {
+      const existing = prev?.[ringNumber];
+      const sameBout = !existing?.boutKey || existing.boutKey === 'idle' || existing.boutKey === boutKey;
+      const baseP1 = sameBout ? (existing?.poomsae1 || '') : '';
+      const baseP2 = sameBout ? (existing?.poomsae2 || '') : '';
+      const updated: Record<number, RingPoomsaeSelection> = {
+        ...(prev || {}),
+        [ringNumber]: {
+          ringNumber,
+          poomsae1: field === 'poomsae1' ? value : baseP1,
+          poomsae2: field === 'poomsae2' ? value : baseP2,
+          boutKey,
+          updatedAt: nowMs
+        }
+      };
+      broadcastRingPoomsaeSelections(updated);
+      return updated;
+    });
+  };
+
+  const clearRingPoomsaeSelection = (ringNumber: number, overrideBoutKey?: string) => {
+    const boutKey = overrideBoutKey !== undefined ? overrideBoutKey : getRingBoutKey(ringNumber);
+    const nowMs = Date.now();
+    setRingPoomsaeSelections(prev => {
+      const updated: Record<number, RingPoomsaeSelection> = {
+        ...(prev || {}),
+        [ringNumber]: {
+          ringNumber,
+          poomsae1: '',
+          poomsae2: '',
+          boutKey,
+          updatedAt: nowMs
+        }
+      };
+      broadcastRingPoomsaeSelections(updated);
+      return updated;
+    });
+  };
+
+  const getRingBoutKey = (ringNumber: number): string => {
+    const r = rings.find(item => item.ringNumber === ringNumber);
+    const cb = r?.currentBout;
+    return cb ? `${cb.eventId || ''}_${cb.bout}` : 'idle';
+  };
+
+  const handleStartRingTimer = (ringNumber: number) => {
+    const defaultDur = Math.max(1, Number(matchTimerSeconds) || 90);
+    const boutKey = getRingBoutKey(ringNumber);
+    const nowMs = Date.now();
+    setRingTimers(prev => {
+      const existing = prev?.[ringNumber];
+      const sameBout = !existing?.boutKey || existing.boutKey === 'idle' || existing.boutKey === boutKey;
+      const canResume = Boolean(existing && sameBout && !existing.isRunning && existing.remainingSeconds > 0);
+      const nextRemaining = canResume ? existing!.remainingSeconds : defaultDur;
+      const nextDuration = canResume ? (existing!.durationSeconds || defaultDur) : defaultDur;
+      const updated: Record<number, RingTimerState> = {
+        ...(prev || {}),
+        [ringNumber]: {
+          ringNumber,
+          durationSeconds: nextDuration,
+          remainingSeconds: nextRemaining,
+          isRunning: true,
+          startedAt: nowMs,
+          boutKey,
+          updatedAt: nowMs
+        }
+      };
+      broadcastRingTimers(updated);
+      return updated;
+    });
+  };
+
+  const handleStopRingTimer = (ringNumber: number) => {
+    const defaultDur = Math.max(1, Number(matchTimerSeconds) || 90);
+    const boutKey = getRingBoutKey(ringNumber);
+    const nowMs = Date.now();
+    setRingTimers(prev => {
+      const existing = prev?.[ringNumber];
+      if (!existing) return prev || {};
+      let nextRemaining = existing.remainingSeconds;
+      if (existing.isRunning && existing.startedAt) {
+        const elapsed = (nowMs - existing.startedAt) / 1000;
+        nextRemaining = Math.max(0, Math.ceil(existing.remainingSeconds - elapsed));
+      }
+      const updated: Record<number, RingTimerState> = {
+        ...(prev || {}),
+        [ringNumber]: {
+          ringNumber,
+          durationSeconds: existing.durationSeconds || defaultDur,
+          remainingSeconds: nextRemaining,
+          isRunning: false,
+          startedAt: null,
+          boutKey: existing.boutKey || boutKey,
+          updatedAt: nowMs
+        }
+      };
+      broadcastRingTimers(updated);
+      return updated;
+    });
+  };
+
+  const handleResetRingTimer = (ringNumber: number, overrideBoutKey?: string) => {
+    const defaultDur = Math.max(1, Number(matchTimerSeconds) || 90);
+    const boutKey = overrideBoutKey !== undefined ? overrideBoutKey : getRingBoutKey(ringNumber);
+    const nowMs = Date.now();
+    setRingTimers(prev => {
+      const updated: Record<number, RingTimerState> = {
+        ...(prev || {}),
+        [ringNumber]: {
+          ringNumber,
+          durationSeconds: defaultDur,
+          remainingSeconds: defaultDur,
+          isRunning: false,
+          startedAt: null,
+          boutKey,
+          updatedAt: nowMs
+        }
+      };
+      broadcastRingTimers(updated);
+      return updated;
+    });
+  };
+
+  const handleUpdateMatchTimerSetting = (newSeconds: number) => {
+    const clamped = Math.max(5, Math.min(3600, Math.round(newSeconds)));
+    setMatchTimerSeconds(clamped);
+    setRingTimers(prev => {
+      const next: Record<number, RingTimerState> = { ...(prev || {}) };
+      let changed = false;
+      Object.keys(next).forEach((k) => {
+        const rNum = Number(k);
+        const t = next[rNum];
+        if (t && !t.isRunning) {
+          next[rNum] = {
+            ...t,
+            durationSeconds: clamped,
+            remainingSeconds: clamped,
+            startedAt: null,
+            updatedAt: Date.now()
+          };
+          changed = true;
+        }
+      });
+      if (changed) {
+        broadcastRingTimers(next);
+        return next;
+      }
+      return prev;
+    });
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        const ch = new BroadcastChannel('tkd_match_timer_setting');
+        ch.postMessage(clamped);
+        ch.close();
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleSetRingControllerMode = (ringNumber: number, mode: 'kyorugi' | 'poomsae') => {
+    setRingControllerModes(prev => ({
+      ...(prev || {}),
+      [ringNumber]: mode
+    }));
+    if (mode === 'kyorugi' && ringTimers?.[ringNumber]?.isRunning) {
+      handleResetRingTimer(ringNumber);
+    }
+  };
+
+  const handleSetAllRingsControllerMode = (mode: 'kyorugi' | 'poomsae') => {
+    setRingControllerModes(prev => {
+      const next: Record<number, 'kyorugi' | 'poomsae'> = { ...(prev || {}) };
+      currentRings.forEach(r => {
+        next[r.ringNumber] = mode;
+      });
+      return next;
+    });
+    if (mode === 'kyorugi') {
+      currentRings.forEach(r => {
+        if (ringTimers?.[r.ringNumber]?.isRunning) {
+          handleResetRingTimer(r.ringNumber);
+        }
+      });
+    }
   };
 
   useEffect(() => {
@@ -3412,6 +3659,8 @@ export default function App() {
       if (winnerDisplaySeconds > 0) {
         setConfirmedWinnerPopup(winnerBroadcast);
       }
+      handleResetRingTimer(ringNumber, 'idle');
+      clearRingPoomsaeSelection(ringNumber, 'idle');
     }
 
     if (activeUrl) {
@@ -4050,6 +4299,8 @@ export default function App() {
       localStorage.setItem('tkd_rings', JSON.stringify(updated));
       return updated;
     });
+    handleResetRingTimer(ringNumber, 'idle');
+    clearRingPoomsaeSelection(ringNumber, 'idle');
   };
 
   const resumeSuspendedBout = (ringNumber: number, boutNumber: string | number) => {
@@ -4084,6 +4335,8 @@ export default function App() {
       localStorage.setItem('tkd_rings', JSON.stringify(updated));
       return updated;
     });
+    handleResetRingTimer(ringNumber, `${currentEventId || ''}_${boutNumber}`);
+    clearRingPoomsaeSelection(ringNumber, `${currentEventId || ''}_${boutNumber}`);
   };
 
   const removeSuspendedBout = (ringNumber: number, boutNumber: string | number) => {
@@ -4136,6 +4389,8 @@ export default function App() {
       localStorage.setItem('tkd_rings', JSON.stringify(updated));
       return updated;
     });
+    handleResetRingTimer(ringNumber, 'idle');
+    clearRingPoomsaeSelection(ringNumber, 'idle');
   };
 
   const startRing = (ringNumber: number) => {
@@ -4727,6 +4982,9 @@ export default function App() {
         currentEventId={effectivePublicEventId || currentEventId}
         teamLogos={teamLogos}
         winnerBanner={ringWinnerBanners?.[selectedRingObj.ringNumber] || null}
+        timerState={ringTimers?.[selectedRingObj.ringNumber] || null}
+        defaultTimerSeconds={matchTimerSeconds}
+        poomsaeSelection={ringPoomsaeSelections?.[selectedRingObj.ringNumber] || null}
         getStageForBout={getStageForBout}
         onSelectRing={setPoomsaeScreenRing}
         onBack={user ? () => setIsStandalonePoomsae(false) : undefined}
@@ -5502,6 +5760,14 @@ export default function App() {
                         onSuspendCurrentBout={() => suspendActiveBout(selectedRingObj.ringNumber)}
                         transfers={boutTransfers}
                         getStageForBout={getStageForBout}
+                        timerState={ringTimers?.[selectedRingObj.ringNumber] || null}
+                        defaultTimerSeconds={matchTimerSeconds}
+                        onStartTimer={() => handleStartRingTimer(selectedRingObj.ringNumber)}
+                        onStopTimer={() => handleStopRingTimer(selectedRingObj.ringNumber)}
+                        onResetTimer={() => handleResetRingTimer(selectedRingObj.ringNumber)}
+                        controllerMode={ringControllerModes?.[selectedRingObj.ringNumber] || 'kyorugi'}
+                        poomsaeSelection={ringPoomsaeSelections?.[selectedRingObj.ringNumber] || null}
+                        onChangePoomsaeSelection={(field, value) => handleUpdateRingPoomsaeSelection(selectedRingObj.ringNumber, field, value)}
                       />
                     </div>
                   </div>
@@ -5850,6 +6116,9 @@ export default function App() {
                 currentEventId={currentEventId}
                 teamLogos={teamLogos}
                 winnerBanner={ringWinnerBanners?.[ringObj.ringNumber] || null}
+                timerState={ringTimers?.[ringObj.ringNumber] || null}
+                defaultTimerSeconds={matchTimerSeconds}
+                poomsaeSelection={ringPoomsaeSelections?.[ringObj.ringNumber] || null}
                 getStageForBout={getStageForBout}
                 onSelectRing={setPoomsaeScreenRing}
                 onBack={() => setActiveTab(user?.role === 'viewer' ? 'general' : 'mats')}
@@ -5859,24 +6128,56 @@ export default function App() {
             );
           })()}
 
-          {activeTab === 'mats' && (
+          {activeTab === 'mats' && (() => {
+            const operatorRingNum = Number(user?.assignedRing) || 1;
+            const operatorControllerMode = ringControllerModes?.[operatorRingNum] || 'kyorugi';
+            const adminAllPoomsae = currentRings.length > 0 && currentRings.every(r => (ringControllerModes?.[r.ringNumber] || 'kyorugi') === 'poomsae');
+            return (
             <div className={cn("space-y-6", isRingOperator && "space-y-2 sm:space-y-6")}>
-              <div className={cn("flex items-center justify-between", isRingOperator ? "hidden sm:flex" : "flex")}>
-                <h3 className="text-lg font-bold flex items-center gap-2">
-                  <LayoutDashboard size={20} className="text-red-600" />
-                  {user?.role === 'admin' ? "Live Ring Control Center" : `Ring ${getRingName(Number(user?.assignedRing) || 1)} Controller`}
-                  {isSyncing && (
-                    <span className="ml-4 flex items-center gap-2 text-green-600 text-[10px] font-black animate-pulse">
-                      <div className="w-1.5 h-1.5 bg-green-600 rounded-full" />
-                      SYNCING TO SYSTEM
-                    </span>
-                  )}
-                  {!googleSheetUrl && (
-                    <span className="ml-4 text-red-500 text-[10px] font-black animate-pulse">
-                      SYNC DISABLED (NO URL)
-                    </span>
-                  )}
-                </h3>
+              <div className={cn("flex items-center justify-between gap-3 flex-wrap", isRingOperator ? "hidden sm:flex" : "flex")}>
+                <div className="flex flex-wrap items-center gap-3 sm:gap-5">
+                  <h3 className="text-lg font-bold flex items-center gap-2">
+                    <LayoutDashboard size={20} className="text-red-600" />
+                    {user?.role === 'admin' ? "Live Ring Control Center" : `Ring ${getRingName(operatorRingNum)} Controller`}
+                    {isSyncing && (
+                      <span className="ml-4 flex items-center gap-2 text-green-600 text-[10px] font-black animate-pulse">
+                        <div className="w-1.5 h-1.5 bg-green-600 rounded-full" />
+                        SYNCING TO SYSTEM
+                      </span>
+                    )}
+                    {!googleSheetUrl && (
+                      <span className="ml-4 text-red-500 text-[10px] font-black animate-pulse">
+                        SYNC DISABLED (NO URL)
+                      </span>
+                    )}
+                  </h3>
+                  <div className="inline-flex items-center bg-slate-200/80 p-1 rounded-xl border border-slate-200 shadow-inner" role="group" aria-label="Controller Mode">
+                    <button
+                      type="button"
+                      onClick={() => user?.role === 'admin' ? handleSetAllRingsControllerMode('kyorugi') : handleSetRingControllerMode(operatorRingNum, 'kyorugi')}
+                      className={cn(
+                        "px-3.5 py-1.5 rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer",
+                        (user?.role === 'admin' ? !adminAllPoomsae : operatorControllerMode === 'kyorugi')
+                          ? "bg-slate-900 text-white shadow-sm"
+                          : "text-slate-600 hover:text-slate-900"
+                      )}
+                    >
+                      Kyorugi
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => user?.role === 'admin' ? handleSetAllRingsControllerMode('poomsae') : handleSetRingControllerMode(operatorRingNum, 'poomsae')}
+                      className={cn(
+                        "px-3.5 py-1.5 rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer",
+                        (user?.role === 'admin' ? adminAllPoomsae : operatorControllerMode === 'poomsae')
+                          ? "bg-red-600 text-white shadow-sm"
+                          : "text-slate-600 hover:text-slate-900"
+                      )}
+                    >
+                      Poomsae
+                    </button>
+                  </div>
+                </div>
                 {user?.role === 'admin' && (
                   <button 
                     onClick={() => setShowAddRingModal(true)}
@@ -5887,6 +6188,39 @@ export default function App() {
                   </button>
                 )}
               </div>
+              {isRingOperator && (
+                <div className="flex sm:hidden items-center justify-between px-1 pb-1">
+                  <span className="text-xs font-black uppercase tracking-wider text-slate-600">
+                    Controller Mode
+                  </span>
+                  <div className="inline-flex items-center bg-slate-200/80 p-0.5 rounded-lg border border-slate-200" role="group" aria-label="Controller Mode">
+                    <button
+                      type="button"
+                      onClick={() => handleSetRingControllerMode(operatorRingNum, 'kyorugi')}
+                      className={cn(
+                        "px-3 py-1 rounded-md text-[11px] font-black uppercase tracking-wider transition-all cursor-pointer",
+                        operatorControllerMode === 'kyorugi'
+                          ? "bg-slate-900 text-white shadow-sm"
+                          : "text-slate-600"
+                      )}
+                    >
+                      Kyorugi
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSetRingControllerMode(operatorRingNum, 'poomsae')}
+                      className={cn(
+                        "px-3 py-1 rounded-md text-[11px] font-black uppercase tracking-wider transition-all cursor-pointer",
+                        operatorControllerMode === 'poomsae'
+                          ? "bg-red-600 text-white shadow-sm"
+                          : "text-slate-600"
+                      )}
+                    >
+                      Poomsae
+                    </button>
+                  </div>
+                </div>
+              )}
               <div className={user?.role === 'admin' ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" : cn("grid grid-cols-1 xl:grid-cols-3 gap-6", isRingOperator && "gap-2 sm:gap-6")}>
                 {user?.role === 'admin' ? (
                   currentRings.map((ring) => (
@@ -5917,6 +6251,14 @@ export default function App() {
                       onSuspendCurrentBout={() => suspendActiveBout(ring.ringNumber)}
                       transfers={boutTransfers}
                       getStageForBout={getStageForBout}
+                      timerState={ringTimers?.[ring.ringNumber] || null}
+                      defaultTimerSeconds={matchTimerSeconds}
+                      onStartTimer={() => handleStartRingTimer(ring.ringNumber)}
+                      onStopTimer={() => handleStopRingTimer(ring.ringNumber)}
+                      onResetTimer={() => handleResetRingTimer(ring.ringNumber)}
+                      controllerMode={ringControllerModes?.[ring.ringNumber] || 'kyorugi'}
+                      poomsaeSelection={ringPoomsaeSelections?.[ring.ringNumber] || null}
+                      onChangePoomsaeSelection={(field, value) => handleUpdateRingPoomsaeSelection(ring.ringNumber, field, value)}
                     />
                   ))
                 ) : (
@@ -5949,6 +6291,14 @@ export default function App() {
                           onSuspendCurrentBout={() => suspendActiveBout(ring.ringNumber)}
                           transfers={boutTransfers}
                           getStageForBout={getStageForBout}
+                          timerState={ringTimers?.[ring.ringNumber] || null}
+                          defaultTimerSeconds={matchTimerSeconds}
+                          onStartTimer={() => handleStartRingTimer(ring.ringNumber)}
+                          onStopTimer={() => handleStopRingTimer(ring.ringNumber)}
+                          onResetTimer={() => handleResetRingTimer(ring.ringNumber)}
+                          controllerMode={ringControllerModes?.[ring.ringNumber] || 'kyorugi'}
+                          poomsaeSelection={ringPoomsaeSelections?.[ring.ringNumber] || null}
+                          onChangePoomsaeSelection={(field, value) => handleUpdateRingPoomsaeSelection(ring.ringNumber, field, value)}
                         />
                       ))}
                     </div>
@@ -6140,7 +6490,8 @@ export default function App() {
                 )}
               </div>
             </div>
-          )}
+            );
+          })()}
 
           {activeTab === 'ta-sheet' && (
             <div className="max-w-5xl mx-auto">
@@ -6769,6 +7120,73 @@ export default function App() {
                         ))}
                       </select>
                     </div>
+                    <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 flex flex-col gap-3 col-span-1 md:col-span-2">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-bold text-slate-700 font-sans flex items-center gap-2">
+                            <Clock size={15} className="text-red-600" />
+                            Poomsae / Match Timer Duration
+                          </p>
+                          <p className="text-[10px] text-slate-500 font-sans">
+                            Set default countdown timing displayed on Poomsae Screen View and controlled by Ring Start/Stop buttons
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="font-mono text-sm sm:text-base font-black text-slate-900 bg-white px-3 py-1.5 rounded-xl border border-slate-200 tabular-nums">
+                            {formatTimerMMSS(matchTimerSeconds)}
+                          </span>
+                          <div className="flex items-center gap-1 bg-white px-2.5 py-1.5 rounded-xl border border-slate-200">
+                            <input
+                              type="number"
+                              min={0}
+                              max={59}
+                              aria-label="Timer Minutes"
+                              value={Math.floor(matchTimerSeconds / 60)}
+                              onChange={(e) => {
+                                const mins = Math.max(0, Math.min(59, Number(e.target.value) || 0));
+                                const secs = matchTimerSeconds % 60;
+                                handleUpdateMatchTimerSetting(mins * 60 + secs);
+                              }}
+                              className="w-11 text-center font-black text-xs sm:text-sm text-slate-800 outline-none bg-transparent"
+                            />
+                            <span className="text-[10px] font-black text-slate-400 uppercase">min</span>
+                            <span className="text-slate-300 font-black">:</span>
+                            <input
+                              type="number"
+                              min={0}
+                              max={59}
+                              aria-label="Timer Seconds"
+                              value={matchTimerSeconds % 60}
+                              onChange={(e) => {
+                                const secs = Math.max(0, Math.min(59, Number(e.target.value) || 0));
+                                const mins = Math.floor(matchTimerSeconds / 60);
+                                handleUpdateMatchTimerSetting(mins * 60 + secs);
+                              }}
+                              className="w-11 text-center font-black text-xs sm:text-sm text-slate-800 outline-none bg-transparent"
+                            />
+                            <span className="text-[10px] font-black text-slate-400 uppercase">sec</span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider mr-1">Quick Presets:</span>
+                        {[30, 60, 90, 120, 150, 180, 300].map((presetSec) => (
+                          <button
+                            key={presetSec}
+                            type="button"
+                            onClick={() => handleUpdateMatchTimerSetting(presetSec)}
+                            className={cn(
+                              "px-2.5 py-1 rounded-lg text-[10px] font-black transition-all border cursor-pointer",
+                              matchTimerSeconds === presetSec
+                                ? "bg-red-600 text-white border-red-600 shadow-sm"
+                                : "bg-white text-slate-600 border-slate-200 hover:bg-slate-100"
+                            )}
+                          >
+                            {formatTimerMMSS(presetSec)}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                     <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 col-span-1 md:col-span-2">
                       <div>
                         <p className="text-sm font-bold text-slate-700">Big LED Screen Font Sizing</p>
@@ -7000,7 +7418,7 @@ export default function App() {
               </div>
 
               {confirmedWinnerPopup.category && (
-                <p className="text-xs sm:text-sm font-bold uppercase tracking-wider text-white/85 mb-5 line-clamp-2">
+                <p className="text-xs sm:text-sm font-bold uppercase tracking-wider text-white/85 mb-5 break-words whitespace-normal leading-snug">
                   {confirmedWinnerPopup.category}
                 </p>
               )}
@@ -8115,6 +8533,14 @@ interface RingCardProps {
   activeClubFontScale?: number;
   onOpenPoomsaeScreen?: () => void;
   getStageForBout?: (boutId: string | number, categoryName: string) => string;
+  timerState?: RingTimerState | null;
+  defaultTimerSeconds?: number;
+  onStartTimer?: () => void;
+  onStopTimer?: () => void;
+  onResetTimer?: () => void;
+  controllerMode?: 'kyorugi' | 'poomsae';
+  poomsaeSelection?: RingPoomsaeSelection | null;
+  onChangePoomsaeSelection?: (field: 'poomsae1' | 'poomsae2', value: string) => void;
 }
 
 interface EditResultModalProps {
@@ -8798,17 +9224,39 @@ function AddRingModal({ onClose, onAdd, existingRings, namingMode }: AddRingModa
   );
 }
 
-function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdate, onPointsUpdate, onUpdateTotalBouts, onStart, onDelete, onWinnerSelect, currentEventId, onForceSync, isAutoPull, onToggleAutoPull, user, boutNumberingMode = 'alphanumeric', layout = 'winner', showInspectionPopupSetting = true, onReturnToQueue, onResumeSuspended, onRemoveSuspended, onSuspendCurrentBout, transfers = [], activeNameFontScale, activeClubFontScale, getStageForBout }: RingCardProps & { currentEventId?: string | null, onForceSync?: (data: MatchData) => void }) {
+function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdate, onPointsUpdate, onUpdateTotalBouts, onStart, onDelete, onWinnerSelect, currentEventId, onForceSync, isAutoPull, onToggleAutoPull, user, boutNumberingMode = 'alphanumeric', layout = 'winner', showInspectionPopupSetting = true, onReturnToQueue, onResumeSuspended, onRemoveSuspended, onSuspendCurrentBout, transfers = [], activeNameFontScale, activeClubFontScale, getStageForBout, timerState, defaultTimerSeconds = 90, onStartTimer, onStopTimer, onResetTimer, controllerMode = 'kyorugi', poomsaeSelection, onChangePoomsaeSelection }: RingCardProps & { currentEventId?: string | null, onForceSync?: (data: MatchData) => void }) {
   const [syncedNameScale] = useSyncedState<number>('tkd_active_name_font_scale', 100);
   const [syncedClubScale] = useSyncedState<number>('tkd_active_club_font_scale', 100);
   const effectiveNameScale = activeNameFontScale ?? syncedNameScale;
   const effectiveClubScale = activeClubFontScale ?? syncedClubScale;
   const [now, setNow] = useState(new Date());
+  const [timerTickMs, setTimerTickMs] = useState<number>(() => Date.now());
 
   useEffect(() => {
     const interval = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(interval);
   }, []);
+
+  const currentBoutKeyForTimer = ring.currentBout ? `${ring.currentBout.eventId || ''}_${ring.currentBout.bout}` : 'idle';
+  const isTimerForRingBout = !timerState?.boutKey || timerState.boutKey === 'idle' || timerState.boutKey === currentBoutKeyForTimer;
+  const isRingTimerRunning = Boolean(timerState && isTimerForRingBout && timerState.isRunning && timerState.startedAt);
+
+  useEffect(() => {
+    if (!isRingTimerRunning) return;
+    setTimerTickMs(Date.now());
+    const id = setInterval(() => setTimerTickMs(Date.now()), 200);
+    return () => clearInterval(id);
+  }, [isRingTimerRunning]);
+
+  const displayedRingTimerSeconds = (() => {
+    const fallback = Math.max(1, Number(defaultTimerSeconds) || 90);
+    if (!timerState || !isTimerForRingBout) return fallback;
+    if (timerState.isRunning && timerState.startedAt) {
+      const elapsedSec = (timerTickMs - timerState.startedAt) / 1000;
+      return Math.max(0, Math.ceil(timerState.remainingSeconds - elapsedSec));
+    }
+    return Math.max(0, Math.ceil(timerState.remainingSeconds));
+  })();
 
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
   const [isFinalBoutSelection, setIsFinalBoutSelection] = useState(false);
@@ -8992,7 +9440,7 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
                 })();
                 const formBout = formatBoutNumber(ring.ringNumber, current.bout, boutNumberingMode);
                 return (
-                  <span className="text-sm sm:text-2xl font-black text-slate-300 uppercase tracking-wider border border-slate-700 bg-slate-800 rounded-md sm:rounded-lg px-2 sm:px-3 py-0.5 sm:py-1 leading-none shrink-0">
+                  <span className="text-lg sm:text-3xl font-black text-slate-200 uppercase tracking-wider border border-slate-700 bg-slate-800 rounded-md sm:rounded-lg px-2.5 sm:px-4 py-1 sm:py-1.5 leading-none shrink-0">
                     {formBout}
                     {!isTransferred && ring.totalBouts ? ` / ${formatBoutNumber(ring.ringNumber, ring.totalBouts, boutNumberingMode)}` : ''}
                   </span>
@@ -9146,8 +9594,8 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
               <div className="flex items-start justify-between pb-1 sm:pb-2">
                 <div className="flex flex-col gap-1 min-w-0 pr-2">
                   <div className="flex items-center gap-1.5 min-w-0">
-                    <Shield size={16} className={cn("shrink-0", current.privacy_mode ? "text-red-500" : "text-green-500")} />
-                    <span className="text-xs sm:text-sm md:text-[15px] font-bold text-slate-600 uppercase leading-snug line-clamp-2">{cleanPlaceholder(current.category)}</span>
+                    <Shield size={16} className={cn("shrink-0 mt-0.5", current.privacy_mode ? "text-red-500" : "text-green-500")} />
+                    <span className="text-xs sm:text-sm md:text-[15px] font-bold text-slate-600 uppercase leading-snug break-words whitespace-normal">{cleanPlaceholder(current.category)}</span>
                   </div>
                   {current.privacy_mode && (
                     <span className="text-[9px] font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded w-fit inline-block">PDPA ACTIVE</span>
@@ -9168,10 +9616,132 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
                 )}
               </div>
               
-              {/* Category section migrated above */}
+              {/* Poomsae 1 & 2 Selection (Shown in Poomsae controller mode before Match Timer) */}
+              {controllerMode === 'poomsae' && onChangePoomsaeSelection && (() => {
+                const isSelForCurrentBout =
+                  !poomsaeSelection?.boutKey ||
+                  poomsaeSelection.boutKey === 'idle' ||
+                  poomsaeSelection.boutKey === currentBoutKeyForTimer;
+                const valPoomsae1 = isSelForCurrentBout ? (poomsaeSelection?.poomsae1 || '') : '';
+                const valPoomsae2 = isSelForCurrentBout ? (poomsaeSelection?.poomsae2 || '') : '';
+                return (
+                  <div className="pt-3 border-t border-slate-100">
+                    <div className="flex flex-col gap-2.5">
+                      <div className="space-y-1">
+                        <label
+                          htmlFor={`ring-${ring.ringNumber}-poomsae-1`}
+                          className="block text-[11px] sm:text-xs font-black text-slate-600 uppercase tracking-wider px-0.5"
+                        >
+                          Selection for Poomsae 1
+                        </label>
+                        <select
+                          id={`ring-${ring.ringNumber}-poomsae-1`}
+                          value={valPoomsae1}
+                          onChange={(e) => onChangePoomsaeSelection('poomsae1', e.target.value)}
+                          className="w-full min-h-[42px] px-3 py-2 bg-slate-50 hover:bg-white border border-slate-200 focus:border-blue-500 focus:bg-white rounded-xl text-sm sm:text-base font-bold text-slate-800 outline-none transition-colors cursor-pointer"
+                        >
+                          <option value="">-- Select Poomsae 1 --</option>
+                          {POOMSAE_FORMS.map((form) => (
+                            <option key={form} value={form}>
+                              {form}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="space-y-1">
+                        <label
+                          htmlFor={`ring-${ring.ringNumber}-poomsae-2`}
+                          className="block text-[11px] sm:text-xs font-black text-slate-600 uppercase tracking-wider px-0.5"
+                        >
+                          Selection for Poomsae 2
+                        </label>
+                        <select
+                          id={`ring-${ring.ringNumber}-poomsae-2`}
+                          value={valPoomsae2}
+                          onChange={(e) => onChangePoomsaeSelection('poomsae2', e.target.value)}
+                          className="w-full min-h-[42px] px-3 py-2 bg-slate-50 hover:bg-white border border-slate-200 focus:border-red-500 focus:bg-white rounded-xl text-sm sm:text-base font-bold text-slate-800 outline-none transition-colors cursor-pointer"
+                        >
+                          <option value="">-- Select Poomsae 2 --</option>
+                          {POOMSAE_FORMS.map((form) => (
+                            <option key={form} value={form}>
+                              {form}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Match Timer Controls (Shown in Poomsae controller mode; Kyorugi controller is without timer) */}
+              {controllerMode === 'poomsae' && (onStartTimer || onStopTimer) && (
+                <div className="pt-3 border-t border-slate-100 space-y-2">
+                  <div className="flex items-center justify-between px-0.5">
+                    <span className="text-[9px] sm:text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                      <Clock size={12} className={isRingTimerRunning ? "text-emerald-600 animate-pulse" : "text-slate-400"} />
+                      Match Timer
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <span
+                        className={cn(
+                          "font-mono text-xs sm:text-sm font-black tabular-nums px-2.5 py-0.5 rounded-md border",
+                          isRingTimerRunning
+                            ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                            : displayedRingTimerSeconds === 0
+                              ? "bg-red-50 text-red-600 border-red-200 animate-pulse"
+                              : "bg-slate-100 text-slate-800 border-slate-200"
+                        )}
+                      >
+                        {formatTimerMMSS(displayedRingTimerSeconds)}
+                      </span>
+                      {onResetTimer && (
+                        <button
+                          type="button"
+                          onClick={onResetTimer}
+                          className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 transition-colors cursor-pointer"
+                          title="Reset timer to default duration"
+                        >
+                          <RotateCcw size={12} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2.5 sm:gap-4">
+                    <button
+                      type="button"
+                      onClick={onStartTimer}
+                      disabled={isRingTimerRunning}
+                      className={cn(
+                        "min-h-[42px] sm:min-h-[46px] py-2 px-3 rounded-xl font-black text-xs sm:text-sm uppercase tracking-wider transition-all flex items-center justify-center gap-2 border-2 shadow-sm",
+                        isRingTimerRunning
+                          ? "bg-emerald-600 text-white border-emerald-600 cursor-default shadow-emerald-200"
+                          : "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-600 hover:text-white hover:border-emerald-600 active:scale-95 cursor-pointer"
+                      )}
+                    >
+                      <Play size={14} fill="currentColor" />
+                      <span>{isRingTimerRunning ? 'Running...' : 'Start Timer'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onStopTimer}
+                      disabled={!isRingTimerRunning}
+                      className={cn(
+                        "min-h-[42px] sm:min-h-[46px] py-2 px-3 rounded-xl font-black text-xs sm:text-sm uppercase tracking-wider transition-all flex items-center justify-center gap-2 border-2 shadow-sm",
+                        isRingTimerRunning
+                          ? "bg-red-50 text-red-600 border-red-200 hover:bg-red-600 hover:text-white hover:border-red-600 active:scale-95 cursor-pointer"
+                          : "bg-slate-50 text-slate-400 border-slate-200 opacity-60 cursor-not-allowed"
+                      )}
+                    >
+                      <Square size={13} fill="currentColor" />
+                      <span>Stop Timer</span>
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {onWinnerSelect && (
-                <div className="pt-6 border-t border-slate-100">
+                <div className="pt-4 border-t border-slate-100">
                   {isPoomsaeMode ? (
                     <div className="space-y-4">
                       <p className="text-center text-[10px] font-black text-slate-400 uppercase tracking-widest">Poomsae Final Score</p>
@@ -9903,7 +10473,7 @@ function FighterSide({ color, name, club, privacy, inspected, activeNameFontScal
         <PlayerLogoBadge club={club} name={name} size="sm" className="shrink-0 mt-0.5 sm:w-10 sm:h-10" />
         <div className="min-w-0 flex-1">
           <p 
-            className="font-black text-slate-800 leading-tight line-clamp-2 sm:line-clamp-3 whitespace-normal break-words"
+            className="font-black text-slate-800 leading-tight whitespace-normal break-words"
             style={{
               fontSize: `${baseSize * (activeNameFontScale / 100)}px`,
               lineHeight: 1.15
@@ -9913,7 +10483,7 @@ function FighterSide({ color, name, club, privacy, inspected, activeNameFontScal
           </p>
           <p 
             className={cn(
-              "font-bold uppercase truncate sm:whitespace-normal",
+              "font-bold uppercase whitespace-normal break-words",
               color === 'blue' ? "text-[#00a2e8]" : "text-[#ed1c24]"
             )}
             style={{
@@ -10692,8 +11262,8 @@ function StandbyView({
                     <>
                       {/* Bout Num */}
                       <div
-                        className="col-span-2 flex items-center justify-center text-3xl font-black text-white border-r border-white/10 bg-[#161f33] overflow-hidden px-1 whitespace-nowrap"
-                        style={effectiveBoutScale !== 100 ? { fontSize: `calc(30px * ${effectiveBoutScale / 100})`, lineHeight: 1 } : undefined}
+                        className="col-span-2 flex items-center justify-center text-3xl sm:text-4xl font-black text-white border-r border-white/10 bg-[#161f33] overflow-hidden px-1 whitespace-nowrap"
+                        style={effectiveBoutScale !== 100 ? { fontSize: `calc(36px * ${effectiveBoutScale / 100})`, lineHeight: 1 } : undefined}
                       >
                         {current ? formatBoutNumber(ring.ringNumber, current.bout, boutNumberingMode) : "---"}
                       </div>
@@ -11232,8 +11802,8 @@ function SiteView({
                     <>
                       {/* Bout Num */}
                       <div
-                        className="col-span-2 flex items-center justify-center text-3xl font-black text-white border-r border-[#1a1f2e] bg-[#161f33] overflow-hidden px-1 whitespace-nowrap"
-                        style={effectiveBoutScale !== 100 ? { fontSize: `calc(30px * ${effectiveBoutScale / 100})`, lineHeight: 1 } : undefined}
+                        className="col-span-2 flex items-center justify-center text-3xl sm:text-4xl font-black text-white border-r border-[#1a1f2e] bg-[#161f33] overflow-hidden px-1 whitespace-nowrap"
+                        style={effectiveBoutScale !== 100 ? { fontSize: `calc(36px * ${effectiveBoutScale / 100})`, lineHeight: 1 } : undefined}
                       >
                         {current ? formatBoutNumber(ring.ringNumber, current.bout, boutNumberingMode) : "---"}
                       </div>
@@ -11716,8 +12286,8 @@ function PointsView({
                     <>
                       {/* Bout Num */}
                       <div
-                        className="col-span-2 flex items-center justify-center text-3xl font-black text-white border-r border-white/10 bg-[#161f33] overflow-hidden px-1 whitespace-nowrap"
-                        style={effectiveBoutScale !== 100 ? { fontSize: `calc(30px * ${effectiveBoutScale / 100})`, lineHeight: 1 } : undefined}
+                        className="col-span-2 flex items-center justify-center text-3xl sm:text-4xl font-black text-white border-r border-white/10 bg-[#161f33] overflow-hidden px-1 whitespace-nowrap"
+                        style={effectiveBoutScale !== 100 ? { fontSize: `calc(36px * ${effectiveBoutScale / 100})`, lineHeight: 1 } : undefined}
                       >
                         {current ? formatBoutNumber(ring.ringNumber, current.bout, boutNumberingMode) : "---"}
                       </div>
@@ -13069,8 +13639,8 @@ function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, b
         {current && (
           <div className="absolute top-0 left-0 right-0 bottom-0 flex items-center justify-center pointer-events-none">
             <p
-              className="text-xl sm:text-3xl md:text-[40px] font-black text-white leading-none drop-shadow-md pointer-events-auto translate-x-10"
-              style={effectiveBoutScale !== 100 ? { fontSize: `calc(clamp(20px, 2.8vw, 40px) * ${effectiveBoutScale / 100})`, lineHeight: 1 } : undefined}
+              className="text-2xl sm:text-4xl md:text-[52px] font-black text-white leading-none drop-shadow-md pointer-events-auto translate-x-10"
+              style={effectiveBoutScale !== 100 ? { fontSize: `calc(clamp(24px, 3.6vw, 52px) * ${effectiveBoutScale / 100})`, lineHeight: 1 } : undefined}
             >
               {(() => {
                 const isTransferred = (() => {
@@ -13095,8 +13665,8 @@ function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, b
                       <>
                         <span className="mx-1 sm:mx-2 text-white/40">/</span>
                         <span
-                          className="text-xs sm:text-2xl md:text-[30px]"
-                          style={effectiveBoutScale !== 100 ? { fontSize: `calc(clamp(12px, 2vw, 30px) * ${effectiveBoutScale / 100})`, lineHeight: 1 } : undefined}
+                          className="text-sm sm:text-2xl md:text-[34px]"
+                          style={effectiveBoutScale !== 100 ? { fontSize: `calc(clamp(14px, 2.3vw, 34px) * ${effectiveBoutScale / 100})`, lineHeight: 1 } : undefined}
                         >
                           {ring.totalBouts ? formatBoutNumber(ring.ringNumber, ring.totalBouts, boutNumberingMode) : (queueCount || 0)}
                         </span>
