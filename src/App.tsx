@@ -45,12 +45,16 @@ import {
   ChevronRight,
   LayoutGrid,
   Clock,
-  Square
+  Square,
+  Copy,
+  Users2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { QRCodeSVG } from 'qrcode.react';
-import { MatchData, RingStatus, EventData, BoutMapping, MatchHistoryItem, AdminBoutOverride, RingWinnerBroadcast, RingTimerState, RingPoomsaeSelection } from './types';
+import { MatchData, RingStatus, EventData, BoutMapping, MatchHistoryItem, AdminBoutOverride, RingWinnerBroadcast, RingTimerState, RingPoomsaeSelection, PoomsaeJudgeScore, RingPoomsaeScoringTarget, PoomsaeSideScoreSummary } from './types';
 import { PoomsaeScreenView } from './components/PoomsaeScreenView';
+import { JudgeScoringView } from './components/JudgeScoringView';
+import { calculatePoomsaePanelScore, formatPoomsaeScore, round2 } from './lib/poomsaeScoring';
 import { TASheet } from './components/TASheet';
 import { InspectionLogs } from './components/InspectionLogs';
 import { RingSummary } from './components/RingSummary';
@@ -184,6 +188,51 @@ function useLocalState<T>(key: string, initialValue: T) {
   return [state, setLocalState] as const;
 }
 
+const SYNC_TAB_ID =
+  typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : Math.random().toString(36).slice(2);
+
+function canClientWriteToCloud(): boolean {
+  if (typeof window !== 'undefined') {
+    const viewParam = new URLSearchParams(window.location.search).get('view')?.toLowerCase().trim();
+    const readOnlyViews = [
+      'public',
+      'poomsae',
+      'poomsae1',
+      'poomsae2',
+      'court',
+      'court1',
+      'court2',
+      'screen1',
+      'screen2',
+      'poomsae_screen',
+      'poomsae_screen_2',
+      'court_screen',
+      'court_screen_2',
+      'court-1',
+      'court-2',
+      'poomsae-1',
+      'poomsae-2',
+      'screen-1',
+      'screen-2',
+      'judge',
+      'j'
+    ];
+    if (viewParam && readOnlyViews.includes(viewParam)) return false;
+  }
+  const savedUser = localStorage.getItem('tkd_user');
+  if (savedUser) {
+    try {
+      const parsed = JSON.parse(savedUser);
+      return ['admin', 'user', 'ta'].includes(parsed?.role);
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
 export function useSyncedState<T>(key: string, initialValue: T) {
   const [state, setState] = useState<T>(() => {
     const saved = localStorage.getItem(key);
@@ -206,6 +255,52 @@ export function useSyncedState<T>(key: string, initialValue: T) {
   useEffect(() => {
     latestValueRef.current = state;
   }, [state]);
+
+  // Same-browser cross-tab instant sync via BroadcastChannel & localStorage 'storage' event
+  useEffect(() => {
+    let channel: BroadcastChannel | null = null;
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        channel = new BroadcastChannel('tkd_synced_state');
+        channel.onmessage = (event) => {
+          const msg = event.data as { key?: string; value?: T; sender?: string } | undefined;
+          if (!msg || msg.sender === SYNC_TAB_ID || msg.key !== key) return;
+          const incomingStr = JSON.stringify(msg.value);
+          if (incomingStr !== JSON.stringify(latestValueRef.current)) {
+            lastRemoteValue.current = incomingStr;
+            latestValueRef.current = msg.value as T;
+            try {
+              localStorage.setItem(key, incomingStr);
+            } catch {}
+            setState(msg.value as T);
+          }
+        };
+      }
+    } catch {
+      // ignore BroadcastChannel errors
+    }
+
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === key && e.newValue !== null) {
+        try {
+          if (e.newValue !== JSON.stringify(latestValueRef.current)) {
+            const parsed = JSON.parse(e.newValue) as T;
+            lastRemoteValue.current = e.newValue;
+            latestValueRef.current = parsed;
+            setState(parsed);
+          }
+        } catch {
+          // ignore parse errors
+        }
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+
+    return () => {
+      if (channel) channel.close();
+      window.removeEventListener('storage', handleStorage);
+    };
+  }, [key]);
 
   useEffect(() => {
     if (isFirestoreQuotaExceeded) {
@@ -232,9 +327,11 @@ export function useSyncedState<T>(key: string, initialValue: T) {
 
         if (document.exists()) {
           let remoteValue = document.data().value;
+          const canWrite = canClientWriteToCloud();
           
-          // CRDT Last-Write-Wins Merge for tkd_rings to prevent cross-court state overrides (uses logical version & updatedAt physical fallback)
-          if (key === 'tkd_rings' && Array.isArray(remoteValue)) {
+          // CRDT Last-Write-Wins Merge for tkd_rings on authorized writer clients only;
+          // read-only clients (Court Screen URL, Public Display, unauthenticated viewers) must always accept remote snapshots directly.
+          if (canWrite && key === 'tkd_rings' && Array.isArray(remoteValue)) {
             const localRings = (latestValueRef.current || []) as any[];
             const remoteRings = remoteValue as any[];
             
@@ -451,6 +548,16 @@ export function useSyncedState<T>(key: string, initialValue: T) {
         const valStr = JSON.stringify(newValue);
         localStorage.setItem(key, valStr);
         latestValueRef.current = newValue;
+
+        try {
+          if (typeof BroadcastChannel !== 'undefined') {
+            const ch = new BroadcastChannel('tkd_synced_state');
+            ch.postMessage({ key, value: newValue, sender: SYNC_TAB_ID });
+            ch.close();
+          }
+        } catch {
+          // ignore BroadcastChannel errors
+        }
         
         // Clear previous pending write to avoid extra intermediate updates
         if (timeoutRef.current) {
@@ -459,20 +566,8 @@ export function useSyncedState<T>(key: string, initialValue: T) {
         }
 
         // Only allow authorized logged-in users (admin, user, ta) to push updates to Firestore 
-        // to prevent spectator/viewer/guest clients from overwriting the cloud state.
-        const canWriteToCloud = (() => {
-          const isPublicUrl = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('view') === 'public';
-          if (isPublicUrl) return false;
-          
-          const savedUser = localStorage.getItem('tkd_user');
-          if (savedUser) {
-            try {
-              const parsed = JSON.parse(savedUser);
-              return ['admin', 'user', 'ta'].includes(parsed?.role);
-            } catch (_) {}
-          }
-          return false; // Strict default: Do NOT allow unlogged-in guest/spectator clients to write settings/states back to the Firestore database
-        })();
+        // to prevent spectator/viewer/guest/court-screen clients from overwriting the cloud state.
+        const canWriteToCloud = canClientWriteToCloud();
 
         // Guard against writing the same value back to Firestore, and ensure user is authorized
         if (canWriteToCloud && valStr !== lastRemoteValue.current) {
@@ -1492,13 +1587,34 @@ export default function App() {
     return isPublicEnv || isPublicUrl;
   });
   const [isStandalonePoomsae, setIsStandalonePoomsae] = useState(() => {
-    return typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('view') === 'poomsae';
+    if (typeof window === 'undefined') return false;
+    const v = (new URLSearchParams(window.location.search).get('view') || '').toLowerCase().trim();
+    return ['poomsae', 'poomsae1', 'court', 'court1', 'screen1', 'poomsae_screen', 'court_screen', 'court-1', 'poomsae-1', 'screen-1'].includes(v);
+  });
+  const [isStandalonePoomsae2, setIsStandalonePoomsae2] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    const v = (new URLSearchParams(window.location.search).get('view') || '').toLowerCase().trim();
+    return ['poomsae2', 'court2', 'screen2', 'poomsae_screen_2', 'court_screen_2', 'court-2', 'poomsae-2', 'screen-2'].includes(v);
+  });
+  const [isStandaloneJudge, setIsStandaloneJudge] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    const v = (new URLSearchParams(window.location.search).get('view') || '').toLowerCase().trim();
+    return ['judge', 'j', 'scoring'].includes(v);
+  });
+  const [judgeScreenNumber, setJudgeScreenNumber] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      const sp = new URLSearchParams(window.location.search);
+      const j = Number(sp.get('judge') || sp.get('j') || sp.get('judgeNumber'));
+      if (j >= 1 && j <= 7) return j;
+    }
+    return 1;
   });
   const [poomsaeScreenRing, setPoomsaeScreenRing] = useState<number>(() => {
     if (typeof window !== 'undefined') {
-      const ringParam = new URLSearchParams(window.location.search).get('ring');
+      const sp = new URLSearchParams(window.location.search);
+      const ringParam = sp.get('ring') || sp.get('court') || sp.get('courtNumber') || sp.get('r') || sp.get('ringNumber');
       if (ringParam) {
-        return parseRingNumber(ringParam);
+        return parseRingNumber(ringParam) || 1;
       }
     }
     const savedUser = localStorage.getItem('tkd_user');
@@ -1512,6 +1628,26 @@ export default function App() {
     }
     return 1;
   });
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const sp = new URLSearchParams(window.location.search);
+      const v = (sp.get('view') || '').toLowerCase().trim();
+      setIsPublicView(v === 'public' || (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_APP_MODE === 'PUBLIC'));
+      setIsStandalonePoomsae(['poomsae', 'poomsae1', 'court', 'court1', 'screen1', 'poomsae_screen', 'court_screen', 'court-1', 'poomsae-1', 'screen-1'].includes(v));
+      setIsStandalonePoomsae2(['poomsae2', 'court2', 'screen2', 'poomsae_screen_2', 'court_screen_2', 'court-2', 'poomsae-2', 'screen-2'].includes(v));
+      setIsStandaloneJudge(['judge', 'j', 'scoring'].includes(v));
+      const j = Number(sp.get('judge') || sp.get('j') || sp.get('judgeNumber'));
+      if (j >= 1 && j <= 7) setJudgeScreenNumber(j);
+      const r = sp.get('ring') || sp.get('court') || sp.get('courtNumber') || sp.get('r') || sp.get('ringNumber');
+      if (r) {
+        const parsedR = parseRingNumber(r);
+        if (parsedR) setPoomsaeScreenRing(parsedR);
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
   const [showLogin, setShowLogin] = useState(false);
   const [showNewBoutModal, setShowNewBoutModal] = useState(false);
   const [newBoutInitialRing, setNewBoutInitialRing] = useState<number | undefined>(undefined);
@@ -1634,6 +1770,15 @@ export default function App() {
   const [ringTimers, setRingTimers] = useSyncedState<Record<number, RingTimerState>>('tkd_ring_timers', {});
   const [ringControllerModes, setRingControllerModes] = useSyncedState<Record<number, 'kyorugi' | 'poomsae'>>('tkd_ring_controller_modes', {});
   const [ringPoomsaeSelections, setRingPoomsaeSelections] = useSyncedState<Record<number, RingPoomsaeSelection>>('tkd_ring_poomsae_selection', {});
+  const [poomsaeJudgeCount, setPoomsaeJudgeCount] = useSyncedState<3 | 5 | 7>('tkd_poomsae_judge_count', 5);
+  const [ringPoomsaeTargets, setRingPoomsaeTargets] = useSyncedState<Record<number, RingPoomsaeScoringTarget>>('tkd_ring_poomsae_targets', {});
+  const [poomsaeJudgeScores, setPoomsaeJudgeScores] = useState<PoomsaeJudgeScore[]>(() => {
+    try {
+      const saved = localStorage.getItem('tkd_poomsae_judge_scores');
+      if (saved) return JSON.parse(saved) as PoomsaeJudgeScore[];
+    } catch {}
+    return [];
+  });
   const [confirmedWinnerPopup, setConfirmedWinnerPopup] = useState<RingWinnerBroadcast | null>(null);
   const [winnerPopupProgressStarted, setWinnerPopupProgressStarted] = useState(false);
   const [winnerPopupSecondsLeft, setWinnerPopupSecondsLeft] = useState(5);
@@ -1728,6 +1873,261 @@ export default function App() {
     const r = rings.find(item => item.ringNumber === ringNumber);
     const cb = r?.currentBout;
     return cb ? `${cb.eventId || ''}_${cb.bout}` : 'idle';
+  };
+
+  // Real-time Firestore + same-browser BroadcastChannel sync for Poomsae Judge Scores
+  useEffect(() => {
+    let channel: BroadcastChannel | null = null;
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        channel = new BroadcastChannel('tkd_poomsae_judge_scores');
+        channel.onmessage = (event) => {
+          const msg = event.data as { type?: string; score?: PoomsaeJudgeScore; scores?: PoomsaeJudgeScore[]; clearedIds?: string[] } | undefined;
+          if (!msg) return;
+          if (msg.type === 'upsert' && msg.score) {
+            setPoomsaeJudgeScores((prev) => {
+              const filtered = prev.filter((s) => s.id !== msg.score!.id);
+              const next = [...filtered, msg.score!];
+              try { localStorage.setItem('tkd_poomsae_judge_scores', JSON.stringify(next)); } catch {}
+              return next;
+            });
+          } else if (msg.type === 'clear' && msg.clearedIds) {
+            const clearSet = new Set(msg.clearedIds);
+            setPoomsaeJudgeScores((prev) => {
+              const next = prev.filter((s) => !clearSet.has(s.id));
+              try { localStorage.setItem('tkd_poomsae_judge_scores', JSON.stringify(next)); } catch {}
+              return next;
+            });
+          }
+        };
+      }
+    } catch {}
+
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === 'tkd_poomsae_judge_scores' && e.newValue) {
+        try {
+          setPoomsaeJudgeScores(JSON.parse(e.newValue) as PoomsaeJudgeScore[]);
+        } catch {}
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+
+    let unsub = () => {};
+    const handleGlobalQuota = () => {
+      unsub();
+    };
+    window.addEventListener('firestore-quota-exceeded', handleGlobalQuota);
+
+    if (!isFirestoreQuotaExceeded) {
+      try {
+        unsub = onSnapshot(collection(db, 'poomsae_judge_scores'), (snapshot) => {
+          const cloudScores = snapshot.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<PoomsaeJudgeScore, 'id'>) }));
+          setPoomsaeJudgeScores(cloudScores);
+          try {
+            localStorage.setItem('tkd_poomsae_judge_scores', JSON.stringify(cloudScores));
+          } catch {}
+        }, (error) => {
+          if (error.code === 'resource-exhausted' || error.message?.toLowerCase().includes('quota')) {
+            handleGlobalQuotaTrigger();
+            unsub();
+          } else if (error.code !== 'permission-denied') {
+            console.error('Firestore poomsae_judge_scores error:', error);
+          }
+        });
+      } catch (e: any) {
+        if (e?.code === 'resource-exhausted' || e?.message?.toLowerCase().includes('quota')) {
+          handleGlobalQuotaTrigger();
+        }
+      }
+    }
+
+    return () => {
+      if (channel) channel.close();
+      window.removeEventListener('storage', handleStorage);
+      window.removeEventListener('firestore-quota-exceeded', handleGlobalQuota);
+      unsub();
+    };
+  }, []);
+
+  const handleSubmitPoomsaeJudgeScore = async (score: PoomsaeJudgeScore) => {
+    setPoomsaeJudgeScores((prev) => {
+      const next = [...prev.filter((s) => s.id !== score.id), score];
+      try {
+        localStorage.setItem('tkd_poomsae_judge_scores', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        const ch = new BroadcastChannel('tkd_poomsae_judge_scores');
+        ch.postMessage({ type: 'upsert', score });
+        ch.close();
+      }
+    } catch {}
+
+    if (!isFirestoreQuotaExceeded) {
+      try {
+        await setDoc(doc(db, 'poomsae_judge_scores', score.id), sanitizeForFirestore(score));
+      } catch (e: any) {
+        if (e?.code === 'resource-exhausted' || e?.message?.toLowerCase().includes('quota')) {
+          handleGlobalQuotaTrigger();
+        } else {
+          throw e;
+        }
+      }
+    }
+  };
+
+  const handleUpdateRingPoomsaeTarget = (
+    ringNumber: number,
+    patch: Partial<RingPoomsaeScoringTarget>,
+    overrideBoutKey?: string
+  ) => {
+    const boutKey = overrideBoutKey !== undefined ? overrideBoutKey : getRingBoutKey(ringNumber);
+    const nowMs = Date.now();
+    setRingPoomsaeTargets((prev) => {
+      const existing = prev?.[ringNumber];
+      const sameBout = !existing?.boutKey || existing.boutKey === 'idle' || existing.boutKey === boutKey;
+      const nextForRing: RingPoomsaeScoringTarget = {
+        ringNumber,
+        judgeCount: patch.judgeCount ?? (sameBout ? existing?.judgeCount : undefined) ?? poomsaeJudgeCount ?? 5,
+        activeSide: patch.activeSide ?? (sameBout ? existing?.activeSide : undefined) ?? 'blue',
+        activePoomsae: patch.activePoomsae ?? (sameBout ? existing?.activePoomsae : undefined) ?? 1,
+        showFinalScoreOnScreen:
+          patch.showFinalScoreOnScreen !== undefined
+            ? patch.showFinalScoreOnScreen
+            : sameBout && existing?.showFinalScoreOnScreen !== undefined
+              ? existing.showFinalScoreOnScreen
+              : true,
+        boutKey,
+        clearedAt: patch.clearedAt !== undefined ? patch.clearedAt : (sameBout ? existing?.clearedAt : undefined),
+        updatedAt: nowMs,
+      };
+      return {
+        ...(prev || {}),
+        [ringNumber]: nextForRing,
+      };
+    });
+  };
+
+  const handleClearRingPoomsaeScores = async (
+    ringNumber: number,
+    options?: { side?: 'blue' | 'red'; poomsaeNo?: 1 | 2; overrideBoutKey?: string }
+  ) => {
+    const boutKey = options?.overrideBoutKey !== undefined ? options.overrideBoutKey : getRingBoutKey(ringNumber);
+    const nowMs = Date.now();
+    const toDelete = poomsaeJudgeScores.filter((s) => {
+      if (Number(s.ringNumber) !== Number(ringNumber)) return false;
+      if (boutKey && boutKey !== 'idle' && s.boutKey !== boutKey && s.boutKey !== `${currentEventId || ''}_${boutKey.split('_').slice(1).join('_')}`) {
+        return false;
+      }
+      if (options?.side && s.side !== options.side) return false;
+      if (options?.poomsaeNo && s.poomsaeNo !== options.poomsaeNo) return false;
+      return true;
+    });
+
+    const clearedIds = toDelete.map((s) => s.id);
+    if (clearedIds.length > 0) {
+      const clearSet = new Set(clearedIds);
+      setPoomsaeJudgeScores((prev) => {
+        const next = prev.filter((s) => !clearSet.has(s.id));
+        try {
+          localStorage.setItem('tkd_poomsae_judge_scores', JSON.stringify(next));
+        } catch {}
+        return next;
+      });
+      try {
+        if (typeof BroadcastChannel !== 'undefined') {
+          const ch = new BroadcastChannel('tkd_poomsae_judge_scores');
+          ch.postMessage({ type: 'clear', clearedIds });
+          ch.close();
+        }
+      } catch {}
+
+      if (!isFirestoreQuotaExceeded) {
+        Promise.allSettled(
+          clearedIds.map((docId) => deleteDoc(doc(db, 'poomsae_judge_scores', docId)))
+        ).catch(() => {});
+      }
+    }
+
+    if (!options?.side && !options?.poomsaeNo) {
+      handleUpdateRingPoomsaeTarget(ringNumber, {
+        activeSide: 'blue',
+        activePoomsae: 1,
+        clearedAt: nowMs,
+      }, boutKey);
+    }
+  };
+
+  const getRingPoomsaeSummaries = (
+    ringObj: RingStatus
+  ): { blue: PoomsaeSideScoreSummary; red: PoomsaeSideScoreSummary } => {
+    const emptySummary: PoomsaeSideScoreSummary = {
+      p1Total: null,
+      p2Total: null,
+      finalTotal: null,
+      p1Complete: false,
+      p2Complete: false,
+    };
+    const cb = ringObj.currentBout;
+    if (!cb) return { blue: emptySummary, red: emptySummary };
+
+    const target = ringPoomsaeTargets?.[ringObj.ringNumber];
+    const expectedBoutKey = `${cb.eventId || ''}_${cb.bout}`;
+    const targetMatches =
+      !target?.boutKey || target.boutKey === 'idle' || target.boutKey === expectedBoutKey;
+
+    if (targetMatches && target?.showFinalScoreOnScreen === false) {
+      return { blue: emptySummary, red: emptySummary };
+    }
+
+    const panelSize: 3 | 5 | 7 = (targetMatches ? target?.judgeCount : undefined) || poomsaeJudgeCount || 5;
+    const clearedAt = targetMatches && target?.clearedAt ? target.clearedAt : 0;
+
+    const matchingBoutScores = poomsaeJudgeScores.filter((s) => {
+      if (Number(s.ringNumber) !== Number(ringObj.ringNumber)) return false;
+      if (String(s.boutNumber) !== String(cb.bout)) return false;
+      const evA = String(cb.eventId || 'default');
+      const evB = String(s.eventId || 'default');
+      if (evA !== evB && cb.eventId && s.eventId) return false;
+      if (clearedAt > 0 && s.submittedAt < clearedAt) return false;
+      return true;
+    });
+
+    const computeForSide = (side: 'blue' | 'red'): PoomsaeSideScoreSummary => {
+      const sideScores = matchingBoutScores.filter((s) => s.side === side);
+      const p1Res = calculatePoomsaePanelScore(
+        sideScores.filter((s) => s.poomsaeNo === 1),
+        panelSize
+      );
+      const p2Res = calculatePoomsaePanelScore(
+        sideScores.filter((s) => s.poomsaeNo === 2),
+        panelSize
+      );
+      const p1Total = p1Res.isComplete ? p1Res.totalScore : null;
+      const p2Total = p2Res.isComplete ? p2Res.totalScore : null;
+      let finalTotal: number | null = null;
+      if (p1Total !== null && p2Total !== null) {
+        finalTotal = round2((p1Total + p2Total) / 2);
+      } else if (p1Total !== null) {
+        finalTotal = p1Total;
+      } else if (p2Total !== null) {
+        finalTotal = p2Total;
+      }
+      return {
+        p1Total,
+        p2Total,
+        finalTotal,
+        p1Complete: p1Res.isComplete,
+        p2Complete: p2Res.isComplete,
+      };
+    };
+
+    return {
+      blue: computeForSide('blue'),
+      red: computeForSide('red'),
+    };
   };
 
   const handleStartRingTimer = (ringNumber: number) => {
@@ -1928,8 +2328,9 @@ export default function App() {
     setShowRebootModal(false);
   };
 
-  // Auto-select first event when currentEventId is null or not valid
+  // Auto-select first event when currentEventId is null or not valid (authorized sessions only)
   useEffect(() => {
+    if (isStandalonePoomsae || isStandalonePoomsae2 || isStandaloneJudge || isPublicView) return;
     if (events.length > 0) {
       if (!currentEventId || !events.some(e => e.id === currentEventId)) {
         const defaultEventId = events[0].id;
@@ -1945,7 +2346,7 @@ export default function App() {
         console.log("Automatically synchronized and activated default event:", defaultEventId);
       }
     }
-  }, [events, currentEventId, setCurrentEventId, setGoogleSheetUrl]);
+  }, [events, currentEventId, setCurrentEventId, setGoogleSheetUrl, isStandalonePoomsae, isStandalonePoomsae2, isStandaloneJudge, isPublicView]);
 
   // Persistence & Cross-tab Sync handled by useSyncedState
 
@@ -3661,6 +4062,7 @@ export default function App() {
       }
       handleResetRingTimer(ringNumber, 'idle');
       clearRingPoomsaeSelection(ringNumber, 'idle');
+      handleUpdateRingPoomsaeTarget(ringNumber, { activeSide: 'blue', activePoomsae: 1, clearedAt: Date.now() }, 'idle');
     }
 
     if (activeUrl) {
@@ -4301,6 +4703,7 @@ export default function App() {
     });
     handleResetRingTimer(ringNumber, 'idle');
     clearRingPoomsaeSelection(ringNumber, 'idle');
+    handleUpdateRingPoomsaeTarget(ringNumber, { activeSide: 'blue', activePoomsae: 1, clearedAt: Date.now() }, 'idle');
   };
 
   const resumeSuspendedBout = (ringNumber: number, boutNumber: string | number) => {
@@ -4337,6 +4740,7 @@ export default function App() {
     });
     handleResetRingTimer(ringNumber, `${currentEventId || ''}_${boutNumber}`);
     clearRingPoomsaeSelection(ringNumber, `${currentEventId || ''}_${boutNumber}`);
+    handleUpdateRingPoomsaeTarget(ringNumber, { activeSide: 'blue', activePoomsae: 1 }, `${currentEventId || ''}_${boutNumber}`);
   };
 
   const removeSuspendedBout = (ringNumber: number, boutNumber: string | number) => {
@@ -4391,6 +4795,7 @@ export default function App() {
     });
     handleResetRingTimer(ringNumber, 'idle');
     clearRingPoomsaeSelection(ringNumber, 'idle');
+    handleUpdateRingPoomsaeTarget(ringNumber, { activeSide: 'blue', activePoomsae: 1, clearedAt: Date.now() }, 'idle');
   };
 
   const startRing = (ringNumber: number) => {
@@ -4965,32 +5370,102 @@ export default function App() {
     return event ? event.name : '';
   }, [events, effectivePublicEventId]);
 
-  if (isStandalonePoomsae) {
-    const standaloneRings = publicRings.length > 0 ? publicRings : currentRings;
-    const selectedRingObj = standaloneRings.find(r => r.ringNumber === poomsaeScreenRing) || standaloneRings[0] || {
-      ringNumber: poomsaeScreenRing || 1,
-      currentBout: null,
-      onDeck: null,
-      inTheHole: null
-    };
+  if (isStandalonePoomsae || isStandalonePoomsae2) {
+    const standaloneRings = currentRings.length > 0 ? currentRings : publicRings;
+    const selectedRingObj =
+      standaloneRings.find(r => parseRingNumber(r.ringNumber) === parseRingNumber(poomsaeScreenRing)) ||
+      (rings || []).find(r => parseRingNumber(r.ringNumber) === parseRingNumber(poomsaeScreenRing)) ||
+      standaloneRings[0] || {
+        ringNumber: poomsaeScreenRing || 1,
+        currentBout: null,
+        onDeck: null,
+        inTheHole: null
+      };
+    const isScreen2 = isStandalonePoomsae2;
+    const summaries = isScreen2 ? getRingPoomsaeSummaries(selectedRingObj) : null;
     return (
       <PoomsaeScreenView
         ring={selectedRingObj}
         availableRings={standaloneRings}
         namingMode={ringNamingMode}
         boutNumberingMode={boutNumberingMode}
-        currentEventId={effectivePublicEventId || currentEventId}
+        currentEventId={currentEventId || effectivePublicEventId}
         teamLogos={teamLogos}
         winnerBanner={ringWinnerBanners?.[selectedRingObj.ringNumber] || null}
         timerState={ringTimers?.[selectedRingObj.ringNumber] || null}
         defaultTimerSeconds={matchTimerSeconds}
         poomsaeSelection={ringPoomsaeSelections?.[selectedRingObj.ringNumber] || null}
         getStageForBout={getStageForBout}
-        onSelectRing={setPoomsaeScreenRing}
-        onBack={user ? () => setIsStandalonePoomsae(false) : undefined}
+        onSelectRing={(nextRing) => {
+          setPoomsaeScreenRing(nextRing);
+          try {
+            const url = new URL(window.location.href);
+            url.searchParams.set('view', isScreen2 ? 'poomsae2' : 'poomsae');
+            url.searchParams.set('ring', String(nextRing));
+            window.history.replaceState({}, '', url.toString());
+          } catch {}
+        }}
+        onBack={user ? () => {
+          setIsStandalonePoomsae(false);
+          setIsStandalonePoomsae2(false);
+        } : undefined}
         canSwitchRing={true}
         isStandalone={true}
         winnerDisplaySeconds={winnerDisplaySeconds}
+        showFinalScore={isScreen2}
+        blueScoreSummary={summaries?.blue || null}
+        redScoreSummary={summaries?.red || null}
+      />
+    );
+  }
+
+  if (isStandaloneJudge) {
+    const standaloneRings = currentRings.length > 0 ? currentRings : publicRings;
+    const selectedRingObj =
+      standaloneRings.find(r => parseRingNumber(r.ringNumber) === parseRingNumber(poomsaeScreenRing)) ||
+      (rings || []).find(r => parseRingNumber(r.ringNumber) === parseRingNumber(poomsaeScreenRing)) ||
+      standaloneRings[0] || {
+        ringNumber: poomsaeScreenRing || 1,
+        currentBout: null,
+        onDeck: null,
+        inTheHole: null
+      };
+    return (
+      <JudgeScoringView
+        ring={selectedRingObj}
+        availableRings={standaloneRings}
+        namingMode={ringNamingMode}
+        boutNumberingMode={boutNumberingMode}
+        currentEventId={currentEventId || effectivePublicEventId}
+        currentEventName={getCurrentEventName() || publicEventName}
+        currentEventDate={getCurrentEventDate()}
+        judgeNumber={judgeScreenNumber}
+        defaultJudgeCount={poomsaeJudgeCount}
+        scoringTarget={ringPoomsaeTargets?.[selectedRingObj.ringNumber] || null}
+        poomsaeSelection={ringPoomsaeSelections?.[selectedRingObj.ringNumber] || null}
+        existingScores={poomsaeJudgeScores}
+        onSelectRing={(nextRing) => {
+          setPoomsaeScreenRing(nextRing);
+          try {
+            const url = new URL(window.location.href);
+            url.searchParams.set('view', 'judge');
+            url.searchParams.set('ring', String(nextRing));
+            url.searchParams.set('judge', String(judgeScreenNumber));
+            window.history.replaceState({}, '', url.toString());
+          } catch {}
+        }}
+        onSelectJudge={(nextJudge) => {
+          setJudgeScreenNumber(nextJudge);
+          try {
+            const url = new URL(window.location.href);
+            url.searchParams.set('view', 'judge');
+            url.searchParams.set('ring', String(selectedRingObj.ringNumber));
+            url.searchParams.set('judge', String(nextJudge));
+            window.history.replaceState({}, '', url.toString());
+          } catch {}
+        }}
+        onSubmitScore={handleSubmitPoomsaeJudgeScore}
+        onBack={user ? () => setIsStandaloneJudge(false) : undefined}
       />
     );
   }
@@ -5147,7 +5622,7 @@ export default function App() {
               <NavGroup
                 icon={<Monitor size={20} />}
                 label="Views"
-                isActive={['general', 'standby', 'site_view', 'points', 'poomsae_screen'].includes(activeTab)}
+                isActive={['general', 'standby', 'site_view', 'points', 'poomsae_screen', 'poomsae_screen_2'].includes(activeTab)}
               >
                 <NavItem 
                   icon={<Monitor size={18} />} 
@@ -5178,6 +5653,12 @@ export default function App() {
                   label="Poomsae Screen" 
                   active={activeTab === 'poomsae_screen'} 
                   onClick={() => setActiveTab('poomsae_screen')} 
+                />
+                <NavItem 
+                  icon={<Monitor size={18} />} 
+                  label="Poomsae Screen 2" 
+                  active={activeTab === 'poomsae_screen_2'} 
+                  onClick={() => setActiveTab('poomsae_screen_2')} 
                 />
               </NavGroup>
               <NavItem 
@@ -5231,6 +5712,15 @@ export default function App() {
                 }} 
               />
               <NavItem 
+                icon={<Monitor size={20} />} 
+                label="Poomsae Screen 2" 
+                active={activeTab === 'poomsae_screen_2'} 
+                onClick={() => {
+                  setPoomsaeScreenRing(Number(user?.assignedRing) || 1);
+                  setActiveTab('poomsae_screen_2');
+                }} 
+              />
+              <NavItem 
                 icon={<Search size={20} />} 
                 label="Search Winner" 
                 active={activeTab === 'search-winner'} 
@@ -5243,7 +5733,7 @@ export default function App() {
               <NavGroup
                 icon={<Monitor size={20} />}
                 label="Views"
-                isActive={['general', 'standby', 'site_view', 'points', 'poomsae_screen'].includes(activeTab)}
+                isActive={['general', 'standby', 'site_view', 'points', 'poomsae_screen', 'poomsae_screen_2'].includes(activeTab)}
               >
                 <NavItem 
                   icon={<Monitor size={18} />} 
@@ -5274,6 +5764,12 @@ export default function App() {
                   label="Poomsae Screen" 
                   active={activeTab === 'poomsae_screen'} 
                   onClick={() => setActiveTab('poomsae_screen')} 
+                />
+                <NavItem 
+                  icon={<Monitor size={18} />} 
+                  label="Poomsae Screen 2" 
+                  active={activeTab === 'poomsae_screen_2'} 
+                  onClick={() => setActiveTab('poomsae_screen_2')} 
                 />
                 <NavItem 
                   icon={<QrCode size={18} />} 
@@ -5464,7 +5960,9 @@ export default function App() {
           {/* Page Header */}
           <div className={cn("flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-2 sm:mb-4 md:mb-8 print:hidden", (isRingOperator && activeTab === 'mats') && "hidden sm:flex")}>
             <div className="flex items-center gap-4">
-              <h2 className="text-xl md:text-2xl font-black text-slate-900 capitalize tracking-tight">{activeTab}</h2>
+              <h2 className="text-xl md:text-2xl font-black text-slate-900 capitalize tracking-tight">
+                {activeTab === 'poomsae_screen_2' ? 'Poomsae Screen 2' : activeTab === 'poomsae_screen' ? 'Poomsae Screen' : activeTab}
+              </h2>
             </div>
             
             <div className="flex flex-wrap items-center gap-2 md:gap-4">
@@ -5768,6 +6266,12 @@ export default function App() {
                         controllerMode={ringControllerModes?.[selectedRingObj.ringNumber] || 'kyorugi'}
                         poomsaeSelection={ringPoomsaeSelections?.[selectedRingObj.ringNumber] || null}
                         onChangePoomsaeSelection={(field, value) => handleUpdateRingPoomsaeSelection(selectedRingObj.ringNumber, field, value)}
+                        defaultPoomsaeJudgeCount={poomsaeJudgeCount}
+                        poomsaeScoringTarget={ringPoomsaeTargets?.[selectedRingObj.ringNumber] || null}
+                        poomsaeJudgeScores={poomsaeJudgeScores}
+                        onUpdatePoomsaeTarget={(patch) => handleUpdateRingPoomsaeTarget(selectedRingObj.ringNumber, patch)}
+                        onClearPoomsaeScores={(opts) => handleClearRingPoomsaeScores(selectedRingObj.ringNumber, opts)}
+                        onUpdatePoomsaeScore={handleSubmitPoomsaeJudgeScore}
                       />
                     </div>
                   </div>
@@ -6099,7 +6603,7 @@ export default function App() {
             />
           )}
 
-          {activeTab === 'poomsae_screen' && (() => {
+          {(activeTab === 'poomsae_screen' || activeTab === 'poomsae_screen_2') && (() => {
             const targetRingNum = user?.role === 'user' ? (Number(user?.assignedRing) || 1) : poomsaeScreenRing;
             const ringObj = currentRings.find(r => r.ringNumber === targetRingNum) || currentRings[0] || {
               ringNumber: targetRingNum || 1,
@@ -6107,6 +6611,8 @@ export default function App() {
               onDeck: null,
               inTheHole: null
             };
+            const isScreen2 = activeTab === 'poomsae_screen_2';
+            const summaries = isScreen2 ? getRingPoomsaeSummaries(ringObj) : null;
             return (
               <PoomsaeScreenView
                 ring={ringObj}
@@ -6124,6 +6630,9 @@ export default function App() {
                 onBack={() => setActiveTab(user?.role === 'viewer' ? 'general' : 'mats')}
                 canSwitchRing={user?.role === 'admin' || user?.role === 'viewer'}
                 winnerDisplaySeconds={winnerDisplaySeconds}
+                showFinalScore={isScreen2}
+                blueScoreSummary={summaries?.blue || null}
+                redScoreSummary={summaries?.red || null}
               />
             );
           })()}
@@ -6259,6 +6768,12 @@ export default function App() {
                       controllerMode={ringControllerModes?.[ring.ringNumber] || 'kyorugi'}
                       poomsaeSelection={ringPoomsaeSelections?.[ring.ringNumber] || null}
                       onChangePoomsaeSelection={(field, value) => handleUpdateRingPoomsaeSelection(ring.ringNumber, field, value)}
+                      defaultPoomsaeJudgeCount={poomsaeJudgeCount}
+                      poomsaeScoringTarget={ringPoomsaeTargets?.[ring.ringNumber] || null}
+                      poomsaeJudgeScores={poomsaeJudgeScores}
+                      onUpdatePoomsaeTarget={(patch) => handleUpdateRingPoomsaeTarget(ring.ringNumber, patch)}
+                      onClearPoomsaeScores={(opts) => handleClearRingPoomsaeScores(ring.ringNumber, opts)}
+                      onUpdatePoomsaeScore={handleSubmitPoomsaeJudgeScore}
                     />
                   ))
                 ) : (
@@ -6299,6 +6814,12 @@ export default function App() {
                           controllerMode={ringControllerModes?.[ring.ringNumber] || 'kyorugi'}
                           poomsaeSelection={ringPoomsaeSelections?.[ring.ringNumber] || null}
                           onChangePoomsaeSelection={(field, value) => handleUpdateRingPoomsaeSelection(ring.ringNumber, field, value)}
+                          defaultPoomsaeJudgeCount={poomsaeJudgeCount}
+                          poomsaeScoringTarget={ringPoomsaeTargets?.[ring.ringNumber] || null}
+                          poomsaeJudgeScores={poomsaeJudgeScores}
+                          onUpdatePoomsaeTarget={(patch) => handleUpdateRingPoomsaeTarget(ring.ringNumber, patch)}
+                          onClearPoomsaeScores={(opts) => handleClearRingPoomsaeScores(ring.ringNumber, opts)}
+                          onUpdatePoomsaeScore={handleSubmitPoomsaeJudgeScore}
                         />
                       ))}
                     </div>
@@ -7189,6 +7710,34 @@ export default function App() {
                     </div>
                     <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 col-span-1 md:col-span-2">
                       <div>
+                        <p className="text-sm font-bold text-slate-700 font-sans flex items-center gap-2">
+                          <Users2 size={15} className="text-red-600" />
+                          Poomsae Screen 2 — Judges Panel Count
+                        </p>
+                        <p className="text-[10px] text-slate-500 font-sans">
+                          3 Judges (Avg all 3) · 5 Judges (Drop 1 high &amp; 1 low, avg 3) · 7 Judges (Drop 1 high &amp; 1 low, avg 5)
+                        </p>
+                      </div>
+                      <div className="flex bg-slate-200 p-1 rounded-xl shrink-0">
+                        {([3, 5, 7] as const).map((cnt) => (
+                          <button
+                            key={cnt}
+                            type="button"
+                            onClick={() => setPoomsaeJudgeCount(cnt)}
+                            className={cn(
+                              "px-3.5 py-1.5 text-xs font-black rounded-lg transition-all cursor-pointer whitespace-nowrap",
+                              poomsaeJudgeCount === cnt
+                                ? "bg-slate-900 text-white shadow-sm"
+                                : "text-slate-600 hover:text-slate-900"
+                            )}
+                          >
+                            {cnt} Judges
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 col-span-1 md:col-span-2">
+                      <div>
                         <p className="text-sm font-bold text-slate-700">Big LED Screen Font Sizing</p>
                         <p className="text-[10px] text-slate-500">Adjust active court athlete name, club name, and standby player font scaling across all LED boards and public views</p>
                       </div>
@@ -7370,7 +7919,7 @@ export default function App() {
         );
       })()}
 
-      {confirmedWinnerPopup && activeTab !== 'poomsae_screen' && (() => {
+      {confirmedWinnerPopup && activeTab !== 'poomsae_screen' && activeTab !== 'poomsae_screen_2' && (() => {
         const isRedWinner = confirmedWinnerPopup.winnerSide === 'Red';
         const isCompletedResult = confirmedWinnerPopup.winnerSide === 'Completed';
         const popupRingLabel = ringNamingMode === 'alphabet'
@@ -8214,27 +8763,30 @@ export default function App() {
                   setActiveTab('poomsae_screen');
                 }}
                 className={cn(
-                  "flex flex-col sm:flex-row items-center gap-1 sm:gap-2 px-3 py-1.5 rounded-xl transition-all font-bold text-xs min-h-[44px] justify-center",
+                  "flex flex-col sm:flex-row items-center gap-1 sm:gap-2 px-2.5 py-1.5 rounded-xl transition-all font-bold text-xs min-h-[44px] justify-center",
                   activeTab === 'poomsae_screen' 
                     ? "bg-blue-50 text-blue-600 shadow-sm" 
                     : "text-slate-500 hover:text-slate-900 hover:bg-slate-50"
                 )}
               >
                 <Monitor size={20} />
-                <span className="text-[10px] sm:text-xs">Poomsae</span>
+                <span className="text-[10px] sm:text-xs whitespace-nowrap">Poomsae</span>
               </button>
 
               <button 
-                onClick={() => setActiveTab('general')}
+                onClick={() => {
+                  setPoomsaeScreenRing(Number(user?.assignedRing) || 1);
+                  setActiveTab('poomsae_screen_2');
+                }}
                 className={cn(
-                  "flex flex-col sm:flex-row items-center gap-1 sm:gap-2 px-3 py-1.5 rounded-xl transition-all font-bold text-xs min-h-[44px] justify-center",
-                  activeTab === 'general' 
+                  "flex flex-col sm:flex-row items-center gap-1 sm:gap-2 px-2.5 py-1.5 rounded-xl transition-all font-bold text-xs min-h-[44px] justify-center",
+                  activeTab === 'poomsae_screen_2' 
                     ? "bg-red-50 text-red-600 shadow-sm" 
                     : "text-slate-500 hover:text-slate-900 hover:bg-slate-50"
                 )}
               >
                 <Monitor size={20} />
-                <span className="text-[10px] sm:text-xs">Live Display</span>
+                <span className="text-[10px] sm:text-xs whitespace-nowrap">Poomsae 2</span>
               </button>
             </div>
 
@@ -8541,6 +9093,12 @@ interface RingCardProps {
   controllerMode?: 'kyorugi' | 'poomsae';
   poomsaeSelection?: RingPoomsaeSelection | null;
   onChangePoomsaeSelection?: (field: 'poomsae1' | 'poomsae2', value: string) => void;
+  defaultPoomsaeJudgeCount?: 3 | 5 | 7;
+  poomsaeScoringTarget?: RingPoomsaeScoringTarget | null;
+  poomsaeJudgeScores?: PoomsaeJudgeScore[];
+  onUpdatePoomsaeTarget?: (patch: Partial<RingPoomsaeScoringTarget>) => void;
+  onClearPoomsaeScores?: (options?: { side?: 'blue' | 'red'; poomsaeNo?: 1 | 2 }) => void;
+  onUpdatePoomsaeScore?: (score: PoomsaeJudgeScore) => void;
 }
 
 interface EditResultModalProps {
@@ -9224,13 +9782,14 @@ function AddRingModal({ onClose, onAdd, existingRings, namingMode }: AddRingModa
   );
 }
 
-function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdate, onPointsUpdate, onUpdateTotalBouts, onStart, onDelete, onWinnerSelect, currentEventId, onForceSync, isAutoPull, onToggleAutoPull, user, boutNumberingMode = 'alphanumeric', layout = 'winner', showInspectionPopupSetting = true, onReturnToQueue, onResumeSuspended, onRemoveSuspended, onSuspendCurrentBout, transfers = [], activeNameFontScale, activeClubFontScale, getStageForBout, timerState, defaultTimerSeconds = 90, onStartTimer, onStopTimer, onResetTimer, controllerMode = 'kyorugi', poomsaeSelection, onChangePoomsaeSelection }: RingCardProps & { currentEventId?: string | null, onForceSync?: (data: MatchData) => void }) {
+function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdate, onPointsUpdate, onUpdateTotalBouts, onStart, onDelete, onWinnerSelect, currentEventId, onForceSync, isAutoPull, onToggleAutoPull, user, boutNumberingMode = 'alphanumeric', layout = 'winner', showInspectionPopupSetting = true, onReturnToQueue, onResumeSuspended, onRemoveSuspended, onSuspendCurrentBout, transfers = [], activeNameFontScale, activeClubFontScale, getStageForBout, timerState, defaultTimerSeconds = 90, onStartTimer, onStopTimer, onResetTimer, controllerMode = 'kyorugi', poomsaeSelection, onChangePoomsaeSelection, defaultPoomsaeJudgeCount = 5, poomsaeScoringTarget, poomsaeJudgeScores = [], onUpdatePoomsaeTarget, onClearPoomsaeScores }: RingCardProps & { currentEventId?: string | null, onForceSync?: (data: MatchData) => void }) {
   const [syncedNameScale] = useSyncedState<number>('tkd_active_name_font_scale', 100);
   const [syncedClubScale] = useSyncedState<number>('tkd_active_club_font_scale', 100);
   const effectiveNameScale = activeNameFontScale ?? syncedNameScale;
   const effectiveClubScale = activeClubFontScale ?? syncedClubScale;
   const [now, setNow] = useState(new Date());
   const [timerTickMs, setTimerTickMs] = useState<number>(() => Date.now());
+  const [copiedJudgeTag, setCopiedJudgeTag] = useState<string | null>(null);
 
   useEffect(() => {
     const interval = setInterval(() => setNow(new Date()), 1000);
@@ -9591,31 +10150,6 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
               ) : null;
             })()}
             <div className="space-y-2 sm:space-y-3">
-              <div className="flex items-start justify-between pb-1 sm:pb-2">
-                <div className="flex flex-col gap-1 min-w-0 pr-2">
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <Shield size={16} className={cn("shrink-0 mt-0.5", current.privacy_mode ? "text-red-500" : "text-green-500")} />
-                    <span className="text-xs sm:text-sm md:text-[15px] font-bold text-slate-600 uppercase leading-snug break-words whitespace-normal">{cleanPlaceholder(current.category)}</span>
-                  </div>
-                  {current.privacy_mode && (
-                    <span className="text-[9px] font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded w-fit inline-block">PDPA ACTIVE</span>
-                  )}
-                </div>
-                <span className="text-[9px] sm:text-[10px] font-bold text-red-600 bg-red-50 border border-red-100 px-2 py-0.5 rounded uppercase flex items-center gap-1.5 shadow-sm shrink-0">
-                  Live <div className="w-1.5 h-1.5 bg-red-600 rounded-full animate-pulse" />
-                </span>
-              </div>
-              
-              <div className="flex items-start gap-2.5 sm:gap-4">
-                <FighterSide color="blue" name={cleanPlaceholder(current.blue_name)} club={cleanPlaceholder(current.blue_club)} privacy={current.privacy_mode} inspected={current.blue_inspected} activeNameFontScale={effectiveNameScale} activeClubFontScale={effectiveClubScale} />
-                {!isPoomsaeMode && (
-                  <>
-                    <div className="text-[10px] sm:text-xs font-black text-slate-300 italic mt-4 sm:mt-6 shrink-0">VS</div>
-                    <FighterSide color="red" name={cleanPlaceholder(current.red_name)} club={cleanPlaceholder(current.red_club)} privacy={current.privacy_mode} inspected={current.red_inspected} activeNameFontScale={effectiveNameScale} activeClubFontScale={effectiveClubScale} />
-                  </>
-                )}
-              </div>
-              
               {/* Poomsae 1 & 2 Selection (Shown in Poomsae controller mode before Match Timer) */}
               {controllerMode === 'poomsae' && onChangePoomsaeSelection && (() => {
                 const isSelForCurrentBout =
@@ -9625,8 +10159,8 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
                 const valPoomsae1 = isSelForCurrentBout ? (poomsaeSelection?.poomsae1 || '') : '';
                 const valPoomsae2 = isSelForCurrentBout ? (poomsaeSelection?.poomsae2 || '') : '';
                 return (
-                  <div className="pt-3 border-t border-slate-100">
-                    <div className="flex flex-col gap-2.5">
+                  <div className="pb-3 border-b border-slate-100">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div className="space-y-1">
                         <label
                           htmlFor={`ring-${ring.ringNumber}-poomsae-1`}
@@ -9673,6 +10207,31 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
                   </div>
                 );
               })()}
+
+              <div className="flex items-start justify-between pb-1 sm:pb-2">
+                <div className="flex flex-col gap-1 min-w-0 pr-2">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <Shield size={16} className={cn("shrink-0 mt-0.5", current.privacy_mode ? "text-red-500" : "text-green-500")} />
+                    <span className="text-xs sm:text-sm md:text-[15px] font-bold text-slate-600 uppercase leading-snug break-words whitespace-normal">{cleanPlaceholder(current.category)}</span>
+                  </div>
+                  {current.privacy_mode && (
+                    <span className="text-[9px] font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded w-fit inline-block">PDPA ACTIVE</span>
+                  )}
+                </div>
+                <span className="text-[9px] sm:text-[10px] font-bold text-red-600 bg-red-50 border border-red-100 px-2 py-0.5 rounded uppercase flex items-center gap-1.5 shadow-sm shrink-0">
+                  Live <div className="w-1.5 h-1.5 bg-red-600 rounded-full animate-pulse" />
+                </span>
+              </div>
+              
+              <div className="flex items-start gap-2.5 sm:gap-4">
+                <FighterSide color="blue" name={cleanPlaceholder(current.blue_name)} club={cleanPlaceholder(current.blue_club)} privacy={current.privacy_mode} inspected={current.blue_inspected} activeNameFontScale={effectiveNameScale} activeClubFontScale={effectiveClubScale} />
+                {!isPoomsaeMode && (
+                  <>
+                    <div className="text-[10px] sm:text-xs font-black text-slate-300 italic mt-4 sm:mt-6 shrink-0">VS</div>
+                    <FighterSide color="red" name={cleanPlaceholder(current.red_name)} club={cleanPlaceholder(current.red_club)} privacy={current.privacy_mode} inspected={current.red_inspected} activeNameFontScale={effectiveNameScale} activeClubFontScale={effectiveClubScale} />
+                  </>
+                )}
+              </div>
 
               {/* Match Timer Controls (Shown in Poomsae controller mode; Kyorugi controller is without timer) */}
               {controllerMode === 'poomsae' && (onStartTimer || onStopTimer) && (
@@ -9739,6 +10298,379 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
                   </div>
                 </div>
               )}
+
+              {/* Poomsae Screen 2 — Live 3 / 5 / 7 Judge Panel */}
+              {controllerMode === 'poomsae' && onUpdatePoomsaeTarget && (() => {
+                const targetMatches =
+                  !poomsaeScoringTarget?.boutKey ||
+                  poomsaeScoringTarget.boutKey === 'idle' ||
+                  poomsaeScoringTarget.boutKey === currentBoutKeyForTimer;
+                const judgeCount: 3 | 5 | 7 =
+                  (targetMatches ? poomsaeScoringTarget?.judgeCount : undefined) ||
+                  defaultPoomsaeJudgeCount ||
+                  5;
+                const hasRedAthlete = Boolean(
+                  current?.red_name &&
+                    current.red_name.trim() !== '' &&
+                    current.red_name.trim() !== '---' &&
+                    current.red_name.trim().toUpperCase() !== 'BYE'
+                );
+                const activeSide: 'blue' | 'red' = !hasRedAthlete
+                  ? 'blue'
+                  : (targetMatches ? poomsaeScoringTarget?.activeSide : undefined) || 'blue';
+                const activePoomsae: 1 | 2 =
+                  (targetMatches ? poomsaeScoringTarget?.activePoomsae : undefined) || 1;
+                const showOnScreen2 =
+                  targetMatches && poomsaeScoringTarget?.showFinalScoreOnScreen !== undefined
+                    ? poomsaeScoringTarget.showFinalScoreOnScreen
+                    : true;
+                const clearedAt = targetMatches && poomsaeScoringTarget?.clearedAt ? poomsaeScoringTarget.clearedAt : 0;
+
+                const boutJudgeScores = poomsaeJudgeScores.filter((s) => {
+                  if (Number(s.ringNumber) !== Number(ring.ringNumber)) return false;
+                  if (String(s.boutNumber) !== String(current.bout)) return false;
+                  const evA = String(current.eventId || currentEventId || 'default');
+                  const evB = String(s.eventId || 'default');
+                  if (evA !== evB && current.eventId && s.eventId) return false;
+                  if (clearedAt > 0 && s.submittedAt < clearedAt) return false;
+                  return true;
+                });
+
+                const activeTargetScores = boutJudgeScores.filter(
+                  (s) => s.side === activeSide && s.poomsaeNo === activePoomsae
+                );
+                const activePanelResult = calculatePoomsaePanelScore(activeTargetScores, judgeCount);
+
+                const computeSideFinal = (side: 'blue' | 'red') => {
+                  const sScores = boutJudgeScores.filter((s) => s.side === side);
+                  const p1R = calculatePoomsaePanelScore(sScores.filter((s) => s.poomsaeNo === 1), judgeCount);
+                  const p2R = calculatePoomsaePanelScore(sScores.filter((s) => s.poomsaeNo === 2), judgeCount);
+                  const p1Val = p1R.isComplete ? p1R.totalScore : null;
+                  const p2Val = p2R.isComplete ? p2R.totalScore : null;
+                  if (p1Val !== null && p2Val !== null) return round2((p1Val + p2Val) / 2);
+                  return p1Val ?? p2Val;
+                };
+                const blueFinal = computeSideFinal('blue');
+                const redFinal = hasRedAthlete ? computeSideFinal('red') : null;
+
+                const copyWithFeedback = (tag: string, url: string) => {
+                  if (navigator.clipboard?.writeText) {
+                    navigator.clipboard.writeText(url).then(() => {
+                      setCopiedJudgeTag(tag);
+                      setTimeout(() => setCopiedJudgeTag((curr) => (curr === tag ? null : curr)), 1800);
+                    }).catch(() => {});
+                  }
+                };
+
+                return (
+                  <div className="pt-3 border-t border-slate-100 space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-1.5">
+                        <Users2 size={13} className="text-red-600" />
+                        Poomsae Screen 2 — Judge Panels (Side-by-Side)
+                      </span>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <div className="inline-flex bg-slate-100 p-0.5 rounded-lg border border-slate-200">
+                          {([3, 5, 7] as const).map((cnt) => (
+                            <button
+                              key={cnt}
+                              type="button"
+                              onClick={() => onUpdatePoomsaeTarget({ judgeCount: cnt })}
+                              className={cn(
+                                "px-2 py-1 text-[10px] font-black rounded-md transition-all cursor-pointer",
+                                judgeCount === cnt
+                                  ? "bg-slate-900 text-white shadow-sm"
+                                  : "text-slate-600 hover:text-slate-900"
+                              )}
+                            >
+                              {cnt}J
+                            </button>
+                          ))}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => onUpdatePoomsaeTarget({ showFinalScoreOnScreen: !showOnScreen2 })}
+                          className={cn(
+                            "px-2.5 py-1 rounded-lg text-[10px] font-black uppercase border transition-colors cursor-pointer",
+                            showOnScreen2
+                              ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                              : "bg-slate-100 text-slate-500 border-slate-200"
+                          )}
+                        >
+                          {showOnScreen2 ? "Screen 2: ON" : "Screen 2: OFF"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            copyWithFeedback(
+                              'screen1',
+                              `${window.location.origin}${window.location.pathname}?view=poomsae&ring=${ring.ringNumber}`
+                            )
+                          }
+                          className="px-2.5 py-1 rounded-lg text-[10px] font-black uppercase bg-blue-700 text-white hover:bg-blue-600 flex items-center gap-1 cursor-pointer shadow-sm transition-colors"
+                          title="Copy dedicated URL for Court Screen 1 monitor"
+                        >
+                          {copiedJudgeTag === 'screen1' ? <Check size={11} className="text-emerald-300" /> : <Copy size={11} />}
+                          <span>{copiedJudgeTag === 'screen1' ? 'Copied' : 'Screen 1 URL'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            copyWithFeedback(
+                              'screen2',
+                              `${window.location.origin}${window.location.pathname}?view=poomsae2&ring=${ring.ringNumber}`
+                            )
+                          }
+                          className="px-2.5 py-1 rounded-lg text-[10px] font-black uppercase bg-slate-900 text-white hover:bg-slate-800 flex items-center gap-1 cursor-pointer transition-colors"
+                          title="Copy dedicated URL for Poomsae Screen 2 monitor"
+                        >
+                          {copiedJudgeTag === 'screen2' ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} />}
+                          <span>{copiedJudgeTag === 'screen2' ? 'Copied' : 'Screen 2 URL'}</span>
+                        </button>
+
+                        {Array.from({ length: judgeCount }, (_, idx) => idx + 1).map((jNum) => {
+                          const tag = `j_url_${jNum}`;
+                          const isCopied = copiedJudgeTag === tag;
+                          return (
+                            <button
+                              key={jNum}
+                              type="button"
+                              onClick={() =>
+                                copyWithFeedback(
+                                  tag,
+                                  `${window.location.origin}${window.location.pathname}?view=judge&ring=${ring.ringNumber}&judge=${jNum}`
+                                )
+                              }
+                              className={cn(
+                                "px-2 py-1 rounded-lg text-[10px] font-black uppercase border transition-colors cursor-pointer flex items-center gap-1",
+                                isCopied
+                                  ? "bg-emerald-600 text-white border-emerald-600"
+                                  : "bg-slate-800 text-slate-200 border-slate-700 hover:bg-slate-700"
+                              )}
+                              title={`Copy Judge ${jNum} scoring URL`}
+                            >
+                              {isCopied ? <Check size={11} /> : <Copy size={11} />}
+                              <span>J{jNum} URL</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Poomsae Form Switcher (P1 / P2) */}
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="inline-flex bg-slate-100 p-0.5 rounded-lg border border-slate-200">
+                        {([1, 2] as const).map((pNo) => (
+                          <button
+                            key={pNo}
+                            type="button"
+                            onClick={() => onUpdatePoomsaeTarget({ activePoomsae: pNo })}
+                            className={cn(
+                              "px-3 py-1 rounded-md text-xs font-black uppercase transition-all cursor-pointer",
+                              activePoomsae === pNo ? "bg-amber-400 text-slate-950 shadow-sm" : "text-slate-600"
+                            )}
+                          >
+                            Poomsae {pNo}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* SIDE-BY-SIDE BLUE & RED JUDGE PANELS */}
+                    <div className={cn("grid gap-4", hasRedAthlete ? "grid-cols-1 md:grid-cols-2" : "grid-cols-1")}>
+                      {/* BLUE (CHUNG) PANEL */}
+                      {(() => {
+                        const blueScores = boutJudgeScores.filter((s) => s.side === 'blue' && s.poomsaeNo === activePoomsae);
+                        const blueRes = calculatePoomsaePanelScore(blueScores, judgeCount);
+                        return (
+                          <div className="bg-blue-950/20 border-2 border-blue-500/40 rounded-2xl p-3.5 space-y-3">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-black uppercase text-[#00a2e8] flex items-center gap-1.5">
+                                Chung (Blue) · P{activePoomsae}
+                              </span>
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono text-xs font-bold text-slate-700 tabular-nums">
+                                  {blueRes.submittedCount}/{judgeCount} submitted
+                                </span>
+                                {onClearPoomsaeScores && (
+                                  <button
+                                    type="button"
+                                    onClick={() => onClearPoomsaeScores({ side: 'blue', poomsaeNo: activePoomsae })}
+                                    className="px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-slate-100 hover:bg-red-50 text-slate-600 hover:text-red-600 border border-slate-200 transition-colors cursor-pointer"
+                                  >
+                                    Clear
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className={cn("grid gap-1", judgeCount === 3 ? "grid-cols-3" : judgeCount === 5 ? "grid-cols-5" : "grid-cols-7")}>
+                              {Array.from({ length: judgeCount }, (_, idx) => idx + 1).map((jNum) => {
+                                const scoreDoc = blueScores.find((s) => s.judgeNumber === jNum);
+                                const isAccLow = blueRes.droppedAccuracyMinJudge === jNum;
+                                const isAccHigh = blueRes.droppedAccuracyMaxJudge === jNum;
+                                const isPresLow = blueRes.droppedPresentationMinJudge === jNum;
+                                const isPresHigh = blueRes.droppedPresentationMaxJudge === jNum;
+                                const tag = `j_b_${jNum}`;
+                                return (
+                                  <button
+                                    key={jNum}
+                                    type="button"
+                                    onClick={() =>
+                                      copyWithFeedback(
+                                        tag,
+                                        `${window.location.origin}${window.location.pathname}?view=judge&ring=${ring.ringNumber}&judge=${jNum}`
+                                      )
+                                    }
+                                    className={cn(
+                                      "p-1 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center justify-center min-h-[52px]",
+                                      scoreDoc ? "bg-emerald-50/80 border-emerald-300 text-slate-900" : "bg-white border-slate-200 text-slate-500"
+                                    )}
+                                  >
+                                    <span className="text-[9px] font-black uppercase">J{jNum}</span>
+                                    {scoreDoc ? (
+                                      <>
+                                        <span className="font-mono text-xs font-black text-slate-900 tabular-nums">
+                                          {formatPoomsaeScore(scoreDoc.total)}
+                                        </span>
+                                        <span className="font-mono text-[8px] text-slate-500 tabular-nums">
+                                          <span className={cn((isAccLow || isAccHigh) && "line-through text-red-500 font-bold")}>
+                                            {scoreDoc.accuracy.toFixed(1)}
+                                          </span>
+                                          +
+                                          <span className={cn((isPresLow || isPresHigh) && "line-through text-red-500 font-bold")}>
+                                            {scoreDoc.presentation.toFixed(1)}
+                                          </span>
+                                        </span>
+                                      </>
+                                    ) : (
+                                      <span className="text-[9px] font-mono text-slate-400">--</span>
+                                    )}
+                                  </button>
+                                );
+                              })}
+                            </div>
+
+                            <div className="bg-slate-900 text-white rounded-xl p-2.5 flex items-center justify-between text-xs font-mono">
+                              <span>Acc {formatPoomsaeScore(blueRes.avgAccuracy)} + Pres {formatPoomsaeScore(blueRes.avgPresentation)}</span>
+                              <span className="text-amber-300 font-black text-sm">
+                                {blueRes.submittedCount > 0 ? formatPoomsaeScore(blueRes.totalScore) : '-.--'}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })()}
+
+                      {/* RED (HONG) PANEL */}
+                      {hasRedAthlete && (() => {
+                        const redScores = boutJudgeScores.filter((s) => s.side === 'red' && s.poomsaeNo === activePoomsae);
+                        const redRes = calculatePoomsaePanelScore(redScores, judgeCount);
+                        return (
+                          <div className="bg-red-950/20 border-2 border-red-500/40 rounded-2xl p-3.5 space-y-3">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-black uppercase text-[#ed1c24] flex items-center gap-1.5">
+                                Hong (Red) · P{activePoomsae}
+                              </span>
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono text-xs font-bold text-slate-700 tabular-nums">
+                                  {redRes.submittedCount}/{judgeCount} submitted
+                                </span>
+                                {onClearPoomsaeScores && (
+                                  <button
+                                    type="button"
+                                    onClick={() => onClearPoomsaeScores({ side: 'red', poomsaeNo: activePoomsae })}
+                                    className="px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-slate-100 hover:bg-red-50 text-slate-600 hover:text-red-600 border border-slate-200 transition-colors cursor-pointer"
+                                  >
+                                    Clear
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className={cn("grid gap-1", judgeCount === 3 ? "grid-cols-3" : judgeCount === 5 ? "grid-cols-5" : "grid-cols-7")}>
+                              {Array.from({ length: judgeCount }, (_, idx) => idx + 1).map((jNum) => {
+                                const scoreDoc = redScores.find((s) => s.judgeNumber === jNum);
+                                const isAccLow = redRes.droppedAccuracyMinJudge === jNum;
+                                const isAccHigh = redRes.droppedAccuracyMaxJudge === jNum;
+                                const isPresLow = redRes.droppedPresentationMinJudge === jNum;
+                                const isPresHigh = redRes.droppedPresentationMaxJudge === jNum;
+                                const tag = `j_r_${jNum}`;
+                                return (
+                                  <button
+                                    key={jNum}
+                                    type="button"
+                                    onClick={() =>
+                                      copyWithFeedback(
+                                        tag,
+                                        `${window.location.origin}${window.location.pathname}?view=judge&ring=${ring.ringNumber}&judge=${jNum}`
+                                      )
+                                    }
+                                    className={cn(
+                                      "p-1 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center justify-center min-h-[52px]",
+                                      scoreDoc ? "bg-emerald-50/80 border-emerald-300 text-slate-900" : "bg-white border-slate-200 text-slate-500"
+                                    )}
+                                  >
+                                    <span className="text-[9px] font-black uppercase">J{jNum}</span>
+                                    {scoreDoc ? (
+                                      <>
+                                        <span className="font-mono text-xs font-black text-slate-900 tabular-nums">
+                                          {formatPoomsaeScore(scoreDoc.total)}
+                                        </span>
+                                        <span className="font-mono text-[8px] text-slate-500 tabular-nums">
+                                          <span className={cn((isAccLow || isAccHigh) && "line-through text-red-500 font-bold")}>
+                                            {scoreDoc.accuracy.toFixed(1)}
+                                          </span>
+                                          +
+                                          <span className={cn((isPresLow || isPresHigh) && "line-through text-red-500 font-bold")}>
+                                            {scoreDoc.presentation.toFixed(1)}
+                                          </span>
+                                        </span>
+                                      </>
+                                    ) : (
+                                      <span className="text-[9px] font-mono text-slate-400">--</span>
+                                    )}
+                                  </button>
+                                );
+                              })}
+                            </div>
+
+                            <div className="bg-slate-900 text-white rounded-xl p-2.5 flex items-center justify-between text-xs font-mono">
+                              <span>Acc {formatPoomsaeScore(redRes.avgAccuracy)} + Pres {formatPoomsaeScore(redRes.avgPresentation)}</span>
+                              <span className="text-amber-300 font-black text-sm">
+                                {redRes.submittedCount > 0 ? formatPoomsaeScore(redRes.totalScore) : '-.--'}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+
+                    {/* Final Calculated Match Score Output Bar */}
+                    <div className="bg-slate-900 text-white rounded-xl p-3 flex items-center justify-between gap-3 font-mono">
+                      <div>
+                        <div className="text-[9px] uppercase tracking-wider text-slate-400 font-bold">Match Totals</div>
+                        <div className="text-xs text-slate-200">Official Poomsae Final Score Summary</div>
+                      </div>
+                      <div className="flex items-center gap-4 text-right">
+                        <div>
+                          <div className="text-[9px] uppercase text-cyan-300 font-black">Blue Final</div>
+                          <div className="text-base sm:text-lg font-black text-white">
+                            {blueFinal !== null ? formatPoomsaeScore(blueFinal) : '-.--'}
+                          </div>
+                        </div>
+                        {hasRedAthlete && (
+                          <div>
+                            <div className="text-[9px] uppercase text-red-300 font-black">Red Final</div>
+                            <div className="text-base sm:text-lg font-black text-white">
+                              {redFinal !== null ? formatPoomsaeScore(redFinal) : '-.--'}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {onWinnerSelect && (
                 <div className="pt-4 border-t border-slate-100">
@@ -10121,7 +11053,7 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
                             </button>
                           </div>
                         </div>
-                        {!isPoomsaeMode && (
+                        {!isPoomsaeMode && controllerMode !== 'poomsae' && (
                           <div className="mt-2 mb-2 p-1.5 sm:p-2 bg-slate-50 border border-slate-200 rounded-xl">
                             <div className="flex items-center justify-between mb-1 px-1">
                               <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Win Method</span>
@@ -10160,7 +11092,7 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
                         )}
                         <div className="flex gap-2.5 sm:gap-4">
                           <button 
-                            onClick={() => onWinnerSelect('Blue', selectedWinType)}
+                            onClick={() => onWinnerSelect('Blue', controllerMode === 'poomsae' ? undefined : selectedWinType)}
                             disabled={isBlueWinDisabled}
                             className={cn(
                               "flex-[1] min-h-[44px] sm:min-h-[48px] py-2 bg-[#00a2e8] text-white rounded-xl font-black text-xs sm:text-sm uppercase transition-all shadow-md px-2 break-words text-center flex items-center justify-center",
@@ -10172,7 +11104,7 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
                             Mark {cleanPlaceholder(current.blue_name) || 'Blue'} Win
                           </button>
                           <button 
-                            onClick={() => onWinnerSelect('Red', selectedWinType)}
+                            onClick={() => onWinnerSelect('Red', controllerMode === 'poomsae' ? undefined : selectedWinType)}
                             disabled={isRedWinDisabled}
                             className={cn(
                               "flex-[1] min-h-[44px] sm:min-h-[48px] py-2 bg-[#ed1c24] text-white rounded-xl font-black text-xs sm:text-sm uppercase transition-all shadow-md px-2 break-words text-center flex items-center justify-center",
@@ -10187,13 +11119,15 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
                       </>
                     ) : (
                       <>
-                        <div className="flex items-center justify-between mb-1 sm:mb-1.5">
-                          <p className="text-[9px] sm:text-[10px] font-black text-slate-400 uppercase tracking-widest">Select Winner</p>
-                          <span className="text-[9px] font-bold text-slate-500 uppercase">
-                            Method: <strong className="text-slate-800">{selectedWinType}</strong>
-                          </span>
-                        </div>
-                        {!isPoomsaeMode && (
+                        {controllerMode !== 'poomsae' && (
+                          <div className="flex items-center justify-between mb-1 sm:mb-1.5">
+                            <p className="text-[9px] sm:text-[10px] font-black text-slate-400 uppercase tracking-widest">Select Winner</p>
+                            <span className="text-[9px] font-bold text-slate-500 uppercase">
+                              Method: <strong className="text-slate-800">{selectedWinType}</strong>
+                            </span>
+                          </div>
+                        )}
+                        {!isPoomsaeMode && controllerMode !== 'poomsae' && (
                           <div className="mt-1 mb-2 sm:mb-2.5 p-1.5 sm:p-2 bg-slate-50 border border-slate-200 rounded-xl">
                             <div className="flex items-center justify-between mb-1 px-1">
                               <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Win Method</span>
@@ -10232,13 +11166,13 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
                         )}
                         <div className="flex gap-2 sm:gap-4 mb-1 sm:mb-2">
                           <button 
-                            onClick={() => onWinnerSelect('Blue', selectedWinType)}
+                            onClick={() => onWinnerSelect('Blue', controllerMode === 'poomsae' ? undefined : selectedWinType)}
                             className="flex-[1.2] min-h-[46px] sm:min-h-[56px] py-2 sm:py-3 bg-blue-50 text-[#00a2e8] hover:bg-[#00a2e8] hover:text-white rounded-xl sm:rounded-2xl font-black text-xs sm:text-base md:text-[18px] uppercase transition-all border-2 border-blue-200 hover:border-[#00a2e8] active:scale-95 px-2 sm:px-4 break-words whitespace-normal flex items-center justify-center text-center leading-tight shadow-sm hover:shadow-xl hover:shadow-blue-200/50"
                           >
                             <span>{cleanPlaceholder(current.blue_name) || 'Blue'} Wins</span>
                           </button>
                           <button 
-                            onClick={() => onWinnerSelect('Red', selectedWinType)}
+                            onClick={() => onWinnerSelect('Red', controllerMode === 'poomsae' ? undefined : selectedWinType)}
                             className="flex-[1.2] min-h-[46px] sm:min-h-[56px] py-2 sm:py-3 bg-red-50 text-[#ed1c24] hover:bg-[#ed1c24] hover:text-white rounded-xl sm:rounded-2xl font-black text-xs sm:text-base md:text-[18px] uppercase transition-all border-2 border-red-200 hover:border-[#ed1c24] active:scale-95 px-2 sm:px-4 break-words whitespace-normal flex items-center justify-center text-center leading-tight shadow-sm hover:shadow-xl hover:shadow-red-200/50"
                           >
                             <span>{cleanPlaceholder(current.red_name) || 'Red'} Wins</span>

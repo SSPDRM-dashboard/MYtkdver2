@@ -113,6 +113,31 @@
         "author": { "type": "string" }
       },
       "required": ["fromRing", "toRing", "boutNumber", "pinnedUntil", "isPinned"]
+    },
+    "PoomsaeJudgeScore": {
+      "title": "PoomsaeJudgeScore",
+      "description": "Individual judge Accuracy (4.0) and Presentation (6.0) score submission for Poomsae",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "ringNumber": { "type": "number" },
+        "eventId": { "type": "string" },
+        "eventName": { "type": "string" },
+        "eventDate": { "type": "string" },
+        "boutNumber": { "type": "string" },
+        "boutKey": { "type": "string" },
+        "side": { "type": "string", "enum": ["blue", "red"] },
+        "poomsaeNo": { "type": "number", "enum": [1, 2] },
+        "judgeNumber": { "type": "number" },
+        "accuracy": { "type": "number" },
+        "presentation": { "type": "number" },
+        "speedPower": { "type": "number" },
+        "rhythmTempo": { "type": "number" },
+        "expressionEnergy": { "type": "number" },
+        "total": { "type": "number" },
+        "submittedAt": { "type": "number" }
+      },
+      "required": ["ringNumber", "eventId", "boutNumber", "side", "poomsaeNo", "judgeNumber", "accuracy", "presentation", "total", "submittedAt"]
     }
   },
   "firestore": {
@@ -151,6 +176,10 @@
     "/bout_transfers/{transferId}": {
       "schema": "BoutTransfer",
       "description": "Collection of pinned bout transfers."
+    },
+    "/poomsae_judge_scores/{scoreId}": {
+      "schema": "PoomsaeJudgeScore",
+      "description": "Individual Poomsae judge submissions keyed per ring, event, bout, side, form, and judge number."
     }
   }
 }

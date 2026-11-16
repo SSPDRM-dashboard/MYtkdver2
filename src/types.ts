@@ -154,4 +154,42 @@ export interface RingPoomsaeSelection {
   updatedAt: number;
 }
 
+export interface PoomsaeJudgeScore {
+  id: string;
+  ringNumber: number;
+  eventId: string;
+  eventName?: string;
+  eventDate?: string;
+  boutNumber: string;
+  boutKey: string;
+  side: 'blue' | 'red';
+  poomsaeNo: 1 | 2;
+  judgeNumber: number;
+  accuracy: number;
+  presentation: number;
+  speedPower?: number;
+  rhythmTempo?: number;
+  expressionEnergy?: number;
+  total: number;
+  submittedAt: number;
+}
+
+export interface RingPoomsaeScoringTarget {
+  ringNumber: number;
+  judgeCount: 3 | 5 | 7;
+  activeSide: 'blue' | 'red';
+  activePoomsae: 1 | 2;
+  showFinalScoreOnScreen: boolean;
+  boutKey?: string;
+  clearedAt?: number;
+  updatedAt: number;
+}
+
+export interface PoomsaeSideScoreSummary {
+  p1Total: number | null;
+  p2Total: number | null;
+  finalTotal: number | null;
+  p1Complete: boolean;
+  p2Complete: boolean;
+}
 

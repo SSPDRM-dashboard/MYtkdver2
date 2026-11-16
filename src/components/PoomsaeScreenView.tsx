@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Check, Clock, Copy, Maximize, Minimize, Monitor } from 'lucide-react';
-import { RingPoomsaeSelection, RingStatus, RingTimerState, RingWinnerBroadcast } from '../types';
+import { PoomsaeSideScoreSummary, RingPoomsaeSelection, RingStatus, RingTimerState, RingWinnerBroadcast } from '../types';
 import { cn, formatBoutNumber } from '../lib/utils';
 import { getPlayerLogoOrFlag } from '../lib/teamLogos';
+import { formatPoomsaeScore } from '../lib/poomsaeScoring';
 
 interface PoomsaeScreenViewProps {
   ring: RingStatus;
@@ -21,6 +22,9 @@ interface PoomsaeScreenViewProps {
   canSwitchRing?: boolean;
   isStandalone?: boolean;
   winnerDisplaySeconds?: number;
+  showFinalScore?: boolean;
+  blueScoreSummary?: PoomsaeSideScoreSummary | null;
+  redScoreSummary?: PoomsaeSideScoreSummary | null;
 }
 
 function formatTimerMMSS(totalSeconds: number): string {
@@ -149,7 +153,10 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
   onBack,
   canSwitchRing = false,
   isStandalone = false,
-  winnerDisplaySeconds = 5
+  winnerDisplaySeconds = 5,
+  showFinalScore = false,
+  blueScoreSummary = null,
+  redScoreSummary = null
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -372,20 +379,25 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
     }
   };
 
-  const handleCopyCourtUrl = () => {
-    const url = `${window.location.origin}${window.location.pathname}?view=poomsae&ring=${ring.ringNumber}`;
+  const [copiedScreen2Url, setCopiedScreen2Url] = useState(false);
+
+  const handleCopyCourtUrl = (screenNum: 1 | 2 = showFinalScore ? 2 : 1) => {
+    const viewQuery = screenNum === 2 ? 'poomsae2' : 'poomsae';
+    const url = `${window.location.origin}${window.location.pathname}?view=${viewQuery}&ring=${ring.ringNumber}`;
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(url).then(() => {
-        setCopiedUrl(true);
-        setTimeout(() => setCopiedUrl(false), 2000);
+        if (screenNum === 2) {
+          setCopiedScreen2Url(true);
+          setTimeout(() => setCopiedScreen2Url(false), 2000);
+        } else {
+          setCopiedUrl(true);
+          setTimeout(() => setCopiedUrl(false), 2000);
+        }
       }).catch(() => {});
     }
   };
 
-  const current =
-    ring.currentBout && (!currentEventId || !ring.currentBout.eventId || ring.currentBout.eventId === currentEventId)
-      ? ring.currentBout
-      : null;
+  const current = ring.currentBout || null;
 
   const effectiveBoutMode: 'numeric' | 'alphanumeric' =
     boutNumberingMode === 'numeric' ? 'numeric' : 'alphanumeric';
@@ -454,7 +466,8 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
   const isTimerForCurrentBout =
     !effectiveTimer?.boutKey ||
     effectiveTimer.boutKey === 'idle' ||
-    effectiveTimer.boutKey === currentBoutKey;
+    effectiveTimer.boutKey === currentBoutKey ||
+    Boolean(current?.bout && effectiveTimer.boutKey.endsWith(`_${current.bout}`));
   const isTimerRunning = Boolean(
     effectiveTimer && isTimerForCurrentBout && effectiveTimer.isRunning && effectiveTimer.startedAt
   );
@@ -534,12 +547,32 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
           <div className="flex items-center gap-2 flex-wrap">
             <button
               type="button"
-              onClick={handleCopyCourtUrl}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0e1a33] hover:bg-[#16274a] border border-white/15 text-slate-100 rounded-xl text-xs font-bold transition-colors cursor-pointer"
-              title="Copy dedicated URL for this court's monitor"
+              onClick={() => handleCopyCourtUrl(1)}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer border",
+                !showFinalScore
+                  ? "bg-blue-600 hover:bg-blue-500 text-white border-blue-400/40 shadow-sm"
+                  : "bg-[#0e1a33] hover:bg-[#16274a] border-white/15 text-slate-200"
+              )}
+              title="Copy dedicated URL for Court Screen 1 monitor"
             >
               {copiedUrl ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
-              <span>{copiedUrl ? 'URL Copied' : 'Court Screen URL'}</span>
+              <span>{copiedUrl ? 'Copied' : 'Screen 1 URL'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleCopyCourtUrl(2)}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer border",
+                showFinalScore
+                  ? "bg-purple-600 hover:bg-purple-500 text-white border-purple-400/40 shadow-sm"
+                  : "bg-[#0e1a33] hover:bg-[#16274a] border-white/15 text-slate-200"
+              )}
+              title="Copy dedicated URL for Poomsae Screen 2 monitor"
+            >
+              {copiedScreen2Url ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
+              <span>{copiedScreen2Url ? 'Copied' : 'Screen 2 URL'}</span>
             </button>
 
             <button
@@ -651,22 +684,25 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
             const currentBoutKeySel = current ? `${current.eventId || ''}_${current.bout}` : 'idle';
             const isSelValid =
               effectiveSel &&
-              (!effectiveSel.boutKey || effectiveSel.boutKey === 'idle' || effectiveSel.boutKey === currentBoutKeySel);
+              (!effectiveSel.boutKey ||
+                effectiveSel.boutKey === 'idle' ||
+                effectiveSel.boutKey === currentBoutKeySel ||
+                Boolean(current?.bout && effectiveSel.boutKey.endsWith(`_${current.bout}`)));
             const p1 = isSelValid ? cleanText(effectiveSel?.poomsae1) : '';
             const p2 = isSelValid ? cleanText(effectiveSel?.poomsae2) : '';
             if (!p1 && !p2) return null;
             return (
-              <div className="mt-2 sm:mt-2.5 px-6 sm:px-10 py-2 sm:py-3 bg-[#060f24]/92 border border-cyan-300/60 shadow-[0_8px_32px_rgba(0,0,0,0.75),0_0_22px_rgba(34,211,238,0.25)] backdrop-blur-md flex flex-col items-center justify-center gap-1.5 sm:gap-2 text-center"
+              <div className="mt-1.5 sm:mt-2 px-4 sm:px-7 py-1.5 sm:py-2 bg-[#060f24]/92 border border-cyan-300/60 shadow-[0_8px_32px_rgba(0,0,0,0.75),0_0_22px_rgba(34,211,238,0.25)] backdrop-blur-md flex flex-col items-center justify-center gap-1 text-center"
                 style={{
                   clipPath: 'polygon(2% 0%, 98% 0%, 100% 22%, 100% 78%, 98% 100%, 2% 100%, 0% 78%, 0% 22%)'
                 }}
               >
                 {p1 && (
-                  <div className="flex flex-wrap items-center justify-center gap-x-2.5 gap-y-0.5">
-                    <span className="text-xs sm:text-base md:text-xl font-black uppercase tracking-widest text-cyan-300">
+                  <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5">
+                    <span className="text-[11px] sm:text-xs md:text-sm font-black uppercase tracking-widest text-cyan-300">
                       Poomsae 1:
                     </span>
-                    <span className="text-lg sm:text-2xl md:text-3xl lg:text-4xl font-black uppercase tracking-wide text-white break-words whitespace-normal drop-shadow leading-tight">
+                    <span className="text-sm sm:text-base md:text-lg lg:text-xl font-black uppercase tracking-wide text-white break-words whitespace-normal drop-shadow leading-tight">
                       {p1}
                     </span>
                   </div>
@@ -675,11 +711,11 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
                   <div aria-hidden="true" className="w-3/4 h-[1px] bg-gradient-to-r from-transparent via-white/30 to-transparent" />
                 )}
                 {p2 && (
-                  <div className="flex flex-wrap items-center justify-center gap-x-2.5 gap-y-0.5">
-                    <span className="text-xs sm:text-base md:text-xl font-black uppercase tracking-widest text-amber-300">
+                  <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5">
+                    <span className="text-[11px] sm:text-xs md:text-sm font-black uppercase tracking-widest text-amber-300">
                       Poomsae 2:
                     </span>
-                    <span className="text-lg sm:text-2xl md:text-3xl lg:text-4xl font-black uppercase tracking-wide text-white break-words whitespace-normal drop-shadow leading-tight">
+                    <span className="text-sm sm:text-base md:text-lg lg:text-xl font-black uppercase tracking-wide text-white break-words whitespace-normal drop-shadow leading-tight">
                       {p2}
                     </span>
                   </div>
@@ -691,7 +727,10 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
 
         {/* CHUNG / BLUE SIDE */}
         <div
-          className="relative flex flex-col items-center justify-center px-4 sm:px-8 pt-36 pb-20 sm:pt-44 sm:pb-24 text-center overflow-hidden"
+          className={cn(
+            'relative flex flex-col items-center justify-center px-4 sm:px-8 text-center overflow-hidden',
+            showFinalScore ? 'pt-32 pb-20 sm:pt-40 sm:pb-24' : 'pt-36 pb-20 sm:pt-44 sm:pb-24'
+          )}
           style={{
             background:
               'radial-gradient(circle at 80% 50%, #0ea5e9 0%, #0369c4 32%, #023b88 68%, #021d52 100%)'
@@ -724,7 +763,7 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
           />
 
           {/* Center Content Stack */}
-          <div className="relative z-10 flex flex-col items-center justify-center w-full max-w-[92%] gap-3 sm:gap-4 mt-2 sm:mt-4">
+          <div className={cn('relative z-10 flex flex-col items-center justify-center w-full max-w-[92%] mt-2 sm:mt-4', showFinalScore ? 'gap-2.5 sm:gap-3' : 'gap-3 sm:gap-4')}>
             <ClubLogoEmblem
               club={blueClub}
               name={blueName}
@@ -781,13 +820,47 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
                 </h2>
               </div>
             </div>
+
+            {/* Poomsae Screen 2: Clean Official Final Score Display */}
+            {showFinalScore && hasActiveMatch && (
+              <div className="w-full max-w-sm sm:max-w-md px-1 shrink-0">
+                <div
+                  className="px-6 py-2.5 sm:py-3 bg-[#020d26]/92 border-2 border-cyan-300/80 shadow-[0_0_28px_rgba(34,211,238,0.35)] flex flex-col items-center justify-center"
+                  style={{
+                    clipPath: 'polygon(6% 0%, 94% 0%, 100% 28%, 100% 72%, 94% 100%, 6% 100%, 0% 72%, 0% 28%)'
+                  }}
+                >
+                  <span className="text-[10px] sm:text-xs font-black uppercase tracking-[0.22em] text-cyan-300">
+                    Final Score
+                  </span>
+                  <span className="font-mono text-3xl sm:text-5xl md:text-6xl font-black text-white tabular-nums tracking-tight leading-none mt-0.5 drop-shadow-[0_3px_12px_rgba(0,0,0,0.8)]">
+                    {blueScoreSummary?.finalTotal !== null && blueScoreSummary?.finalTotal !== undefined
+                      ? formatPoomsaeScore(blueScoreSummary.finalTotal)
+                      : '-.--'}
+                  </span>
+                  {blueScoreSummary?.p1Total !== null &&
+                    blueScoreSummary?.p1Total !== undefined &&
+                    blueScoreSummary?.p2Total !== null &&
+                    blueScoreSummary?.p2Total !== undefined && (
+                      <div className="mt-1 flex items-center gap-2 text-[11px] sm:text-xs font-mono font-bold text-cyan-200/90 tabular-nums">
+                        <span>P1: {formatPoomsaeScore(blueScoreSummary.p1Total)}</span>
+                        <span aria-hidden="true">·</span>
+                        <span>P2: {formatPoomsaeScore(blueScoreSummary.p2Total)}</span>
+                      </div>
+                    )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
         {/* HONG / RED SIDE */}
         {!isSoloPoomsae && (
           <div
-            className="relative flex flex-col items-center justify-center px-4 sm:px-8 pt-36 pb-20 sm:pt-44 sm:pb-24 text-center overflow-hidden"
+            className={cn(
+              'relative flex flex-col items-center justify-center px-4 sm:px-8 text-center overflow-hidden',
+              showFinalScore ? 'pt-32 pb-20 sm:pt-40 sm:pb-24' : 'pt-36 pb-20 sm:pt-44 sm:pb-24'
+            )}
             style={{
               background:
                 'radial-gradient(circle at 20% 50%, #ef4444 0%, #b91c1c 34%, #7f090d 68%, #450306 100%)'
@@ -820,7 +893,7 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
             />
 
             {/* Center Content Stack */}
-            <div className="relative z-10 flex flex-col items-center justify-center w-full max-w-[92%] gap-3 sm:gap-4 mt-2 sm:mt-4">
+            <div className={cn('relative z-10 flex flex-col items-center justify-center w-full max-w-[92%] mt-2 sm:mt-4', showFinalScore ? 'gap-2.5 sm:gap-3' : 'gap-3 sm:gap-4')}>
               <ClubLogoEmblem
                 club={redClub}
                 name={redName}
@@ -877,6 +950,37 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
                   </h2>
                 </div>
               </div>
+
+              {/* Poomsae Screen 2: Clean Official Final Score Display */}
+              {showFinalScore && hasActiveMatch && (
+                <div className="w-full max-w-sm sm:max-w-md px-1 shrink-0">
+                  <div
+                    className="px-6 py-2.5 sm:py-3 bg-[#240103]/92 border-2 border-red-300/80 shadow-[0_0_28px_rgba(248,113,113,0.35)] flex flex-col items-center justify-center"
+                    style={{
+                      clipPath: 'polygon(6% 0%, 94% 0%, 100% 28%, 100% 72%, 94% 100%, 6% 100%, 0% 72%, 0% 28%)'
+                    }}
+                  >
+                    <span className="text-[10px] sm:text-xs font-black uppercase tracking-[0.22em] text-red-200">
+                      Final Score
+                    </span>
+                    <span className="font-mono text-3xl sm:text-5xl md:text-6xl font-black text-white tabular-nums tracking-tight leading-none mt-0.5 drop-shadow-[0_3px_12px_rgba(0,0,0,0.8)]">
+                      {redScoreSummary?.finalTotal !== null && redScoreSummary?.finalTotal !== undefined
+                        ? formatPoomsaeScore(redScoreSummary.finalTotal)
+                        : '-.--'}
+                    </span>
+                    {redScoreSummary?.p1Total !== null &&
+                      redScoreSummary?.p1Total !== undefined &&
+                      redScoreSummary?.p2Total !== null &&
+                      redScoreSummary?.p2Total !== undefined && (
+                        <div className="mt-1 flex items-center gap-2 text-[11px] sm:text-xs font-mono font-bold text-red-200/90 tabular-nums">
+                          <span>P1: {formatPoomsaeScore(redScoreSummary.p1Total)}</span>
+                          <span aria-hidden="true">·</span>
+                          <span>P2: {formatPoomsaeScore(redScoreSummary.p2Total)}</span>
+                        </div>
+                      )}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
