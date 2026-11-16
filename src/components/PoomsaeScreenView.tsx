@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Check, Clock, Copy, Maximize, Minimize, Monitor } from 'lucide-react';
+import { ArrowLeft, Check, Clock, Copy, Maximize, Minimize, Monitor, Trophy } from 'lucide-react';
 import { PoomsaeSideScoreSummary, RingPoomsaeSelection, RingStatus, RingTimerState, RingWinnerBroadcast } from '../types';
 import { cn, formatBoutNumber } from '../lib/utils';
 import { getPlayerLogoOrFlag } from '../lib/teamLogos';
@@ -1034,56 +1034,103 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
           </div>
         </div>
 
-        {/* 5-SECOND WINNER POPUP WINDOW (Matches bright winner color box across lower-center arena, leaving logos visible above) */}
-        {activeWinner && (
-          <div className="absolute inset-x-4 sm:inset-x-12 md:inset-x-24 lg:inset-x-36 top-[40%] bottom-[13%] z-40 flex items-center justify-center pointer-events-none">
-            <div
-              className={cn(
-                'relative w-full h-full border-2 flex flex-col items-center justify-center px-6 sm:px-12 py-6 text-center overflow-hidden shadow-[0_25px_85px_rgba(0,0,0,0.85)]',
-                winnerIsRed
-                  ? 'bg-gradient-to-b from-[#ff1a1a] via-[#e60000] to-[#c40000] border-white/85 shadow-[0_0_65px_rgba(255,0,0,0.65)]'
-                  : 'bg-gradient-to-b from-[#1e88ff] via-[#0066ff] to-[#0044cc] border-white/85 shadow-[0_0_65px_rgba(0,102,255,0.65)]'
-              )}
-            >
-              <h1
+        {/* WINNER POPUP MODAL (Matches Photo 2 layout) */}
+        {activeWinner && (() => {
+          const winnerLogo = activeWinner.winnerSide === 'Red' ? activeWinner.redLogo : activeWinner.blueLogo;
+          const displayCat = cleanText(activeWinner.category);
+          return (
+            <div className="absolute inset-4 sm:inset-10 md:inset-16 lg:inset-24 z-50 flex items-center justify-center pointer-events-auto">
+              <div
                 className={cn(
-                  'font-black text-white uppercase tracking-wide drop-shadow-[0_4px_12px_rgba(0,0,0,0.65)] leading-tight break-words whitespace-normal max-w-full',
-                  winnerDisplayText.length > 34
-                    ? 'text-lg sm:text-2xl md:text-3xl lg:text-4xl'
-                    : winnerDisplayText.length > 22
-                      ? 'text-xl sm:text-3xl md:text-4xl lg:text-5xl'
-                      : 'text-2xl sm:text-4xl md:text-5xl lg:text-[3.5rem]'
+                  'relative w-full h-full border-2 border-white/90 rounded-2xl flex flex-col items-center justify-center px-6 sm:px-12 py-10 text-center overflow-hidden shadow-[0_25px_85px_rgba(0,0,0,0.9)]',
+                  winnerIsRed
+                    ? 'bg-gradient-to-b from-[#e60000] via-[#c40000] to-[#990000] shadow-[0_0_80px_rgba(255,0,0,0.7)]'
+                    : 'bg-gradient-to-b from-[#1a75ff] via-[#0052cc] to-[#003d99] shadow-[0_0_80px_rgba(0,82,204,0.7)]'
                 )}
               >
-                {winnerDisplayText}
-              </h1>
-
-              {cleanText(activeWinner.winnerClub) && (
-                <p
-                  className={cn(
-                    'mt-2 sm:mt-4 font-black text-white uppercase tracking-wider drop-shadow-[0_3px_10px_rgba(0,0,0,0.6)] break-words whitespace-normal max-w-full leading-tight',
-                    cleanText(activeWinner.winnerClub).length > 30
-                      ? 'text-base sm:text-2xl md:text-3xl'
-                      : 'text-lg sm:text-3xl md:text-4xl'
+                {/* Top Header: Ring & Bout */}
+                <div className="absolute top-4 sm:top-6 left-0 right-0 flex items-center justify-center gap-2 text-xs sm:text-sm md:text-base font-black uppercase tracking-widest text-white/95 px-4 drop-shadow">
+                  <span>RING {ringName}</span>
+                  <span aria-hidden="true">•</span>
+                  <span>BOUT {formatBoutNumber(ring.ringNumber, activeWinner.boutNumber, effectiveBoutMode)}</span>
+                  {activeWinner.winType && (
+                    <>
+                      <span aria-hidden="true">•</span>
+                      <span>{activeWinner.winType}</span>
+                    </>
                   )}
-                >
-                  {cleanText(activeWinner.winnerClub)}
-                </p>
-              )}
+                </div>
 
-              {/* Configurable Countdown Bar */}
-              <div className="absolute bottom-0 left-0 right-0 h-2 bg-black/25">
-                <div
-                  className="h-full bg-white transition-all ease-linear"
-                  style={{
-                    width: winnerProgressStarted ? '0%' : '100%',
-                    transitionDuration: `${effectiveDisplayMs || 5000}ms`
-                  }}
-                />
+                {/* Category Name */}
+                {displayCat && (
+                  <div className="absolute top-12 sm:top-14 left-4 right-4 text-[11px] sm:text-xs md:text-sm font-bold uppercase tracking-wider text-cyan-200/95 truncate px-4 drop-shadow">
+                    {displayCat}
+                  </div>
+                )}
+
+                {/* Center Content: Logo + Winner Label + Athlete Name + Club */}
+                <div className="flex flex-col items-center justify-center gap-3 sm:gap-4 max-w-[92%] mt-8">
+                  {/* Logo / Emblem / Trophy */}
+                  <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-black/35 border-2 border-white/55 shadow-xl flex items-center justify-center overflow-hidden p-2">
+                    {winnerLogo ? (
+                      <img src={winnerLogo} alt="Winner Logo" className="w-full h-full object-contain drop-shadow" />
+                    ) : (
+                      <Trophy size={36} className="text-amber-300 drop-shadow-[0_2px_8px_rgba(251,191,36,0.6)]" />
+                    )}
+                  </div>
+
+                  {/* Winner Side / Status Label */}
+                  <span className="text-xs sm:text-sm md:text-base font-black uppercase tracking-[0.25em] text-amber-300 drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)]">
+                    {activeWinner.winnerSide === 'Completed'
+                      ? 'PERFORMER COMPLETE'
+                      : winnerIsRed
+                        ? 'RED WINNER'
+                        : 'BLUE WINNER'}
+                  </span>
+
+                  {/* Athlete Name (Large Italic Uppercase) */}
+                  <h1
+                    className={cn(
+                      'font-black italic text-white uppercase tracking-wide drop-shadow-[0_4px_16px_rgba(0,0,0,0.8)] leading-tight break-words whitespace-normal max-w-full',
+                      cleanText(activeWinner.winnerName).length > 34
+                        ? 'text-xl sm:text-2xl md:text-3xl lg:text-4xl'
+                        : cleanText(activeWinner.winnerName).length > 22
+                          ? 'text-2xl sm:text-3xl md:text-4xl lg:text-5xl'
+                          : 'text-3xl sm:text-5xl md:text-6xl lg:text-[4rem]'
+                    )}
+                  >
+                    {cleanText(activeWinner.winnerName) || 'WINNER'}
+                  </h1>
+
+                  {/* Club Name (Gold/Yellow) */}
+                  {cleanText(activeWinner.winnerClub) && (
+                    <p
+                      className={cn(
+                        'font-black text-amber-200 uppercase tracking-wider drop-shadow-[0_3px_10px_rgba(0,0,0,0.8)] break-words whitespace-normal max-w-full leading-tight',
+                        cleanText(activeWinner.winnerClub).length > 30
+                          ? 'text-sm sm:text-xl md:text-2xl'
+                          : 'text-base sm:text-2xl md:text-3xl'
+                      )}
+                    >
+                      {cleanText(activeWinner.winnerClub)}
+                    </p>
+                  )}
+                </div>
+
+                {/* Configurable Countdown Progress Bar */}
+                <div className="absolute bottom-0 left-0 right-0 h-2 bg-black/30">
+                  <div
+                    className="h-full bg-white transition-all ease-linear"
+                    style={{
+                      width: winnerProgressStarted ? '0%' : '100%',
+                      transitionDuration: `${effectiveDisplayMs || 5000}ms`
+                    }}
+                  />
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
       </div>
 
       {/* Bottom Broadcast Footer Bar with MY-TKD Wordmark */}
