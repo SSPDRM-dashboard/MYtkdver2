@@ -10474,7 +10474,7 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
         </div>
       )}
       
-      <div className="p-3 sm:p-5 md:p-8 space-y-2.5 sm:space-y-4 md:space-y-6 pt-0 mt-2 sm:mt-3">
+      <div className="px-3 sm:px-5 md:px-8 pb-3 sm:pb-5 md:pb-8 pt-1.5 space-y-2 sm:space-y-3">
         {current ? (
           <>
             {(() => {
