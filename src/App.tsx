@@ -10498,11 +10498,11 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
                 const valPoomsae2 = isSelForCurrentBout ? (poomsaeSelection?.poomsae2 || '') : '';
                 return (
                   <div className="pb-3 border-b border-slate-100">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div className="space-y-1">
+                    <div className="grid grid-cols-2 gap-2 sm:gap-3">
+                      <div className="space-y-1 min-w-0">
                         <label
                           htmlFor={`ring-${ring.ringNumber}-poomsae-1`}
-                          className="block text-[11px] sm:text-xs font-black text-slate-600 uppercase tracking-wider px-0.5"
+                          className="block text-[9.5px] sm:text-xs font-black text-slate-600 uppercase tracking-wider px-0.5 truncate"
                         >
                           Selection for Poomsae 1
                         </label>
@@ -10510,7 +10510,7 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
                           id={`ring-${ring.ringNumber}-poomsae-1`}
                           value={valPoomsae1}
                           onChange={(e) => onChangePoomsaeSelection('poomsae1', e.target.value)}
-                          className="w-full min-h-[42px] px-3 py-2 bg-slate-50 hover:bg-white border border-slate-200 focus:border-blue-500 focus:bg-white rounded-xl text-sm sm:text-base font-bold text-slate-800 outline-none transition-colors cursor-pointer"
+                          className="w-full min-h-[40px] sm:min-h-[42px] px-2 sm:px-3 py-1.5 sm:py-2 bg-slate-50 hover:bg-white border border-slate-200 focus:border-blue-500 focus:bg-white rounded-xl text-xs sm:text-base font-bold text-slate-800 outline-none transition-colors cursor-pointer truncate"
                         >
                           <option value="">-- Select Poomsae 1 --</option>
                           {POOMSAE_FORMS.map((form) => (
@@ -10520,10 +10520,10 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
                           ))}
                         </select>
                       </div>
-                      <div className="space-y-1">
+                      <div className="space-y-1 min-w-0">
                         <label
                           htmlFor={`ring-${ring.ringNumber}-poomsae-2`}
-                          className="block text-[11px] sm:text-xs font-black text-slate-600 uppercase tracking-wider px-0.5"
+                          className="block text-[9.5px] sm:text-xs font-black text-slate-600 uppercase tracking-wider px-0.5 truncate"
                         >
                           Selection for Poomsae 2
                         </label>
@@ -10531,7 +10531,7 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
                           id={`ring-${ring.ringNumber}-poomsae-2`}
                           value={valPoomsae2}
                           onChange={(e) => onChangePoomsaeSelection('poomsae2', e.target.value)}
-                          className="w-full min-h-[42px] px-3 py-2 bg-slate-50 hover:bg-white border border-slate-200 focus:border-red-500 focus:bg-white rounded-xl text-sm sm:text-base font-bold text-slate-800 outline-none transition-colors cursor-pointer"
+                          className="w-full min-h-[40px] sm:min-h-[42px] px-2 sm:px-3 py-1.5 sm:py-2 bg-slate-50 hover:bg-white border border-slate-200 focus:border-red-500 focus:bg-white rounded-xl text-xs sm:text-base font-bold text-slate-800 outline-none transition-colors cursor-pointer truncate"
                         >
                           <option value="">-- Select Poomsae 2 --</option>
                           {POOMSAE_FORMS.map((form) => (
