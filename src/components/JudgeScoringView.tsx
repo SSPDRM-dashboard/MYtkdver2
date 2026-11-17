@@ -553,10 +553,10 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
         </div>
       </header>
 
-      <main className="flex-1 w-full max-w-7xl mx-auto px-3 sm:px-6 pt-4 space-y-4">
+      <main className="flex-1 w-full max-w-7xl mx-auto px-1.5 sm:px-4 md:px-6 pt-2 sm:pt-4 space-y-2.5 sm:space-y-4">
         {/* WT Official Display Banner (Matching Photo Layout) */}
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 text-center space-y-1 shadow-md">
-          <div className="flex flex-wrap items-center justify-center gap-3 text-xs font-bold text-slate-300 uppercase tracking-widest">
+        <div className="bg-slate-900 border border-slate-800 rounded-xl sm:rounded-2xl p-2.5 sm:p-4 text-center space-y-1 shadow-md">
+          <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3 text-[10px] sm:text-xs font-bold text-slate-300 uppercase tracking-widest">
             <span>Bout {activeBoutNumberFormatted}</span>
             <span>·</span>
             <span className="text-amber-300">
@@ -568,52 +568,52 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
         </div>
 
         {isJudgeStandby && (
-          <div className="rounded-2xl border border-amber-500/40 bg-amber-950/40 p-4 text-center space-y-1">
-            <p className="text-sm font-bold text-amber-300">Judge {judgeNumber} on Standby</p>
-            <p className="text-xs text-amber-100/80">
+          <div className="rounded-xl sm:rounded-2xl border border-amber-500/40 bg-amber-950/40 p-2.5 sm:p-4 text-center space-y-1">
+            <p className="text-xs sm:text-sm font-bold text-amber-300">Judge {judgeNumber} on Standby</p>
+            <p className="text-[10px] sm:text-xs text-amber-100/80">
               Ring {ringName} is currently configured for {effectiveJudgeCount} Judges.
             </p>
           </div>
         )}
 
-        {/* SIDE-BY-SIDE DUAL BLUE & RED WT SCORING PANELS */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
+        {/* SIDE-BY-SIDE DUAL BLUE & RED WT SCORING PANELS (ALWAYS SIDE BY SIDE ON HP & IPAD) */}
+        <div className="grid grid-cols-2 gap-1.5 sm:gap-4 md:gap-6 items-stretch">
           {/* ================= BLUE (CHUNG) SIDE ================= */}
-          <div className="rounded-3xl bg-gradient-to-b from-[#003882] via-[#002456] to-[#001333] border-2 border-[#00a2e8] p-4 sm:p-5 space-y-4 shadow-[0_0_28px_rgba(0,162,232,0.35)] flex flex-col justify-between">
-            <div className="space-y-4">
+          <div className="rounded-2xl sm:rounded-3xl bg-gradient-to-b from-[#003882] via-[#002456] to-[#001333] border-2 border-[#00a2e8] p-2 sm:p-4 md:p-5 space-y-2 sm:space-y-4 shadow-[0_0_24px_rgba(0,162,232,0.35)] flex flex-col justify-between min-w-0">
+            <div className="space-y-2 sm:space-y-4 min-w-0">
               {/* Athlete Header */}
-              <div className="bg-[#004299]/70 border border-[#00a2e8]/40 rounded-2xl p-3.5 sm:p-4 space-y-1 shadow-inner">
-                <div className="flex items-center justify-between text-xs font-black uppercase tracking-wider">
+              <div className="bg-[#004299]/70 border border-[#00a2e8]/40 rounded-xl sm:rounded-2xl p-2 sm:p-3.5 space-y-0.5 sm:space-y-1 shadow-inner min-w-0">
+                <div className="flex items-center justify-between text-[10px] sm:text-xs font-black uppercase tracking-wider">
                   <span className="text-[#40c4ff]">Chung (Blue)</span>
-                  <span className="font-mono font-bold text-yellow-400">Judge {judgeNumber}</span>
+                  <span className="font-mono font-bold text-yellow-400">J{judgeNumber}</span>
                 </div>
-                <h2 className="text-xl sm:text-2xl md:text-3xl font-black text-white uppercase tracking-tight break-words">
+                <h2 className="text-xs sm:text-xl md:text-2xl font-black text-white uppercase tracking-tight break-words leading-tight line-clamp-2">
                   {blueName || 'Waiting for Blue Athlete'}
                 </h2>
-                <div className="flex flex-wrap items-end justify-between gap-2 pt-0.5">
-                  <p className="text-xs sm:text-sm font-bold text-[#00a2e8] uppercase tracking-wide min-w-0">
+                <div className="flex flex-wrap items-end justify-between gap-1 pt-0.5 min-w-0">
+                  <p className="text-[9px] sm:text-xs md:text-sm font-bold text-[#00a2e8] uppercase tracking-wide truncate max-w-full">
                     {blueClub || '\u00A0'}
                   </p>
-                  <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#001333]/90 border border-[#00a2e8]/40 shrink-0">
+                  <div className="flex items-center gap-1 p-1 rounded-lg bg-[#001333]/90 border border-[#00a2e8]/40 shrink-0">
                     <button
                       type="button"
                       onClick={() => setManualPoomsae(1)}
                       className={cn(
-                        'px-2 py-0.5 rounded text-xs font-black uppercase transition-all cursor-pointer',
+                        'px-1.5 py-0.5 rounded text-[9px] sm:text-xs font-black uppercase transition-all cursor-pointer',
                         activePoomsae === 1 ? 'bg-yellow-400 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-white'
                       )}
                     >
-                      Poomsae 1
+                      P1
                     </button>
                     <button
                       type="button"
                       onClick={() => setManualPoomsae(2)}
                       className={cn(
-                        'px-2 py-0.5 rounded text-xs font-black uppercase transition-all cursor-pointer',
+                        'px-1.5 py-0.5 rounded text-[9px] sm:text-xs font-black uppercase transition-all cursor-pointer',
                         activePoomsae === 2 ? 'bg-yellow-400 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-white'
                       )}
                     >
-                      Poomsae 2
+                      P2
                     </button>
                   </div>
                 </div>
@@ -622,28 +622,28 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
               {/* Conditional Layout: Photo 1 (Accuracy) vs Photo 2 (Presentation) */}
               {blueStep === 'accuracy' ? (
                 /* PHOTO 1: ACCURACY LAYOUT */
-                <div className="space-y-4">
-                  <div className="rounded-2xl bg-[#001f4d]/90 border border-[#00a2e8]/40 p-4 space-y-3.5 shadow-inner">
+                <div className="space-y-2 sm:space-y-4">
+                  <div className="rounded-xl sm:rounded-2xl bg-[#001f4d]/90 border border-[#00a2e8]/40 p-2 sm:p-4 space-y-2 sm:space-y-3.5 shadow-inner">
                     <div className="flex items-center justify-between">
                       <div>
-                        <h3 className="text-sm sm:text-base font-black text-white uppercase tracking-wider">Accuracy</h3>
-                        <p className="text-[10px] sm:text-[11px] text-cyan-200/75">Max 4.0 • Deduct errors by -0.1 / -0.3</p>
+                        <h3 className="text-xs sm:text-sm md:text-base font-black text-white uppercase tracking-wider">Accuracy</h3>
+                        <p className="text-[8px] sm:text-[10px] text-cyan-200/75 leading-tight">Max 4.0 • Deduct -0.1 / -0.3</p>
                       </div>
-                      <div className="flex items-baseline gap-1 font-mono tabular-nums">
-                        <span className="text-3xl sm:text-4xl font-black text-[#00a2e8]">{blueAcc.toFixed(1)}</span>
-                        <span className="text-sm font-bold text-cyan-200/70">/ 4.0</span>
+                      <div className="flex items-baseline gap-0.5 sm:gap-1 font-mono tabular-nums">
+                        <span className="text-xl sm:text-3xl md:text-4xl font-black text-[#00a2e8]">{blueAcc.toFixed(1)}</span>
+                        <span className="text-[10px] sm:text-sm font-bold text-cyan-200/70">/ 4.0</span>
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-2 grid-rows-2 gap-2.5">
+                    <div className="grid grid-cols-2 grid-rows-2 gap-1.5 sm:gap-2.5">
                       {/* -0.1 Minor (Left tall button, spans 2 rows) */}
                       <button
                         type="button"
                         disabled={!current || isJudgeStandby}
                         onClick={() => setBlueAcc((prev) => clampAccuracy(prev - 0.1))}
-                        className="col-start-1 row-start-1 row-span-2 min-h-[96px] rounded-2xl bg-[#33352f] hover:bg-[#3f4139] border-2 border-[#b5a642]/60 text-[#fde047] font-black text-base sm:text-lg active:scale-[0.98] transition-all cursor-pointer flex flex-col items-center justify-center gap-1 shadow-md disabled:opacity-40"
+                        className="col-start-1 row-start-1 row-span-2 min-h-[76px] sm:min-h-[96px] rounded-xl sm:rounded-2xl bg-[#33352f] hover:bg-[#3f4139] border-2 border-[#b5a642]/60 text-[#fde047] font-black text-xs sm:text-base md:text-lg active:scale-[0.98] transition-all cursor-pointer flex flex-col items-center justify-center p-1 shadow-md disabled:opacity-40 select-none touch-manipulation"
                       >
-                        <span className="text-base sm:text-xl font-black tracking-wide">-0.1 Minor</span>
+                        <span className="text-xs sm:text-base md:text-xl font-black tracking-wide">-0.1 Minor</span>
                       </button>
 
                       {/* -0.3 Major (Right top) */}
@@ -651,7 +651,7 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                         type="button"
                         disabled={!current || isJudgeStandby}
                         onClick={() => setBlueAcc((prev) => clampAccuracy(prev - 0.3))}
-                        className="col-start-2 row-start-1 min-h-[44px] rounded-xl sm:rounded-2xl bg-[#4b1d7d] hover:bg-[#5c2499] border border-[#a855f7]/60 text-white font-black text-xs sm:text-sm active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center gap-1 shadow-md disabled:opacity-40"
+                        className="col-start-2 row-start-1 min-h-[36px] sm:min-h-[44px] rounded-lg sm:rounded-xl bg-[#4b1d7d] hover:bg-[#5c2499] border border-[#a855f7]/60 text-white font-black text-[10px] sm:text-xs md:text-sm active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center p-1 shadow-md disabled:opacity-40 select-none touch-manipulation"
                       >
                         <span>-0.3 Major</span>
                       </button>
@@ -661,9 +661,9 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                         type="button"
                         disabled={!current || isJudgeStandby}
                         onClick={() => setBlueAcc((prev) => clampAccuracy(prev + 0.1))}
-                        className="col-start-2 row-start-2 min-h-[44px] rounded-xl sm:rounded-2xl bg-[#0055b3] hover:bg-[#0066d6] border border-[#38bdf8]/60 text-white font-black text-xs sm:text-sm active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center gap-1 shadow-md disabled:opacity-40"
+                        className="col-start-2 row-start-2 min-h-[36px] sm:min-h-[44px] rounded-lg sm:rounded-xl bg-[#0055b3] hover:bg-[#0066d6] border border-[#38bdf8]/60 text-white font-black text-[10px] sm:text-xs md:text-sm active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center gap-0.5 p-1 shadow-md disabled:opacity-40 select-none touch-manipulation"
                       >
-                        <Plus size={14} strokeWidth={3} />
+                        <Plus size={12} strokeWidth={3} />
                         <span>+0.1 Undo</span>
                       </button>
                     </div>
@@ -674,11 +674,11 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                     type="button"
                     disabled={!current || isJudgeStandby}
                     onClick={() => setBlueStep('presentation')}
-                    className="w-full min-h-[64px] sm:min-h-[76px] rounded-2xl sm:rounded-3xl bg-gradient-to-r from-[#0052cc] via-[#0073e6] to-[#0052cc] hover:from-[#0066ff] hover:to-[#0052cc] border-2 border-[#00a2e8] text-white font-black text-xl sm:text-2xl uppercase tracking-widest shadow-[0_0_24px_rgba(0,162,232,0.7)] active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center gap-3 disabled:opacity-40"
+                    className="w-full min-h-[48px] sm:min-h-[64px] md:min-h-[76px] rounded-xl sm:rounded-2xl md:rounded-3xl bg-gradient-to-r from-[#0052cc] via-[#0073e6] to-[#0052cc] hover:from-[#0066ff] hover:to-[#0052cc] border-2 border-[#00a2e8] text-white font-black text-xs sm:text-lg md:text-2xl uppercase tracking-wider sm:tracking-widest shadow-[0_0_24px_rgba(0,162,232,0.7)] active:scale-[0.98] transition-all cursor-pointer flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-3 p-2 disabled:opacity-40 select-none touch-manipulation"
                   >
                     <span>PRESENTATION</span>
                     {blueSubmitSuccessAt && (!existingBlue || blueSubmitSuccessAt >= existingBlue.submittedAt) && (
-                      <span className="text-xs font-bold bg-emerald-500/30 border border-emerald-400 px-2.5 py-1 rounded-full text-emerald-200">
+                      <span className="text-[9px] sm:text-xs font-bold bg-emerald-500/30 border border-emerald-400 px-1.5 sm:px-2.5 py-0.5 rounded-full text-emerald-200">
                         ✓ SUBMITTED ({round2(blueAcc + bluePresTotal).toFixed(2)})
                       </span>
                     )}
@@ -686,29 +686,29 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                 </div>
               ) : (
                 /* PHOTO 2: PRESENTATION LAYOUT */
-                <div className="space-y-3">
+                <div className="space-y-2 sm:space-y-3">
                   {/* Top back navigation */}
                   <div className="flex items-center justify-between pb-0.5">
                     <button
                       type="button"
                       onClick={() => setBlueStep('accuracy')}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#00173d] hover:bg-[#002456] border border-[#00a2e8]/50 text-cyan-200 hover:text-white font-black text-xs uppercase tracking-wider transition-all cursor-pointer shadow-sm"
+                      className="flex items-center gap-1 px-2 py-1 rounded-lg bg-[#00173d] hover:bg-[#002456] border border-[#00a2e8]/50 text-cyan-200 hover:text-white font-black text-[9px] sm:text-xs uppercase tracking-wider transition-all cursor-pointer shadow-sm select-none touch-manipulation"
                     >
-                      <ArrowLeft size={13} />
+                      <ArrowLeft size={12} />
                       <span>&lt; Accuracy ({blueAcc.toFixed(1)})</span>
                     </button>
-                    <span className="font-mono text-xs font-black text-cyan-300">
-                      Presentation: {bluePresTotal.toFixed(1)} / 6.0
+                    <span className="font-mono text-[9px] sm:text-xs font-black text-cyan-300">
+                      Pres: {bluePresTotal.toFixed(1)} / 6.0
                     </span>
                   </div>
 
                   {/* 1. Speed & Power (16 buttons) */}
-                  <div className="rounded-2xl bg-[#001f4d]/85 border border-[#00a2e8]/40 p-3 sm:p-3.5 space-y-1.5 shadow-inner">
+                  <div className="rounded-xl sm:rounded-2xl bg-[#001f4d]/85 border border-[#00a2e8]/40 p-1.5 sm:p-3 space-y-1 shadow-inner">
                     <div className="flex items-center justify-between">
-                      <h3 className="text-xs sm:text-sm font-black text-white uppercase tracking-wider">Speed &amp; Power</h3>
-                      <span className="font-mono text-xs font-bold text-cyan-300">{blueSp.toFixed(1)} / 2.0</span>
+                      <h3 className="text-[10px] sm:text-xs md:text-sm font-black text-white uppercase tracking-wider">Speed &amp; Power</h3>
+                      <span className="font-mono text-[9px] sm:text-xs font-bold text-cyan-300">{blueSp.toFixed(1)}</span>
                     </div>
-                    <div className="grid grid-cols-8 gap-1 sm:gap-1.5">
+                    <div className="grid grid-cols-8 gap-0.5 sm:gap-1.5">
                       {PRESENTATION_ROW_1.map((val) => (
                         <button
                           key={val}
@@ -716,9 +716,9 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                           disabled={!current || isJudgeStandby}
                           onClick={() => setBlueSp(val)}
                           className={cn(
-                            'h-8 sm:h-9 rounded-lg font-black text-[11px] sm:text-xs transition-all cursor-pointer flex items-center justify-center tabular-nums disabled:opacity-40',
+                            'h-7 sm:h-8 md:h-9 rounded font-black text-[8px] sm:text-[11px] md:text-xs p-0 transition-all cursor-pointer flex items-center justify-center tabular-nums leading-none overflow-hidden select-none touch-manipulation active:scale-95 disabled:opacity-40',
                             blueSp === val
-                              ? 'bg-[#00a2e8] text-white border-2 border-white shadow-[0_0_14px_rgba(0,162,232,1)] scale-105 z-10'
+                              ? 'bg-[#00a2e8] text-white border sm:border-2 border-white shadow-[0_0_12px_rgba(0,162,232,1)] scale-105 z-10'
                               : 'bg-[#041b45]/90 border border-cyan-400/30 text-white/90 hover:border-cyan-300 hover:bg-[#072d6e]'
                           )}
                         >
@@ -726,7 +726,7 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                         </button>
                       ))}
                     </div>
-                    <div className="grid grid-cols-8 gap-1 sm:gap-1.5">
+                    <div className="grid grid-cols-8 gap-0.5 sm:gap-1.5">
                       {PRESENTATION_ROW_2.map((val) => (
                         <button
                           key={val}
@@ -734,9 +734,9 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                           disabled={!current || isJudgeStandby}
                           onClick={() => setBlueSp(val)}
                           className={cn(
-                            'h-8 sm:h-9 rounded-lg font-black text-[11px] sm:text-xs transition-all cursor-pointer flex items-center justify-center tabular-nums disabled:opacity-40',
+                            'h-7 sm:h-8 md:h-9 rounded font-black text-[8px] sm:text-[11px] md:text-xs p-0 transition-all cursor-pointer flex items-center justify-center tabular-nums leading-none overflow-hidden select-none touch-manipulation active:scale-95 disabled:opacity-40',
                             blueSp === val
-                              ? 'bg-[#00a2e8] text-white border-2 border-white shadow-[0_0_14px_rgba(0,162,232,1)] scale-105 z-10'
+                              ? 'bg-[#00a2e8] text-white border sm:border-2 border-white shadow-[0_0_12px_rgba(0,162,232,1)] scale-105 z-10'
                               : 'bg-[#041b45]/90 border border-cyan-400/30 text-white/90 hover:border-cyan-300 hover:bg-[#072d6e]'
                           )}
                         >
@@ -747,12 +747,12 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                   </div>
 
                   {/* 2. Rhythm / Tempo / Softness (16 buttons) */}
-                  <div className="rounded-2xl bg-[#001f4d]/85 border border-[#00a2e8]/40 p-3 sm:p-3.5 space-y-1.5 shadow-inner">
+                  <div className="rounded-xl sm:rounded-2xl bg-[#001f4d]/85 border border-[#00a2e8]/40 p-1.5 sm:p-3 space-y-1 shadow-inner">
                     <div className="flex items-center justify-between">
-                      <h3 className="text-xs sm:text-sm font-black text-white uppercase tracking-wider">Rhythm / Tempo / Softness</h3>
-                      <span className="font-mono text-xs font-bold text-cyan-300">{blueRt.toFixed(1)} / 2.0</span>
+                      <h3 className="text-[10px] sm:text-xs md:text-sm font-black text-white uppercase tracking-wider">Rhythm / Tempo</h3>
+                      <span className="font-mono text-[9px] sm:text-xs font-bold text-cyan-300">{blueRt.toFixed(1)}</span>
                     </div>
-                    <div className="grid grid-cols-8 gap-1 sm:gap-1.5">
+                    <div className="grid grid-cols-8 gap-0.5 sm:gap-1.5">
                       {PRESENTATION_ROW_1.map((val) => (
                         <button
                           key={val}
@@ -760,9 +760,9 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                           disabled={!current || isJudgeStandby}
                           onClick={() => setBlueRt(val)}
                           className={cn(
-                            'h-8 sm:h-9 rounded-lg font-black text-[11px] sm:text-xs transition-all cursor-pointer flex items-center justify-center tabular-nums disabled:opacity-40',
+                            'h-7 sm:h-8 md:h-9 rounded font-black text-[8px] sm:text-[11px] md:text-xs p-0 transition-all cursor-pointer flex items-center justify-center tabular-nums leading-none overflow-hidden select-none touch-manipulation active:scale-95 disabled:opacity-40',
                             blueRt === val
-                              ? 'bg-[#00a2e8] text-white border-2 border-white shadow-[0_0_14px_rgba(0,162,232,1)] scale-105 z-10'
+                              ? 'bg-[#00a2e8] text-white border sm:border-2 border-white shadow-[0_0_12px_rgba(0,162,232,1)] scale-105 z-10'
                               : 'bg-[#041b45]/90 border border-cyan-400/30 text-white/90 hover:border-cyan-300 hover:bg-[#072d6e]'
                           )}
                         >
@@ -770,7 +770,7 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                         </button>
                       ))}
                     </div>
-                    <div className="grid grid-cols-8 gap-1 sm:gap-1.5">
+                    <div className="grid grid-cols-8 gap-0.5 sm:gap-1.5">
                       {PRESENTATION_ROW_2.map((val) => (
                         <button
                           key={val}
@@ -778,9 +778,9 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                           disabled={!current || isJudgeStandby}
                           onClick={() => setBlueRt(val)}
                           className={cn(
-                            'h-8 sm:h-9 rounded-lg font-black text-[11px] sm:text-xs transition-all cursor-pointer flex items-center justify-center tabular-nums disabled:opacity-40',
+                            'h-7 sm:h-8 md:h-9 rounded font-black text-[8px] sm:text-[11px] md:text-xs p-0 transition-all cursor-pointer flex items-center justify-center tabular-nums leading-none overflow-hidden select-none touch-manipulation active:scale-95 disabled:opacity-40',
                             blueRt === val
-                              ? 'bg-[#00a2e8] text-white border-2 border-white shadow-[0_0_14px_rgba(0,162,232,1)] scale-105 z-10'
+                              ? 'bg-[#00a2e8] text-white border sm:border-2 border-white shadow-[0_0_12px_rgba(0,162,232,1)] scale-105 z-10'
                               : 'bg-[#041b45]/90 border border-cyan-400/30 text-white/90 hover:border-cyan-300 hover:bg-[#072d6e]'
                           )}
                         >
@@ -791,12 +791,12 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                   </div>
 
                   {/* 3. Expression of Energy (16 buttons) */}
-                  <div className="rounded-2xl bg-[#001f4d]/85 border border-[#00a2e8]/40 p-3 sm:p-3.5 space-y-1.5 shadow-inner">
+                  <div className="rounded-xl sm:rounded-2xl bg-[#001f4d]/85 border border-[#00a2e8]/40 p-1.5 sm:p-3 space-y-1 shadow-inner">
                     <div className="flex items-center justify-between">
-                      <h3 className="text-xs sm:text-sm font-black text-white uppercase tracking-wider">Expression of Energy</h3>
-                      <span className="font-mono text-xs font-bold text-cyan-300">{blueEe.toFixed(1)} / 2.0</span>
+                      <h3 className="text-[10px] sm:text-xs md:text-sm font-black text-white uppercase tracking-wider">Expression of Energy</h3>
+                      <span className="font-mono text-[9px] sm:text-xs font-bold text-cyan-300">{blueEe.toFixed(1)}</span>
                     </div>
-                    <div className="grid grid-cols-8 gap-1 sm:gap-1.5">
+                    <div className="grid grid-cols-8 gap-0.5 sm:gap-1.5">
                       {PRESENTATION_ROW_1.map((val) => (
                         <button
                           key={val}
@@ -804,9 +804,9 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                           disabled={!current || isJudgeStandby}
                           onClick={() => setBlueEe(val)}
                           className={cn(
-                            'h-8 sm:h-9 rounded-lg font-black text-[11px] sm:text-xs transition-all cursor-pointer flex items-center justify-center tabular-nums disabled:opacity-40',
+                            'h-7 sm:h-8 md:h-9 rounded font-black text-[8px] sm:text-[11px] md:text-xs p-0 transition-all cursor-pointer flex items-center justify-center tabular-nums leading-none overflow-hidden select-none touch-manipulation active:scale-95 disabled:opacity-40',
                             blueEe === val
-                              ? 'bg-[#00a2e8] text-white border-2 border-white shadow-[0_0_14px_rgba(0,162,232,1)] scale-105 z-10'
+                              ? 'bg-[#00a2e8] text-white border sm:border-2 border-white shadow-[0_0_12px_rgba(0,162,232,1)] scale-105 z-10'
                               : 'bg-[#041b45]/90 border border-cyan-400/30 text-white/90 hover:border-cyan-300 hover:bg-[#072d6e]'
                           )}
                         >
@@ -814,7 +814,7 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                         </button>
                       ))}
                     </div>
-                    <div className="grid grid-cols-8 gap-1 sm:gap-1.5">
+                    <div className="grid grid-cols-8 gap-0.5 sm:gap-1.5">
                       {PRESENTATION_ROW_2.map((val) => (
                         <button
                           key={val}
@@ -822,9 +822,9 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                           disabled={!current || isJudgeStandby}
                           onClick={() => setBlueEe(val)}
                           className={cn(
-                            'h-8 sm:h-9 rounded-lg font-black text-[11px] sm:text-xs transition-all cursor-pointer flex items-center justify-center tabular-nums disabled:opacity-40',
+                            'h-7 sm:h-8 md:h-9 rounded font-black text-[8px] sm:text-[11px] md:text-xs p-0 transition-all cursor-pointer flex items-center justify-center tabular-nums leading-none overflow-hidden select-none touch-manipulation active:scale-95 disabled:opacity-40',
                             blueEe === val
-                              ? 'bg-[#00a2e8] text-white border-2 border-white shadow-[0_0_14px_rgba(0,162,232,1)] scale-105 z-10'
+                              ? 'bg-[#00a2e8] text-white border sm:border-2 border-white shadow-[0_0_12px_rgba(0,162,232,1)] scale-105 z-10'
                               : 'bg-[#041b45]/90 border border-cyan-400/30 text-white/90 hover:border-cyan-300 hover:bg-[#072d6e]'
                           )}
                         >
@@ -835,47 +835,57 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                   </div>
 
                   {/* PHOTO 2: Bottom Bar (Math display + SUBMIT button) */}
-                  <div className="pt-3 border-t border-cyan-400/40 flex flex-wrap items-center justify-between gap-3">
+                  <div className="pt-2 sm:pt-3 border-t border-cyan-400/40 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 sm:gap-3">
                     <div className="space-y-0.5 min-w-0">
-                      <div className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-cyan-200/90">
+                      <div className="text-[7.5px] sm:text-[10px] md:text-xs font-bold uppercase tracking-wider text-cyan-200/90 truncate">
                         ACCURACY + PRESENTATION = BLUE TOTAL / 10.0
                       </div>
-                      <div className="flex flex-wrap items-baseline gap-1.5 sm:gap-2 font-mono font-black tabular-nums">
-                        <span className="text-xl sm:text-2xl text-[#00a2e8]" title="Accuracy">
+                      <div className="flex flex-wrap items-baseline gap-1 sm:gap-1.5 font-mono font-black tabular-nums">
+                        <span className="text-xs sm:text-base md:text-xl text-[#00a2e8]" title="Accuracy">
                           {blueAcc.toFixed(1)}
                         </span>
-                        <span className="text-sm sm:text-base text-cyan-200/70">+</span>
-                        <span className="text-xl sm:text-2xl text-[#00a2e8]" title="Presentation">
+                        <span className="text-[10px] sm:text-xs text-white">+</span>
+                        <span className="text-xs sm:text-base md:text-xl text-[#00a2e8]" title="Presentation">
                           {bluePresTotal.toFixed(1)}
                         </span>
-                        <span className="text-sm sm:text-base text-cyan-200/70">=</span>
-                        <span className="text-2xl sm:text-3xl md:text-4xl text-yellow-400">
+                        <span className="text-[10px] sm:text-xs text-white">=</span>
+                        <span className="text-sm sm:text-2xl md:text-3xl text-yellow-400">
                           {round2(blueAcc + bluePresTotal).toFixed(2)}
                         </span>
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setBlueStep('accuracy')}
+                        className="min-h-[36px] sm:min-h-[46px] px-2.5 sm:px-3 rounded-lg sm:rounded-xl border border-cyan-400/40 bg-slate-900/80 hover:bg-slate-800 text-cyan-200 font-bold text-[9px] sm:text-xs uppercase tracking-wider flex items-center justify-center gap-1 transition-all cursor-pointer select-none touch-manipulation"
+                        title="Return to Accuracy screen"
+                      >
+                        <ArrowLeft size={11} />
+                        <span className="hidden sm:inline">Accuracy</span>
+                      </button>
+
                       <button
                         type="button"
                         disabled={!current || isJudgeStandby || isSubmittingBlue}
                         onClick={() => handleManualSubmitSide('blue')}
                         className={cn(
-                          'min-h-[46px] sm:min-h-[52px] px-6 sm:px-8 rounded-xl sm:rounded-2xl font-black text-sm uppercase tracking-wider flex items-center gap-2 transition-all active:scale-[0.98] cursor-pointer disabled:opacity-40 shadow-lg',
+                          'flex-1 sm:flex-initial min-h-[36px] sm:min-h-[48px] px-3 sm:px-6 rounded-lg sm:rounded-xl font-black text-[10px] sm:text-sm uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] cursor-pointer disabled:opacity-40 shadow-lg select-none touch-manipulation',
                           blueSubmitSuccessAt && (!existingBlue || blueSubmitSuccessAt >= existingBlue.submittedAt)
-                            ? 'bg-gradient-to-r from-emerald-500 to-green-600 border-2 border-emerald-300 text-white shadow-[0_0_18px_rgba(16,185,129,0.7)]'
-                            : 'bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-500 hover:to-emerald-600 border-2 border-emerald-400 text-white shadow-[0_0_14px_rgba(16,185,129,0.5)]'
+                            ? 'bg-gradient-to-r from-emerald-500 to-green-600 border border-emerald-300 text-white shadow-[0_0_12px_rgba(16,185,129,0.7)]'
+                            : 'bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-500 hover:to-emerald-600 border border-emerald-400 text-white shadow-[0_0_10px_rgba(16,185,129,0.5)]'
                         )}
                       >
                         {blueSubmitSuccessAt && (!existingBlue || blueSubmitSuccessAt >= existingBlue.submittedAt) ? (
                           <>
-                            <CheckCircle2 size={18} />
+                            <CheckCircle2 size={14} />
                             <span>SUBMITTED</span>
                           </>
                         ) : (
                           <>
-                            <Send size={16} />
-                            <span>{isSubmittingBlue ? 'SUBMITTING...' : 'SUBMIT'}</span>
+                            <Send size={13} />
+                            <span>{isSubmittingBlue ? '...' : 'SUBMIT'}</span>
                           </>
                         )}
                       </button>
@@ -887,42 +897,42 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
           </div>
 
           {/* ================= RED (HONG) SIDE ================= */}
-          <div className="rounded-3xl bg-gradient-to-b from-[#800a12] via-[#52050b] to-[#2e0205] border-2 border-[#ed1c24] p-4 sm:p-5 space-y-4 shadow-[0_0_28px_rgba(237,28,36,0.35)] flex flex-col justify-between">
+          <div className="rounded-2xl sm:rounded-3xl bg-gradient-to-b from-[#800a12] via-[#52050b] to-[#2e0205] border-2 border-[#ed1c24] p-2 sm:p-4 md:p-5 space-y-2 sm:space-y-4 shadow-[0_0_24px_rgba(237,28,36,0.35)] flex flex-col justify-between min-w-0">
             {hasRedCompetitor ? (
-              <div className="space-y-4">
+              <div className="space-y-2 sm:space-y-4 min-w-0">
                 {/* Athlete Header */}
-                <div className="bg-[#9e0c16]/70 border border-[#ed1c24]/40 rounded-2xl p-3.5 sm:p-4 space-y-1 shadow-inner">
-                  <div className="flex items-center justify-between text-xs font-black uppercase tracking-wider">
+                <div className="bg-[#9e0c16]/70 border border-[#ed1c24]/40 rounded-xl sm:rounded-2xl p-2 sm:p-3.5 space-y-0.5 sm:space-y-1 shadow-inner min-w-0">
+                  <div className="flex items-center justify-between text-[10px] sm:text-xs font-black uppercase tracking-wider">
                     <span className="text-[#ff6b6b]">Hong (Red)</span>
-                    <span className="font-mono font-bold text-yellow-400">Judge {judgeNumber}</span>
+                    <span className="font-mono font-bold text-yellow-400">J{judgeNumber}</span>
                   </div>
-                  <h2 className="text-xl sm:text-2xl md:text-3xl font-black text-white uppercase tracking-tight break-words">
+                  <h2 className="text-xs sm:text-xl md:text-2xl font-black text-white uppercase tracking-tight break-words leading-tight line-clamp-2">
                     {redName || 'Waiting for Red Athlete'}
                   </h2>
-                  <div className="flex flex-wrap items-end justify-between gap-2 pt-0.5">
-                    <p className="text-xs sm:text-sm font-bold text-[#ff8a8a] uppercase tracking-wide min-w-0">
+                  <div className="flex flex-wrap items-end justify-between gap-1 pt-0.5 min-w-0">
+                    <p className="text-[9px] sm:text-xs md:text-sm font-bold text-[#ff8a8a] uppercase tracking-wide truncate max-w-full">
                       {redClub || '\u00A0'}
                     </p>
-                    <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#2e0205]/90 border border-[#ed1c24]/40 shrink-0">
+                    <div className="flex items-center gap-1 p-1 rounded-lg bg-[#2e0205]/90 border border-[#ed1c24]/40 shrink-0">
                       <button
                         type="button"
                         onClick={() => setManualPoomsae(1)}
                         className={cn(
-                          'px-2 py-0.5 rounded text-xs font-black uppercase transition-all cursor-pointer',
+                          'px-1.5 py-0.5 rounded text-[9px] sm:text-xs font-black uppercase transition-all cursor-pointer',
                           activePoomsae === 1 ? 'bg-yellow-400 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-white'
                         )}
                       >
-                        Poomsae 1
+                        P1
                       </button>
                       <button
                         type="button"
                         onClick={() => setManualPoomsae(2)}
                         className={cn(
-                          'px-2 py-0.5 rounded text-xs font-black uppercase transition-all cursor-pointer',
+                          'px-1.5 py-0.5 rounded text-[9px] sm:text-xs font-black uppercase transition-all cursor-pointer',
                           activePoomsae === 2 ? 'bg-yellow-400 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-white'
                         )}
                       >
-                        Poomsae 2
+                        P2
                       </button>
                     </div>
                   </div>
@@ -931,26 +941,26 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                 {/* Conditional Layout: Photo 1 (Accuracy) vs Photo 2 (Presentation) */}
                 {redStep === 'accuracy' ? (
                   /* PHOTO 1: ACCURACY LAYOUT */
-                  <div className="space-y-4">
-                    <div className="rounded-2xl bg-[#380307]/90 border border-[#ed1c24]/40 p-4 space-y-3.5 shadow-inner">
+                  <div className="space-y-2 sm:space-y-4">
+                    <div className="rounded-xl sm:rounded-2xl bg-[#380307]/90 border border-[#ed1c24]/40 p-2 sm:p-4 space-y-2 sm:space-y-3.5 shadow-inner">
                       <div className="flex items-center justify-between">
                         <div>
-                          <h3 className="text-sm sm:text-base font-black text-white uppercase tracking-wider">Accuracy</h3>
-                          <p className="text-[10px] sm:text-[11px] text-red-200/75">Max 4.0 • Deduct errors by -0.1 / -0.3</p>
+                          <h3 className="text-xs sm:text-sm md:text-base font-black text-white uppercase tracking-wider">Accuracy</h3>
+                          <p className="text-[8px] sm:text-[10px] text-red-200/75 leading-tight">Max 4.0 • Deduct -0.1 / -0.3</p>
                         </div>
-                        <div className="flex items-baseline gap-1 font-mono tabular-nums">
-                          <span className="text-3xl sm:text-4xl font-black text-white">{redAcc.toFixed(1)}</span>
-                          <span className="text-sm font-bold text-red-200/70">/ 4.0</span>
+                        <div className="flex items-baseline gap-0.5 sm:gap-1 font-mono tabular-nums">
+                          <span className="text-xl sm:text-3xl md:text-4xl font-black text-white">{redAcc.toFixed(1)}</span>
+                          <span className="text-[10px] sm:text-sm font-bold text-red-200/70">/ 4.0</span>
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-2 grid-rows-2 gap-2.5">
+                      <div className="grid grid-cols-2 grid-rows-2 gap-1.5 sm:gap-2.5">
                         {/* -0.3 Major (Left top) */}
                         <button
                           type="button"
                           disabled={!current || isJudgeStandby}
                           onClick={() => setRedAcc((prev) => clampAccuracy(prev - 0.3))}
-                          className="col-start-1 row-start-1 min-h-[44px] rounded-xl sm:rounded-2xl bg-[#730814] hover:bg-[#8c0a18] border border-[#f43f5e]/60 text-white font-black text-xs sm:text-sm active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center gap-1 shadow-md disabled:opacity-40"
+                          className="col-start-1 row-start-1 min-h-[36px] sm:min-h-[44px] rounded-lg sm:rounded-xl bg-[#730814] hover:bg-[#8c0a18] border border-[#f43f5e]/60 text-white font-black text-[10px] sm:text-xs md:text-sm active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center p-1 shadow-md disabled:opacity-40 select-none touch-manipulation"
                         >
                           <span>-0.3 Major</span>
                         </button>
@@ -960,9 +970,9 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                           type="button"
                           disabled={!current || isJudgeStandby}
                           onClick={() => setRedAcc((prev) => clampAccuracy(prev + 0.1))}
-                          className="col-start-1 row-start-2 min-h-[44px] rounded-xl sm:rounded-2xl bg-[#a10e1a] hover:bg-[#bf111f] border border-[#f87171]/60 text-white font-black text-xs sm:text-sm active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center gap-1 shadow-md disabled:opacity-40"
+                          className="col-start-1 row-start-2 min-h-[36px] sm:min-h-[44px] rounded-lg sm:rounded-xl bg-[#a10e1a] hover:bg-[#bf111f] border border-[#f87171]/60 text-white font-black text-[10px] sm:text-xs md:text-sm active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center gap-0.5 p-1 shadow-md disabled:opacity-40 select-none touch-manipulation"
                         >
-                          <Plus size={14} strokeWidth={3} />
+                          <Plus size={12} strokeWidth={3} />
                           <span>+0.1 Undo</span>
                         </button>
 
@@ -971,9 +981,9 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                           type="button"
                           disabled={!current || isJudgeStandby}
                           onClick={() => setRedAcc((prev) => clampAccuracy(prev - 0.1))}
-                          className="col-start-2 row-start-1 row-span-2 min-h-[96px] rounded-2xl bg-[#593006] hover:bg-[#6e3c08] border-2 border-[#f59e0b]/60 text-[#fef08a] font-black text-base sm:text-lg active:scale-[0.98] transition-all cursor-pointer flex flex-col items-center justify-center gap-1 shadow-md disabled:opacity-40"
+                          className="col-start-2 row-start-1 row-span-2 min-h-[76px] sm:min-h-[96px] rounded-xl sm:rounded-2xl bg-[#593006] hover:bg-[#6e3c08] border-2 border-[#f59e0b]/60 text-[#fef08a] font-black text-xs sm:text-base md:text-lg active:scale-[0.98] transition-all cursor-pointer flex flex-col items-center justify-center p-1 shadow-md disabled:opacity-40 select-none touch-manipulation"
                         >
-                          <span className="text-base sm:text-xl font-black tracking-wide">-0.1 Minor</span>
+                          <span className="text-xs sm:text-base md:text-xl font-black tracking-wide">-0.1 Minor</span>
                         </button>
                       </div>
                     </div>
@@ -983,11 +993,11 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                       type="button"
                       disabled={!current || isJudgeStandby}
                       onClick={() => setRedStep('presentation')}
-                      className="w-full min-h-[64px] sm:min-h-[76px] rounded-2xl sm:rounded-3xl bg-gradient-to-r from-[#b30e19] via-[#d61322] to-[#b30e19] hover:from-[#e61727] hover:to-[#b30e19] border-2 border-[#ed1c24] text-white font-black text-xl sm:text-2xl uppercase tracking-widest shadow-[0_0_24px_rgba(237,28,36,0.7)] active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center gap-3 disabled:opacity-40"
+                      className="w-full min-h-[48px] sm:min-h-[64px] md:min-h-[76px] rounded-xl sm:rounded-2xl md:rounded-3xl bg-gradient-to-r from-[#b30e19] via-[#d61322] to-[#b30e19] hover:from-[#e61727] hover:to-[#b30e19] border-2 border-[#ed1c24] text-white font-black text-xs sm:text-lg md:text-2xl uppercase tracking-wider sm:tracking-widest shadow-[0_0_24px_rgba(237,28,36,0.7)] active:scale-[0.98] transition-all cursor-pointer flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-3 p-2 disabled:opacity-40 select-none touch-manipulation"
                     >
                       <span>PRESENTATION</span>
                       {redSubmitSuccessAt && (!existingRed || redSubmitSuccessAt >= existingRed.submittedAt) && (
-                        <span className="text-xs font-bold bg-emerald-500/30 border border-emerald-400 px-2.5 py-1 rounded-full text-emerald-200">
+                        <span className="text-[9px] sm:text-xs font-bold bg-emerald-500/30 border border-emerald-400 px-1.5 sm:px-2.5 py-0.5 rounded-full text-emerald-200">
                           ✓ SUBMITTED ({round2(redAcc + redPresTotal).toFixed(2)})
                         </span>
                       )}
@@ -995,29 +1005,29 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                   </div>
                 ) : (
                   /* PHOTO 2: PRESENTATION LAYOUT */
-                  <div className="space-y-3">
+                  <div className="space-y-2 sm:space-y-3">
                     {/* Top back navigation */}
                     <div className="flex items-center justify-between pb-0.5">
                       <button
                         type="button"
                         onClick={() => setRedStep('accuracy')}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#2e0205] hover:bg-[#47050a] border border-[#ed1c24]/50 text-red-200 hover:text-white font-black text-xs uppercase tracking-wider transition-all cursor-pointer shadow-sm"
+                        className="flex items-center gap-1 px-2 py-1 rounded-lg bg-[#2e0205] hover:bg-[#47050a] border border-[#ed1c24]/50 text-red-200 hover:text-white font-black text-[9px] sm:text-xs uppercase tracking-wider transition-all cursor-pointer shadow-sm select-none touch-manipulation"
                       >
-                        <ArrowLeft size={13} />
+                        <ArrowLeft size={12} />
                         <span>&lt; Accuracy ({redAcc.toFixed(1)})</span>
                       </button>
-                      <span className="font-mono text-xs font-black text-red-200">
-                        Presentation: {redPresTotal.toFixed(1)} / 6.0
+                      <span className="font-mono text-[9px] sm:text-xs font-black text-red-200">
+                        Pres: {redPresTotal.toFixed(1)} / 6.0
                       </span>
                     </div>
 
                     {/* 1. Speed & Power (16 buttons) */}
-                    <div className="rounded-2xl bg-[#380307]/85 border border-[#ed1c24]/40 p-3 sm:p-3.5 space-y-1.5 shadow-inner">
+                    <div className="rounded-xl sm:rounded-2xl bg-[#380307]/85 border border-[#ed1c24]/40 p-1.5 sm:p-3 space-y-1 shadow-inner">
                       <div className="flex items-center justify-between">
-                        <h3 className="text-xs sm:text-sm font-black text-white uppercase tracking-wider">Speed &amp; Power</h3>
-                        <span className="font-mono text-xs font-bold text-red-200">{redSp.toFixed(1)} / 2.0</span>
+                        <h3 className="text-[10px] sm:text-xs md:text-sm font-black text-white uppercase tracking-wider">Speed &amp; Power</h3>
+                        <span className="font-mono text-[9px] sm:text-xs font-bold text-red-200">{redSp.toFixed(1)}</span>
                       </div>
-                      <div className="grid grid-cols-8 gap-1 sm:gap-1.5">
+                      <div className="grid grid-cols-8 gap-0.5 sm:gap-1.5">
                         {PRESENTATION_ROW_1.map((val) => (
                           <button
                             key={val}
@@ -1025,9 +1035,9 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                             disabled={!current || isJudgeStandby}
                             onClick={() => setRedSp(val)}
                             className={cn(
-                              'h-8 sm:h-9 rounded-lg font-black text-[11px] sm:text-xs transition-all cursor-pointer flex items-center justify-center tabular-nums disabled:opacity-40',
+                              'h-7 sm:h-8 md:h-9 rounded font-black text-[8px] sm:text-[11px] md:text-xs p-0 transition-all cursor-pointer flex items-center justify-center tabular-nums leading-none overflow-hidden select-none touch-manipulation active:scale-95 disabled:opacity-40',
                               redSp === val
-                                ? 'bg-[#ed1c24] text-white border-2 border-white shadow-[0_0_14px_rgba(237,28,36,1)] scale-105 z-10'
+                                ? 'bg-[#ed1c24] text-white border sm:border-2 border-white shadow-[0_0_12px_rgba(237,28,36,1)] scale-105 z-10'
                                 : 'bg-[#260305]/90 border border-red-400/30 text-white/90 hover:border-red-300 hover:bg-[#52050b]'
                             )}
                           >
@@ -1035,7 +1045,7 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                           </button>
                         ))}
                       </div>
-                      <div className="grid grid-cols-8 gap-1 sm:gap-1.5">
+                      <div className="grid grid-cols-8 gap-0.5 sm:gap-1.5">
                         {PRESENTATION_ROW_2.map((val) => (
                           <button
                             key={val}
@@ -1043,9 +1053,9 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                             disabled={!current || isJudgeStandby}
                             onClick={() => setRedSp(val)}
                             className={cn(
-                              'h-8 sm:h-9 rounded-lg font-black text-[11px] sm:text-xs transition-all cursor-pointer flex items-center justify-center tabular-nums disabled:opacity-40',
+                              'h-7 sm:h-8 md:h-9 rounded font-black text-[8px] sm:text-[11px] md:text-xs p-0 transition-all cursor-pointer flex items-center justify-center tabular-nums leading-none overflow-hidden select-none touch-manipulation active:scale-95 disabled:opacity-40',
                               redSp === val
-                                ? 'bg-[#ed1c24] text-white border-2 border-white shadow-[0_0_14px_rgba(237,28,36,1)] scale-105 z-10'
+                                ? 'bg-[#ed1c24] text-white border sm:border-2 border-white shadow-[0_0_12px_rgba(237,28,36,1)] scale-105 z-10'
                                 : 'bg-[#260305]/90 border border-red-400/30 text-white/90 hover:border-red-300 hover:bg-[#52050b]'
                             )}
                           >
@@ -1056,12 +1066,12 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                     </div>
 
                     {/* 2. Rhythm / Tempo / Softness (16 buttons) */}
-                    <div className="rounded-2xl bg-[#380307]/85 border border-[#ed1c24]/40 p-3 sm:p-3.5 space-y-1.5 shadow-inner">
+                    <div className="rounded-xl sm:rounded-2xl bg-[#380307]/85 border border-[#ed1c24]/40 p-1.5 sm:p-3 space-y-1 shadow-inner">
                       <div className="flex items-center justify-between">
-                        <h3 className="text-xs sm:text-sm font-black text-white uppercase tracking-wider">Rhythm / Tempo / Softness</h3>
-                        <span className="font-mono text-xs font-bold text-red-200">{redRt.toFixed(1)} / 2.0</span>
+                        <h3 className="text-[10px] sm:text-xs md:text-sm font-black text-white uppercase tracking-wider">Rhythm / Tempo</h3>
+                        <span className="font-mono text-[9px] sm:text-xs font-bold text-red-200">{redRt.toFixed(1)}</span>
                       </div>
-                      <div className="grid grid-cols-8 gap-1 sm:gap-1.5">
+                      <div className="grid grid-cols-8 gap-0.5 sm:gap-1.5">
                         {PRESENTATION_ROW_1.map((val) => (
                           <button
                             key={val}
@@ -1069,9 +1079,9 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                             disabled={!current || isJudgeStandby}
                             onClick={() => setRedRt(val)}
                             className={cn(
-                              'h-8 sm:h-9 rounded-lg font-black text-[11px] sm:text-xs transition-all cursor-pointer flex items-center justify-center tabular-nums disabled:opacity-40',
+                              'h-7 sm:h-8 md:h-9 rounded font-black text-[8px] sm:text-[11px] md:text-xs p-0 transition-all cursor-pointer flex items-center justify-center tabular-nums leading-none overflow-hidden select-none touch-manipulation active:scale-95 disabled:opacity-40',
                               redRt === val
-                                ? 'bg-[#ed1c24] text-white border-2 border-white shadow-[0_0_14px_rgba(237,28,36,1)] scale-105 z-10'
+                                ? 'bg-[#ed1c24] text-white border sm:border-2 border-white shadow-[0_0_12px_rgba(237,28,36,1)] scale-105 z-10'
                                 : 'bg-[#260305]/90 border border-red-400/30 text-white/90 hover:border-red-300 hover:bg-[#52050b]'
                             )}
                           >
@@ -1079,7 +1089,7 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                           </button>
                         ))}
                       </div>
-                      <div className="grid grid-cols-8 gap-1 sm:gap-1.5">
+                      <div className="grid grid-cols-8 gap-0.5 sm:gap-1.5">
                         {PRESENTATION_ROW_2.map((val) => (
                           <button
                             key={val}
@@ -1087,9 +1097,9 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                             disabled={!current || isJudgeStandby}
                             onClick={() => setRedRt(val)}
                             className={cn(
-                              'h-8 sm:h-9 rounded-lg font-black text-[11px] sm:text-xs transition-all cursor-pointer flex items-center justify-center tabular-nums disabled:opacity-40',
+                              'h-7 sm:h-8 md:h-9 rounded font-black text-[8px] sm:text-[11px] md:text-xs p-0 transition-all cursor-pointer flex items-center justify-center tabular-nums leading-none overflow-hidden select-none touch-manipulation active:scale-95 disabled:opacity-40',
                               redRt === val
-                                ? 'bg-[#ed1c24] text-white border-2 border-white shadow-[0_0_14px_rgba(237,28,36,1)] scale-105 z-10'
+                                ? 'bg-[#ed1c24] text-white border sm:border-2 border-white shadow-[0_0_12px_rgba(237,28,36,1)] scale-105 z-10'
                                 : 'bg-[#260305]/90 border border-red-400/30 text-white/90 hover:border-red-300 hover:bg-[#52050b]'
                             )}
                           >
@@ -1100,12 +1110,12 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                     </div>
 
                     {/* 3. Expression of Energy (16 buttons) */}
-                    <div className="rounded-2xl bg-[#380307]/85 border border-[#ed1c24]/40 p-3 sm:p-3.5 space-y-1.5 shadow-inner">
+                    <div className="rounded-xl sm:rounded-2xl bg-[#380307]/85 border border-[#ed1c24]/40 p-1.5 sm:p-3 space-y-1 shadow-inner">
                       <div className="flex items-center justify-between">
-                        <h3 className="text-xs sm:text-sm font-black text-white uppercase tracking-wider">Expression of Energy</h3>
-                        <span className="font-mono text-xs font-bold text-red-200">{redEe.toFixed(1)} / 2.0</span>
+                        <h3 className="text-[10px] sm:text-xs md:text-sm font-black text-white uppercase tracking-wider">Expression of Energy</h3>
+                        <span className="font-mono text-[9px] sm:text-xs font-bold text-red-200">{redEe.toFixed(1)}</span>
                       </div>
-                      <div className="grid grid-cols-8 gap-1 sm:gap-1.5">
+                      <div className="grid grid-cols-8 gap-0.5 sm:gap-1.5">
                         {PRESENTATION_ROW_1.map((val) => (
                           <button
                             key={val}
@@ -1113,9 +1123,9 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                             disabled={!current || isJudgeStandby}
                             onClick={() => setRedEe(val)}
                             className={cn(
-                              'h-8 sm:h-9 rounded-lg font-black text-[11px] sm:text-xs transition-all cursor-pointer flex items-center justify-center tabular-nums disabled:opacity-40',
+                              'h-7 sm:h-8 md:h-9 rounded font-black text-[8px] sm:text-[11px] md:text-xs p-0 transition-all cursor-pointer flex items-center justify-center tabular-nums leading-none overflow-hidden select-none touch-manipulation active:scale-95 disabled:opacity-40',
                               redEe === val
-                                ? 'bg-[#ed1c24] text-white border-2 border-white shadow-[0_0_14px_rgba(237,28,36,1)] scale-105 z-10'
+                                ? 'bg-[#ed1c24] text-white border sm:border-2 border-white shadow-[0_0_12px_rgba(237,28,36,1)] scale-105 z-10'
                                 : 'bg-[#260305]/90 border border-red-400/30 text-white/90 hover:border-red-300 hover:bg-[#52050b]'
                             )}
                           >
@@ -1123,7 +1133,7 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                           </button>
                         ))}
                       </div>
-                      <div className="grid grid-cols-8 gap-1 sm:gap-1.5">
+                      <div className="grid grid-cols-8 gap-0.5 sm:gap-1.5">
                         {PRESENTATION_ROW_2.map((val) => (
                           <button
                             key={val}
@@ -1131,9 +1141,9 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                             disabled={!current || isJudgeStandby}
                             onClick={() => setRedEe(val)}
                             className={cn(
-                              'h-8 sm:h-9 rounded-lg font-black text-[11px] sm:text-xs transition-all cursor-pointer flex items-center justify-center tabular-nums disabled:opacity-40',
+                              'h-7 sm:h-8 md:h-9 rounded font-black text-[8px] sm:text-[11px] md:text-xs p-0 transition-all cursor-pointer flex items-center justify-center tabular-nums leading-none overflow-hidden select-none touch-manipulation active:scale-95 disabled:opacity-40',
                               redEe === val
-                                ? 'bg-[#ed1c24] text-white border-2 border-white shadow-[0_0_14px_rgba(237,28,36,1)] scale-105 z-10'
+                                ? 'bg-[#ed1c24] text-white border sm:border-2 border-white shadow-[0_0_12px_rgba(237,28,36,1)] scale-105 z-10'
                                 : 'bg-[#260305]/90 border border-red-400/30 text-white/90 hover:border-red-300 hover:bg-[#52050b]'
                             )}
                           >
@@ -1144,47 +1154,57 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                     </div>
 
                     {/* PHOTO 2: Bottom Bar (Math display + SUBMIT button) */}
-                    <div className="pt-3 border-t border-red-400/40 flex flex-wrap items-center justify-between gap-3">
+                    <div className="pt-2 sm:pt-3 border-t border-red-400/40 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 sm:gap-3">
                       <div className="space-y-0.5 min-w-0">
-                        <div className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-red-200/90">
+                        <div className="text-[7.5px] sm:text-[10px] md:text-xs font-bold uppercase tracking-wider text-red-200/90 truncate">
                           ACCURACY + PRESENTATION = RED TOTAL / 10.0
                         </div>
-                        <div className="flex flex-wrap items-baseline gap-1.5 sm:gap-2 font-mono font-black tabular-nums">
-                          <span className="text-xl sm:text-2xl text-white" title="Accuracy">
+                        <div className="flex flex-wrap items-baseline gap-1 sm:gap-1.5 font-mono font-black tabular-nums">
+                          <span className="text-xs sm:text-base md:text-xl text-white" title="Accuracy">
                             {redAcc.toFixed(1)}
                           </span>
-                          <span className="text-sm sm:text-base text-red-200/70">+</span>
-                          <span className="text-xl sm:text-2xl text-white" title="Presentation">
+                          <span className="text-[10px] sm:text-xs text-red-200/70">+</span>
+                          <span className="text-xs sm:text-base md:text-xl text-white" title="Presentation">
                             {redPresTotal.toFixed(1)}
                           </span>
-                          <span className="text-sm sm:text-base text-red-200/70">=</span>
-                          <span className="text-2xl sm:text-3xl md:text-4xl text-yellow-400">
+                          <span className="text-[10px] sm:text-xs text-red-200/70">=</span>
+                          <span className="text-sm sm:text-2xl md:text-3xl text-yellow-400">
                             {round2(redAcc + redPresTotal).toFixed(2)}
                           </span>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setRedStep('accuracy')}
+                          className="min-h-[36px] sm:min-h-[46px] px-2.5 sm:px-3 rounded-lg sm:rounded-xl border border-red-400/40 bg-slate-900/80 hover:bg-slate-800 text-red-200 font-bold text-[9px] sm:text-xs uppercase tracking-wider flex items-center justify-center gap-1 transition-all cursor-pointer select-none touch-manipulation"
+                          title="Return to Accuracy screen"
+                        >
+                          <ArrowLeft size={11} />
+                          <span className="hidden sm:inline">Accuracy</span>
+                        </button>
+
                         <button
                           type="button"
                           disabled={!current || isJudgeStandby || isSubmittingRed}
                           onClick={() => handleManualSubmitSide('red')}
                           className={cn(
-                            'min-h-[46px] sm:min-h-[52px] px-6 sm:px-8 rounded-xl sm:rounded-2xl font-black text-sm uppercase tracking-wider flex items-center gap-2 transition-all active:scale-[0.98] cursor-pointer disabled:opacity-40 shadow-lg',
+                            'flex-1 sm:flex-initial min-h-[36px] sm:min-h-[48px] px-3 sm:px-6 rounded-lg sm:rounded-xl font-black text-[10px] sm:text-sm uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] cursor-pointer disabled:opacity-40 shadow-lg select-none touch-manipulation',
                             redSubmitSuccessAt && (!existingRed || redSubmitSuccessAt >= existingRed.submittedAt)
-                              ? 'bg-gradient-to-r from-emerald-500 to-green-600 border-2 border-emerald-300 text-white shadow-[0_0_18px_rgba(16,185,129,0.7)]'
-                              : 'bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-500 hover:to-emerald-600 border-2 border-emerald-400 text-white shadow-[0_0_14px_rgba(16,185,129,0.5)]'
+                              ? 'bg-gradient-to-r from-emerald-500 to-green-600 border border-emerald-300 text-white shadow-[0_0_12px_rgba(16,185,129,0.7)]'
+                              : 'bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-500 hover:to-emerald-600 border border-emerald-400 text-white shadow-[0_0_10px_rgba(16,185,129,0.5)]'
                           )}
                         >
                           {redSubmitSuccessAt && (!existingRed || redSubmitSuccessAt >= existingRed.submittedAt) ? (
                             <>
-                              <CheckCircle2 size={18} />
+                              <CheckCircle2 size={14} />
                               <span>SUBMITTED</span>
                             </>
                           ) : (
                             <>
-                              <Send size={16} />
-                              <span>{isSubmittingRed ? 'SUBMITTING...' : 'SUBMIT'}</span>
+                              <Send size={13} />
+                              <span>{isSubmittingRed ? '...' : 'SUBMIT'}</span>
                             </>
                           )}
                         </button>
@@ -1195,8 +1215,8 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
               </div>
             ) : (
               <div className="py-16 text-center space-y-2 my-auto">
-                <p className="text-lg font-bold text-red-100/80">Single Competitor (BYE)</p>
-                <p className="text-xs text-red-200/60">No red competitor assigned for this bout.</p>
+                <p className="text-base sm:text-lg font-bold text-red-100/80">Single Competitor (BYE)</p>
+                <p className="text-[10px] sm:text-xs text-red-200/60">No red competitor assigned for this bout.</p>
               </div>
             )}
           </div>

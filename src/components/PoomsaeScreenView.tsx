@@ -754,7 +754,7 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
       <div
         className={cn(
           'relative flex-1 grid min-h-0 overflow-hidden',
-          isSoloPoomsae ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2'
+          isSoloPoomsae ? 'grid-cols-1' : 'grid-cols-2'
         )}
       >
         {/* TOP-CENTER BOUT NUMBER PLAQUE + SELECTED POOMSAE DISPLAY */}

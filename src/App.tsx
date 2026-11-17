@@ -10829,8 +10829,8 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
                       </div>
                     </div>
 
-                    {/* SIDE-BY-SIDE BLUE & RED JUDGE PANELS */}
-                    <div className={cn("grid gap-4", hasRedAthlete ? "grid-cols-1 md:grid-cols-2" : "grid-cols-1")}>
+                    {/* SIDE-BY-SIDE BLUE & RED JUDGE PANELS (ALWAYS SIDE-BY-SIDE ON HP & IPAD) */}
+                    <div className={cn("grid gap-2.5 sm:gap-4", hasRedAthlete ? "grid-cols-2" : "grid-cols-1")}>
                       {/* BLUE (CHUNG) PANEL */}
                       {(() => {
                         const blueScores = boutJudgeScores.filter((s) => s.side === 'blue' && s.poomsaeNo === activePoomsae);
