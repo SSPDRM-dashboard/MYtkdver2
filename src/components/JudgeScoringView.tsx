@@ -180,15 +180,43 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
     return found;
   }, [current, hasRedCompetitor, ring.ringNumber, currentEventId, activePoomsae, judgeNumber, existingScores, clearedAtThreshold]);
 
-  // Blue state (WT 4-row layout: Accuracy 4.0 + 3 Presentation criteria 2.0 each)
+  // Presentation score grid options (Photo 2: 16 options in 2 rows of 8)
+  const PRESENTATION_ROW_1 = [0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2];
+  const PRESENTATION_ROW_2 = [1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0];
+
+  const extractPresSplit = (score?: PoomsaeJudgeScore | null) => {
+    if (!score) return { sp: 2.0, rt: 2.0, ee: 2.0 };
+    if (
+      typeof score.speedPower === 'number' &&
+      typeof score.rhythmTempo === 'number' &&
+      typeof score.expressionEnergy === 'number'
+    ) {
+      return {
+        sp: round1(score.speedPower),
+        rt: round1(score.rhythmTempo),
+        ee: round1(score.expressionEnergy),
+      };
+    }
+    const pres = clampPresentation(score.presentation);
+    const split = Math.min(2.0, Math.max(0.5, round1(pres / 3)));
+    return {
+      sp: split,
+      rt: split,
+      ee: clampPresentation(round1(pres - split - split)),
+    };
+  };
+
+  // Blue state (Step 1: Accuracy -> Step 2: Presentation)
+  const [blueStep, setBlueStep] = useState<'accuracy' | 'presentation'>('accuracy');
   const [blueAcc, setBlueAcc] = useState<number>(4.0);
   const [blueSp, setBlueSp] = useState<number>(2.0); // Speed & Power
-  const [blueRt, setBlueRt] = useState<number>(2.0); // Rhythm / Tempo / Softness / Power
+  const [blueRt, setBlueRt] = useState<number>(2.0); // Rhythm / Tempo / Softness
   const [blueEe, setBlueEe] = useState<number>(2.0); // Expression of Energy
   const [isSubmittingBlue, setIsSubmittingBlue] = useState(false);
   const [blueSubmitSuccessAt, setBlueSubmitSuccessAt] = useState<number | null>(null);
 
-  // Red state
+  // Red state (Step 1: Accuracy -> Step 2: Presentation)
+  const [redStep, setRedStep] = useState<'accuracy' | 'presentation'>('accuracy');
   const [redAcc, setRedAcc] = useState<number>(4.0);
   const [redSp, setRedSp] = useState<number>(2.0);
   const [redRt, setRedRt] = useState<number>(2.0);
@@ -209,11 +237,10 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
   useEffect(() => {
     if (existingBlue) {
       setBlueAcc(clampAccuracy(existingBlue.accuracy));
-      const pres = clampPresentation(existingBlue.presentation);
-      const split = round1(pres / 3);
-      setBlueSp(split);
-      setBlueRt(split);
-      setBlueEe(clampPresentation(pres - split - split));
+      const { sp, rt, ee } = extractPresSplit(existingBlue);
+      setBlueSp(sp);
+      setBlueRt(rt);
+      setBlueEe(ee);
       setBlueSubmitSuccessAt(existingBlue.submittedAt);
       blueSubmitSuccessAtRef.current = existingBlue.submittedAt;
       prevBlueSubmittedRef.current = existingBlue.submittedAt;
@@ -229,11 +256,10 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
 
     if (existingRed) {
       setRedAcc(clampAccuracy(existingRed.accuracy));
-      const pres = clampPresentation(existingRed.presentation);
-      const split = round1(pres / 3);
-      setRedSp(split);
-      setRedRt(split);
-      setRedEe(clampPresentation(pres - split - split));
+      const { sp, rt, ee } = extractPresSplit(existingRed);
+      setRedSp(sp);
+      setRedRt(rt);
+      setRedEe(ee);
       setRedSubmitSuccessAt(existingRed.submittedAt);
       redSubmitSuccessAtRef.current = existingRed.submittedAt;
       prevRedSubmittedRef.current = existingRed.submittedAt;
@@ -247,6 +273,8 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
       prevRedSubmittedRef.current = undefined;
     }
     setSubmitError(null);
+    setBlueStep('accuracy');
+    setRedStep('accuracy');
   }, [contextKey]);
 
   // Independent sync for Blue submission updates (NEVER touches Red state)
@@ -260,11 +288,10 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
     if (existingBlue) {
       if (existingBlue.submittedAt !== blueSubmitSuccessAtRef.current) {
         setBlueAcc(clampAccuracy(existingBlue.accuracy));
-        const pres = clampPresentation(existingBlue.presentation);
-        const split = round1(pres / 3);
-        setBlueSp(split);
-        setBlueRt(split);
-        setBlueEe(clampPresentation(pres - split - split));
+        const { sp, rt, ee } = extractPresSplit(existingBlue);
+        setBlueSp(sp);
+        setBlueRt(rt);
+        setBlueEe(ee);
       }
       setBlueSubmitSuccessAt(existingBlue.submittedAt);
       blueSubmitSuccessAtRef.current = existingBlue.submittedAt;
@@ -276,6 +303,7 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
       setBlueEe(2.0);
       setBlueSubmitSuccessAt(null);
       blueSubmitSuccessAtRef.current = null;
+      setBlueStep('accuracy');
     }
   }, [existingBlue?.submittedAt]);
 
@@ -290,11 +318,10 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
     if (existingRed) {
       if (existingRed.submittedAt !== redSubmitSuccessAtRef.current) {
         setRedAcc(clampAccuracy(existingRed.accuracy));
-        const pres = clampPresentation(existingRed.presentation);
-        const split = round1(pres / 3);
-        setRedSp(split);
-        setRedRt(split);
-        setRedEe(clampPresentation(pres - split - split));
+        const { sp, rt, ee } = extractPresSplit(existingRed);
+        setRedSp(sp);
+        setRedRt(rt);
+        setRedEe(ee);
       }
       setRedSubmitSuccessAt(existingRed.submittedAt);
       redSubmitSuccessAtRef.current = existingRed.submittedAt;
@@ -306,6 +333,7 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
       setRedEe(2.0);
       setRedSubmitSuccessAt(null);
       redSubmitSuccessAtRef.current = null;
+      setRedStep('accuracy');
     }
   }, [existingRed?.submittedAt]);
 
@@ -410,6 +438,9 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
         judgeNumber,
         accuracy: accClean,
         presentation: presClean,
+        speedPower: isBlue ? blueSp : redSp,
+        rhythmTempo: isBlue ? blueRt : redRt,
+        expressionEnergy: isBlue ? blueEe : redEe,
         total: round2(accClean + presClean),
         submittedAt: nowMs,
       };
@@ -545,503 +576,627 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
           </div>
         )}
 
-        {/* SIDE-BY-SIDE DUAL BLUE & RED WT 4-ROW SCORING PANELS */}
-        <div className="grid grid-cols-2 gap-3 sm:gap-6">
+        {/* SIDE-BY-SIDE DUAL BLUE & RED WT SCORING PANELS */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
           {/* ================= BLUE (CHUNG) SIDE ================= */}
-          <div className="rounded-3xl bg-gradient-to-b from-[#0b459e] via-[#072d6e] to-[#041d4a] border-2 border-cyan-400/75 p-4 sm:p-6 space-y-5 shadow-[0_10px_34px_rgba(2,132,199,0.28)] flex flex-col justify-between">
+          <div className="rounded-3xl bg-gradient-to-b from-[#003882] via-[#002456] to-[#001333] border-2 border-[#00a2e8] p-4 sm:p-5 space-y-4 shadow-[0_0_28px_rgba(0,162,232,0.35)] flex flex-col justify-between">
             <div className="space-y-4">
               {/* Athlete Header */}
-              <div className="bg-[#0e52ba]/70 border border-cyan-300/45 rounded-2xl p-4 space-y-1 shadow-inner">
-                <div className="flex items-center justify-between text-xs font-black uppercase tracking-wider text-cyan-200">
-                  <span>Chung (Blue)</span>
-                  <span className="font-mono font-bold text-amber-300">Judge {judgeNumber}</span>
+              <div className="bg-[#004299]/70 border border-[#00a2e8]/40 rounded-2xl p-3.5 sm:p-4 space-y-1 shadow-inner">
+                <div className="flex items-center justify-between text-xs font-black uppercase tracking-wider">
+                  <span className="text-[#40c4ff]">Chung (Blue)</span>
+                  <span className="font-mono font-bold text-yellow-400">Judge {judgeNumber}</span>
                 </div>
-                <h2 className="text-xl sm:text-2xl font-black text-white uppercase tracking-tight">
+                <h2 className="text-xl sm:text-2xl md:text-3xl font-black text-white uppercase tracking-tight break-words">
                   {blueName || 'Waiting for Blue Athlete'}
                 </h2>
                 <div className="flex flex-wrap items-end justify-between gap-2 pt-0.5">
-                  <p className="text-xs sm:text-sm font-semibold text-blue-100/90 uppercase tracking-wide min-w-0">
+                  <p className="text-xs sm:text-sm font-bold text-[#00a2e8] uppercase tracking-wide min-w-0">
                     {blueClub || '\u00A0'}
                   </p>
-                  <div className="flex flex-col gap-0.5 px-2.5 py-1.5 rounded-lg bg-[#041b45]/80 border border-cyan-300/40 shrink-0 max-w-full">
-                    <div
+                  <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#001333]/90 border border-[#00a2e8]/40 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setManualPoomsae(1)}
                       className={cn(
-                        'flex items-center gap-1.5 rounded px-1.5 py-0.5 transition-colors',
-                        activePoomsae === 1 ? 'bg-amber-400/15' : 'opacity-70'
+                        'px-2 py-0.5 rounded text-xs font-black uppercase transition-all cursor-pointer',
+                        activePoomsae === 1 ? 'bg-yellow-400 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-white'
                       )}
                     >
-                      <span
+                      Poomsae 1
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setManualPoomsae(2)}
+                      className={cn(
+                        'px-2 py-0.5 rounded text-xs font-black uppercase transition-all cursor-pointer',
+                        activePoomsae === 2 ? 'bg-yellow-400 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-white'
+                      )}
+                    >
+                      Poomsae 2
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Conditional Layout: Photo 1 (Accuracy) vs Photo 2 (Presentation) */}
+              {blueStep === 'accuracy' ? (
+                /* PHOTO 1: ACCURACY LAYOUT */
+                <div className="space-y-4">
+                  <div className="rounded-2xl bg-[#001f4d]/90 border border-[#00a2e8]/40 p-4 space-y-3.5 shadow-inner">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="text-sm sm:text-base font-black text-white uppercase tracking-wider">Accuracy</h3>
+                        <p className="text-[10px] sm:text-[11px] text-cyan-200/75">Max 4.0 • Deduct errors by -0.1 / -0.3</p>
+                      </div>
+                      <div className="flex items-baseline gap-1 font-mono tabular-nums">
+                        <span className="text-3xl sm:text-4xl font-black text-[#00a2e8]">{blueAcc.toFixed(1)}</span>
+                        <span className="text-sm font-bold text-cyan-200/70">/ 4.0</span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 grid-rows-2 gap-2.5">
+                      {/* -0.1 Minor (Left tall button, spans 2 rows) */}
+                      <button
+                        type="button"
+                        disabled={!current || isJudgeStandby}
+                        onClick={() => setBlueAcc((prev) => clampAccuracy(prev - 0.1))}
+                        className="col-start-1 row-start-1 row-span-2 min-h-[96px] rounded-2xl bg-[#33352f] hover:bg-[#3f4139] border-2 border-[#b5a642]/60 text-[#fde047] font-black text-base sm:text-lg active:scale-[0.98] transition-all cursor-pointer flex flex-col items-center justify-center gap-1 shadow-md disabled:opacity-40"
+                      >
+                        <span className="text-base sm:text-xl font-black tracking-wide">-0.1 Minor</span>
+                      </button>
+
+                      {/* -0.3 Major (Right top) */}
+                      <button
+                        type="button"
+                        disabled={!current || isJudgeStandby}
+                        onClick={() => setBlueAcc((prev) => clampAccuracy(prev - 0.3))}
+                        className="col-start-2 row-start-1 min-h-[44px] rounded-xl sm:rounded-2xl bg-[#4b1d7d] hover:bg-[#5c2499] border border-[#a855f7]/60 text-white font-black text-xs sm:text-sm active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center gap-1 shadow-md disabled:opacity-40"
+                      >
+                        <span>-0.3 Major</span>
+                      </button>
+
+                      {/* +0.1 Undo (Right bottom) */}
+                      <button
+                        type="button"
+                        disabled={!current || isJudgeStandby}
+                        onClick={() => setBlueAcc((prev) => clampAccuracy(prev + 0.1))}
+                        className="col-start-2 row-start-2 min-h-[44px] rounded-xl sm:rounded-2xl bg-[#0055b3] hover:bg-[#0066d6] border border-[#38bdf8]/60 text-white font-black text-xs sm:text-sm active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center gap-1 shadow-md disabled:opacity-40"
+                      >
+                        <Plus size={14} strokeWidth={3} />
+                        <span>+0.1 Undo</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Giant PRESENTATION Button (Photo 1) */}
+                  <button
+                    type="button"
+                    disabled={!current || isJudgeStandby}
+                    onClick={() => setBlueStep('presentation')}
+                    className="w-full min-h-[64px] sm:min-h-[76px] rounded-2xl sm:rounded-3xl bg-gradient-to-r from-[#0052cc] via-[#0073e6] to-[#0052cc] hover:from-[#0066ff] hover:to-[#0052cc] border-2 border-[#00a2e8] text-white font-black text-xl sm:text-2xl uppercase tracking-widest shadow-[0_0_24px_rgba(0,162,232,0.7)] active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center gap-3 disabled:opacity-40"
+                  >
+                    <span>PRESENTATION</span>
+                    {blueSubmitSuccessAt && (!existingBlue || blueSubmitSuccessAt >= existingBlue.submittedAt) && (
+                      <span className="text-xs font-bold bg-emerald-500/30 border border-emerald-400 px-2.5 py-1 rounded-full text-emerald-200">
+                        ✓ SUBMITTED ({round2(blueAcc + bluePresTotal).toFixed(2)})
+                      </span>
+                    )}
+                  </button>
+                </div>
+              ) : (
+                /* PHOTO 2: PRESENTATION LAYOUT */
+                <div className="space-y-3">
+                  {/* Top back navigation */}
+                  <div className="flex items-center justify-between pb-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setBlueStep('accuracy')}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#00173d] hover:bg-[#002456] border border-[#00a2e8]/50 text-cyan-200 hover:text-white font-black text-xs uppercase tracking-wider transition-all cursor-pointer shadow-sm"
+                    >
+                      <ArrowLeft size={13} />
+                      <span>&lt; Accuracy ({blueAcc.toFixed(1)})</span>
+                    </button>
+                    <span className="font-mono text-xs font-black text-cyan-300">
+                      Presentation: {bluePresTotal.toFixed(1)} / 6.0
+                    </span>
+                  </div>
+
+                  {/* 1. Speed & Power (16 buttons) */}
+                  <div className="rounded-2xl bg-[#001f4d]/85 border border-[#00a2e8]/40 p-3 sm:p-3.5 space-y-1.5 shadow-inner">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-xs sm:text-sm font-black text-white uppercase tracking-wider">Speed &amp; Power</h3>
+                      <span className="font-mono text-xs font-bold text-cyan-300">{blueSp.toFixed(1)} / 2.0</span>
+                    </div>
+                    <div className="grid grid-cols-8 gap-1 sm:gap-1.5">
+                      {PRESENTATION_ROW_1.map((val) => (
+                        <button
+                          key={val}
+                          type="button"
+                          disabled={!current || isJudgeStandby}
+                          onClick={() => setBlueSp(val)}
+                          className={cn(
+                            'h-8 sm:h-9 rounded-lg font-black text-[11px] sm:text-xs transition-all cursor-pointer flex items-center justify-center tabular-nums disabled:opacity-40',
+                            blueSp === val
+                              ? 'bg-[#00a2e8] text-white border-2 border-white shadow-[0_0_14px_rgba(0,162,232,1)] scale-105 z-10'
+                              : 'bg-[#041b45]/90 border border-cyan-400/30 text-white/90 hover:border-cyan-300 hover:bg-[#072d6e]'
+                          )}
+                        >
+                          {val.toFixed(1)}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="grid grid-cols-8 gap-1 sm:gap-1.5">
+                      {PRESENTATION_ROW_2.map((val) => (
+                        <button
+                          key={val}
+                          type="button"
+                          disabled={!current || isJudgeStandby}
+                          onClick={() => setBlueSp(val)}
+                          className={cn(
+                            'h-8 sm:h-9 rounded-lg font-black text-[11px] sm:text-xs transition-all cursor-pointer flex items-center justify-center tabular-nums disabled:opacity-40',
+                            blueSp === val
+                              ? 'bg-[#00a2e8] text-white border-2 border-white shadow-[0_0_14px_rgba(0,162,232,1)] scale-105 z-10'
+                              : 'bg-[#041b45]/90 border border-cyan-400/30 text-white/90 hover:border-cyan-300 hover:bg-[#072d6e]'
+                          )}
+                        >
+                          {val.toFixed(1)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* 2. Rhythm / Tempo / Softness (16 buttons) */}
+                  <div className="rounded-2xl bg-[#001f4d]/85 border border-[#00a2e8]/40 p-3 sm:p-3.5 space-y-1.5 shadow-inner">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-xs sm:text-sm font-black text-white uppercase tracking-wider">Rhythm / Tempo / Softness</h3>
+                      <span className="font-mono text-xs font-bold text-cyan-300">{blueRt.toFixed(1)} / 2.0</span>
+                    </div>
+                    <div className="grid grid-cols-8 gap-1 sm:gap-1.5">
+                      {PRESENTATION_ROW_1.map((val) => (
+                        <button
+                          key={val}
+                          type="button"
+                          disabled={!current || isJudgeStandby}
+                          onClick={() => setBlueRt(val)}
+                          className={cn(
+                            'h-8 sm:h-9 rounded-lg font-black text-[11px] sm:text-xs transition-all cursor-pointer flex items-center justify-center tabular-nums disabled:opacity-40',
+                            blueRt === val
+                              ? 'bg-[#00a2e8] text-white border-2 border-white shadow-[0_0_14px_rgba(0,162,232,1)] scale-105 z-10'
+                              : 'bg-[#041b45]/90 border border-cyan-400/30 text-white/90 hover:border-cyan-300 hover:bg-[#072d6e]'
+                          )}
+                        >
+                          {val.toFixed(1)}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="grid grid-cols-8 gap-1 sm:gap-1.5">
+                      {PRESENTATION_ROW_2.map((val) => (
+                        <button
+                          key={val}
+                          type="button"
+                          disabled={!current || isJudgeStandby}
+                          onClick={() => setBlueRt(val)}
+                          className={cn(
+                            'h-8 sm:h-9 rounded-lg font-black text-[11px] sm:text-xs transition-all cursor-pointer flex items-center justify-center tabular-nums disabled:opacity-40',
+                            blueRt === val
+                              ? 'bg-[#00a2e8] text-white border-2 border-white shadow-[0_0_14px_rgba(0,162,232,1)] scale-105 z-10'
+                              : 'bg-[#041b45]/90 border border-cyan-400/30 text-white/90 hover:border-cyan-300 hover:bg-[#072d6e]'
+                          )}
+                        >
+                          {val.toFixed(1)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* 3. Expression of Energy (16 buttons) */}
+                  <div className="rounded-2xl bg-[#001f4d]/85 border border-[#00a2e8]/40 p-3 sm:p-3.5 space-y-1.5 shadow-inner">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-xs sm:text-sm font-black text-white uppercase tracking-wider">Expression of Energy</h3>
+                      <span className="font-mono text-xs font-bold text-cyan-300">{blueEe.toFixed(1)} / 2.0</span>
+                    </div>
+                    <div className="grid grid-cols-8 gap-1 sm:gap-1.5">
+                      {PRESENTATION_ROW_1.map((val) => (
+                        <button
+                          key={val}
+                          type="button"
+                          disabled={!current || isJudgeStandby}
+                          onClick={() => setBlueEe(val)}
+                          className={cn(
+                            'h-8 sm:h-9 rounded-lg font-black text-[11px] sm:text-xs transition-all cursor-pointer flex items-center justify-center tabular-nums disabled:opacity-40',
+                            blueEe === val
+                              ? 'bg-[#00a2e8] text-white border-2 border-white shadow-[0_0_14px_rgba(0,162,232,1)] scale-105 z-10'
+                              : 'bg-[#041b45]/90 border border-cyan-400/30 text-white/90 hover:border-cyan-300 hover:bg-[#072d6e]'
+                          )}
+                        >
+                          {val.toFixed(1)}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="grid grid-cols-8 gap-1 sm:gap-1.5">
+                      {PRESENTATION_ROW_2.map((val) => (
+                        <button
+                          key={val}
+                          type="button"
+                          disabled={!current || isJudgeStandby}
+                          onClick={() => setBlueEe(val)}
+                          className={cn(
+                            'h-8 sm:h-9 rounded-lg font-black text-[11px] sm:text-xs transition-all cursor-pointer flex items-center justify-center tabular-nums disabled:opacity-40',
+                            blueEe === val
+                              ? 'bg-[#00a2e8] text-white border-2 border-white shadow-[0_0_14px_rgba(0,162,232,1)] scale-105 z-10'
+                              : 'bg-[#041b45]/90 border border-cyan-400/30 text-white/90 hover:border-cyan-300 hover:bg-[#072d6e]'
+                          )}
+                        >
+                          {val.toFixed(1)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* PHOTO 2: Bottom Bar (Math display + SUBMIT button) */}
+                  <div className="pt-3 border-t border-cyan-400/40 flex flex-wrap items-center justify-between gap-3">
+                    <div className="space-y-0.5 min-w-0">
+                      <div className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-cyan-200/90">
+                        ACCURACY + PRESENTATION = BLUE TOTAL / 10.0
+                      </div>
+                      <div className="flex flex-wrap items-baseline gap-1.5 sm:gap-2 font-mono font-black tabular-nums">
+                        <span className="text-xl sm:text-2xl text-[#00a2e8]" title="Accuracy">
+                          {blueAcc.toFixed(1)}
+                        </span>
+                        <span className="text-sm sm:text-base text-cyan-200/70">+</span>
+                        <span className="text-xl sm:text-2xl text-[#00a2e8]" title="Presentation">
+                          {bluePresTotal.toFixed(1)}
+                        </span>
+                        <span className="text-sm sm:text-base text-cyan-200/70">=</span>
+                        <span className="text-2xl sm:text-3xl md:text-4xl text-yellow-400">
+                          {round2(blueAcc + bluePresTotal).toFixed(2)}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={!current || isJudgeStandby || isSubmittingBlue}
+                        onClick={() => handleManualSubmitSide('blue')}
                         className={cn(
-                          'text-[10px] sm:text-xs font-black uppercase tracking-wider shrink-0',
-                          activePoomsae === 1 ? 'text-amber-300' : 'text-cyan-200/80'
+                          'min-h-[46px] sm:min-h-[52px] px-6 sm:px-8 rounded-xl sm:rounded-2xl font-black text-sm uppercase tracking-wider flex items-center gap-2 transition-all active:scale-[0.98] cursor-pointer disabled:opacity-40 shadow-lg',
+                          blueSubmitSuccessAt && (!existingBlue || blueSubmitSuccessAt >= existingBlue.submittedAt)
+                            ? 'bg-gradient-to-r from-emerald-500 to-green-600 border-2 border-emerald-300 text-white shadow-[0_0_18px_rgba(16,185,129,0.7)]'
+                            : 'bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-500 hover:to-emerald-600 border-2 border-emerald-400 text-white shadow-[0_0_14px_rgba(16,185,129,0.5)]'
                         )}
                       >
-                        Poomsae 1
-                      </span>
-                      {poomsae1Name && (
-                        <>
-                          <span className="text-cyan-300/50">:</span>
-                          <span className="text-[11px] sm:text-xs font-extrabold uppercase tracking-wide text-white truncate max-w-[165px] sm:max-w-[230px]">
-                            {poomsae1Name}
-                          </span>
-                        </>
-                      )}
-                    </div>
-                    <div
-                      className={cn(
-                        'flex items-center gap-1.5 rounded px-1.5 py-0.5 transition-colors',
-                        activePoomsae === 2 ? 'bg-amber-400/15' : 'opacity-70'
-                      )}
-                    >
-                      <span
-                        className={cn(
-                          'text-[10px] sm:text-xs font-black uppercase tracking-wider shrink-0',
-                          activePoomsae === 2 ? 'text-amber-300' : 'text-cyan-200/80'
+                        {blueSubmitSuccessAt && (!existingBlue || blueSubmitSuccessAt >= existingBlue.submittedAt) ? (
+                          <>
+                            <CheckCircle2 size={18} />
+                            <span>SUBMITTED</span>
+                          </>
+                        ) : (
+                          <>
+                            <Send size={16} />
+                            <span>{isSubmittingBlue ? 'SUBMITTING...' : 'SUBMIT'}</span>
+                          </>
                         )}
-                      >
-                        Poomsae 2
-                      </span>
-                      {poomsae2Name && (
-                        <>
-                          <span className="text-cyan-300/50">:</span>
-                          <span className="text-[11px] sm:text-xs font-extrabold uppercase tracking-wide text-white truncate max-w-[165px] sm:max-w-[230px]">
-                            {poomsae2Name}
-                          </span>
-                        </>
-                      )}
+                      </button>
                     </div>
                   </div>
                 </div>
-              </div>
-
-              {/* WT 4-Row Scoring Grid */}
-              <div className="space-y-3">
-                {/* 1. Accuracy (4.0) */}
-                <div className="rounded-2xl bg-[#041b45]/85 border border-cyan-400/30 p-3.5 space-y-2.5">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h3 className="text-sm font-black text-white uppercase tracking-wider">Accuracy</h3>
-                      <p className="text-[10px] text-blue-200/75">Max 4.0 • Deduct errors by -0.1 / -0.3</p>
-                    </div>
-                    <span className="font-mono text-2xl font-black text-cyan-300 tabular-nums">
-                      {blueAcc.toFixed(1)} <span className="text-xs font-bold text-blue-200/70">/ 4.0</span>
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-2 grid-rows-2 gap-2">
-                    <button
-                      type="button"
-                      disabled={!current || isJudgeStandby}
-                      onClick={() => setBlueAcc((prev) => clampAccuracy(prev - 0.1))}
-                      className="col-start-1 row-start-1 row-span-2 min-h-[90px] rounded-xl bg-amber-500/25 hover:bg-amber-500/35 border border-amber-400/50 text-amber-200 font-black text-sm active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center gap-1 disabled:opacity-40"
-                    >
-                      <span>-0.1 Minor</span>
-                    </button>
-                    <button
-                      type="button"
-                      disabled={!current || isJudgeStandby}
-                      onClick={() => setBlueAcc((prev) => clampAccuracy(prev - 0.3))}
-                      className="col-start-2 row-start-1 min-h-[42px] rounded-xl bg-purple-500/25 hover:bg-purple-500/35 border border-purple-400/50 text-purple-200 font-black text-xs active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center gap-1 disabled:opacity-40"
-                    >
-                      <span>-0.3 Major</span>
-                    </button>
-                    <button
-                      type="button"
-                      disabled={!current || isJudgeStandby}
-                      onClick={() => setBlueAcc((prev) => clampAccuracy(prev + 0.1))}
-                      className="col-start-2 row-start-2 min-h-[42px] rounded-xl bg-[#0a3175] hover:bg-[#0e429c] border border-blue-300/30 text-slate-100 font-bold text-xs cursor-pointer flex items-center justify-center gap-1 disabled:opacity-40"
-                    >
-                      <Plus size={12} />
-                      <span>+0.1 Undo</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* 2. Speed & Power (2.0) */}
-                <div className="rounded-2xl bg-[#041b45]/85 border border-cyan-400/30 p-3.5 flex items-center justify-between gap-3">
-                  <div>
-                    <h3 className="text-sm font-black text-white uppercase tracking-wider">Speed &amp; Power</h3>
-                    <p className="text-[10px] text-blue-200/75">Max 2.0</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      disabled={!current || isJudgeStandby}
-                      onClick={() => handleAdjustCriterion(setBlueSp, -0.1)}
-                      className="w-10 h-10 rounded-xl bg-[#0a3175] hover:bg-[#0e429c] border border-blue-300/30 text-white font-black flex items-center justify-center cursor-pointer disabled:opacity-40"
-                    >
-                      <Minus size={16} />
-                    </button>
-                    <span className="w-12 text-center font-mono text-xl font-black text-emerald-300 tabular-nums">
-                      {blueSp.toFixed(1)}
-                    </span>
-                    <button
-                      type="button"
-                      disabled={!current || isJudgeStandby}
-                      onClick={() => handleAdjustCriterion(setBlueSp, 0.1)}
-                      className="w-10 h-10 rounded-xl bg-[#0a3175] hover:bg-[#0e429c] border border-blue-300/30 text-white font-black flex items-center justify-center cursor-pointer disabled:opacity-40"
-                    >
-                      <Plus size={16} />
-                    </button>
-                  </div>
-                </div>
-
-                {/* 3. Rhythm / Tempo / Softness / Power (2.0) */}
-                <div className="rounded-2xl bg-[#041b45]/85 border border-cyan-400/30 p-3.5 flex items-center justify-between gap-3">
-                  <div>
-                    <h3 className="text-sm font-black text-white uppercase tracking-wider">Rhythm / Tempo / Softness</h3>
-                    <p className="text-[10px] text-blue-200/75">Max 2.0</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      disabled={!current || isJudgeStandby}
-                      onClick={() => handleAdjustCriterion(setBlueRt, -0.1)}
-                      className="w-10 h-10 rounded-xl bg-[#0a3175] hover:bg-[#0e429c] border border-blue-300/30 text-white font-black flex items-center justify-center cursor-pointer disabled:opacity-40"
-                    >
-                      <Minus size={16} />
-                    </button>
-                    <span className="w-12 text-center font-mono text-xl font-black text-emerald-300 tabular-nums">
-                      {blueRt.toFixed(1)}
-                    </span>
-                    <button
-                      type="button"
-                      disabled={!current || isJudgeStandby}
-                      onClick={() => handleAdjustCriterion(setBlueRt, 0.1)}
-                      className="w-10 h-10 rounded-xl bg-[#0a3175] hover:bg-[#0e429c] border border-blue-300/30 text-white font-black flex items-center justify-center cursor-pointer disabled:opacity-40"
-                    >
-                      <Plus size={16} />
-                    </button>
-                  </div>
-                </div>
-
-                {/* 4. Expression of Energy (2.0) */}
-                <div className="rounded-2xl bg-[#041b45]/85 border border-cyan-400/30 p-3.5 flex items-center justify-between gap-3">
-                  <div>
-                    <h3 className="text-sm font-black text-white uppercase tracking-wider">Expression of Energy</h3>
-                    <p className="text-[10px] text-blue-200/75">Max 2.0</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      disabled={!current || isJudgeStandby}
-                      onClick={() => handleAdjustCriterion(setBlueEe, -0.1)}
-                      className="w-10 h-10 rounded-xl bg-[#0a3175] hover:bg-[#0e429c] border border-blue-300/30 text-white font-black flex items-center justify-center cursor-pointer disabled:opacity-40"
-                    >
-                      <Minus size={16} />
-                    </button>
-                    <span className="w-12 text-center font-mono text-xl font-black text-emerald-300 tabular-nums">
-                      {blueEe.toFixed(1)}
-                    </span>
-                    <button
-                      type="button"
-                      disabled={!current || isJudgeStandby}
-                      onClick={() => handleAdjustCriterion(setBlueEe, 0.1)}
-                      className="w-10 h-10 rounded-xl bg-[#0a3175] hover:bg-[#0e429c] border border-blue-300/30 text-white font-black flex items-center justify-center cursor-pointer disabled:opacity-40"
-                    >
-                      <Plus size={16} />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Blue Submit Button */}
-            <div className="pt-4 border-t border-cyan-400/35 flex items-center justify-between gap-3">
-              <div className="space-y-0.5 min-w-0">
-                <div className="text-[10px] font-bold uppercase tracking-wider text-blue-200/80">
-                  Accuracy + Presentation = Blue Total / 10.0
-                </div>
-                <div className="flex flex-wrap items-baseline gap-1.5 font-mono font-black tabular-nums">
-                  <span className="text-base sm:text-lg text-cyan-300" title="Accuracy">
-                    {blueAcc.toFixed(1)}
-                  </span>
-                  <span className="text-xs sm:text-sm text-blue-200/70">+</span>
-                  <span className="text-base sm:text-lg text-emerald-300" title="Presentation">
-                    {bluePresTotal.toFixed(1)}
-                  </span>
-                  <span className="text-xs sm:text-sm text-blue-200/70">=</span>
-                  <span className="text-2xl sm:text-3xl text-amber-300">
-                    {round2(blueAcc + bluePresTotal).toFixed(2)}
-                  </span>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                disabled={!current || isJudgeStandby || isSubmittingBlue}
-                onClick={() => handleManualSubmitSide('blue')}
-                className={cn(
-                  'min-h-[48px] px-6 rounded-xl font-black text-sm uppercase tracking-wider flex items-center gap-2 transition-all active:scale-[0.98] cursor-pointer disabled:opacity-40 shadow-lg',
-                  blueSubmitSuccessAt && (!existingBlue || blueSubmitSuccessAt >= existingBlue.submittedAt)
-                    ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
-                    : 'bg-blue-600 hover:bg-blue-500 text-white'
-                )}
-              >
-                {blueSubmitSuccessAt ? (
-                  <>
-                    <CheckCircle2 size={16} />
-                    <span>Submitted</span>
-                  </>
-                ) : (
-                  <>
-                    <Send size={15} />
-                    <span>{isSubmittingBlue ? 'Sending...' : 'Submit Blue'}</span>
-                  </>
-                )}
-              </button>
+              )}
             </div>
           </div>
 
           {/* ================= RED (HONG) SIDE ================= */}
-          <div className="rounded-3xl bg-gradient-to-b from-[#99121a] via-[#6b0b12] to-[#47050a] border-2 border-red-400/75 p-4 sm:p-6 space-y-5 shadow-[0_10px_34px_rgba(220,38,38,0.28)] flex flex-col justify-between">
+          <div className="rounded-3xl bg-gradient-to-b from-[#800a12] via-[#52050b] to-[#2e0205] border-2 border-[#ed1c24] p-4 sm:p-5 space-y-4 shadow-[0_0_28px_rgba(237,28,36,0.35)] flex flex-col justify-between">
             {hasRedCompetitor ? (
               <div className="space-y-4">
                 {/* Athlete Header */}
-                <div className="bg-[#b51821]/70 border border-red-300/45 rounded-2xl p-4 space-y-1 shadow-inner">
-                  <div className="flex items-center justify-between text-xs font-black uppercase tracking-wider text-red-200">
-                    <span>Hong (Red)</span>
-                    <span className="font-mono font-bold text-amber-300">Judge {judgeNumber}</span>
+                <div className="bg-[#9e0c16]/70 border border-[#ed1c24]/40 rounded-2xl p-3.5 sm:p-4 space-y-1 shadow-inner">
+                  <div className="flex items-center justify-between text-xs font-black uppercase tracking-wider">
+                    <span className="text-[#ff6b6b]">Hong (Red)</span>
+                    <span className="font-mono font-bold text-yellow-400">Judge {judgeNumber}</span>
                   </div>
-                  <h2 className="text-xl sm:text-2xl font-black text-white uppercase tracking-tight">
+                  <h2 className="text-xl sm:text-2xl md:text-3xl font-black text-white uppercase tracking-tight break-words">
                     {redName || 'Waiting for Red Athlete'}
                   </h2>
                   <div className="flex flex-wrap items-end justify-between gap-2 pt-0.5">
-                    <p className="text-xs sm:text-sm font-semibold text-red-100/90 uppercase tracking-wide min-w-0">
+                    <p className="text-xs sm:text-sm font-bold text-[#ff8a8a] uppercase tracking-wide min-w-0">
                       {redClub || '\u00A0'}
                     </p>
-                    <div className="flex flex-col gap-0.5 px-2.5 py-1.5 rounded-lg bg-[#3d060b]/80 border border-red-300/40 shrink-0 max-w-full">
-                      <div
+                    <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#2e0205]/90 border border-[#ed1c24]/40 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setManualPoomsae(1)}
                         className={cn(
-                          'flex items-center gap-1.5 rounded px-1.5 py-0.5 transition-colors',
-                          activePoomsae === 1 ? 'bg-amber-400/15' : 'opacity-70'
+                          'px-2 py-0.5 rounded text-xs font-black uppercase transition-all cursor-pointer',
+                          activePoomsae === 1 ? 'bg-yellow-400 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-white'
                         )}
                       >
-                        <span
-                          className={cn(
-                            'text-[10px] sm:text-xs font-black uppercase tracking-wider shrink-0',
-                            activePoomsae === 1 ? 'text-amber-300' : 'text-red-200/80'
-                          )}
-                        >
-                          Poomsae 1
-                        </span>
-                        {poomsae1Name && (
-                          <>
-                            <span className="text-red-300/50">:</span>
-                            <span className="text-[11px] sm:text-xs font-extrabold uppercase tracking-wide text-white truncate max-w-[165px] sm:max-w-[230px]">
-                              {poomsae1Name}
-                            </span>
-                          </>
-                        )}
-                      </div>
-                      <div
+                        Poomsae 1
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setManualPoomsae(2)}
                         className={cn(
-                          'flex items-center gap-1.5 rounded px-1.5 py-0.5 transition-colors',
-                          activePoomsae === 2 ? 'bg-amber-400/15' : 'opacity-70'
+                          'px-2 py-0.5 rounded text-xs font-black uppercase transition-all cursor-pointer',
+                          activePoomsae === 2 ? 'bg-yellow-400 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-white'
                         )}
                       >
-                        <span
-                          className={cn(
-                            'text-[10px] sm:text-xs font-black uppercase tracking-wider shrink-0',
-                            activePoomsae === 2 ? 'text-amber-300' : 'text-red-200/80'
-                          )}
-                        >
-                          Poomsae 2
-                        </span>
-                        {poomsae2Name && (
-                          <>
-                            <span className="text-red-300/50">:</span>
-                            <span className="text-[11px] sm:text-xs font-extrabold uppercase tracking-wide text-white truncate max-w-[165px] sm:max-w-[230px]">
-                              {poomsae2Name}
-                            </span>
-                          </>
-                        )}
-                      </div>
+                        Poomsae 2
+                      </button>
                     </div>
                   </div>
                 </div>
 
-                {/* WT 4-Row Scoring Grid */}
-                <div className="space-y-3">
-                  {/* 1. Accuracy (4.0) */}
-                  <div className="rounded-2xl bg-[#3d060b]/85 border border-red-400/30 p-3.5 space-y-2.5">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <h3 className="text-sm font-black text-white uppercase tracking-wider">Accuracy</h3>
-                        <p className="text-[10px] text-red-200/75">Max 4.0 • Deduct errors by -0.1 / -0.3</p>
+                {/* Conditional Layout: Photo 1 (Accuracy) vs Photo 2 (Presentation) */}
+                {redStep === 'accuracy' ? (
+                  /* PHOTO 1: ACCURACY LAYOUT */
+                  <div className="space-y-4">
+                    <div className="rounded-2xl bg-[#380307]/90 border border-[#ed1c24]/40 p-4 space-y-3.5 shadow-inner">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h3 className="text-sm sm:text-base font-black text-white uppercase tracking-wider">Accuracy</h3>
+                          <p className="text-[10px] sm:text-[11px] text-red-200/75">Max 4.0 • Deduct errors by -0.1 / -0.3</p>
+                        </div>
+                        <div className="flex items-baseline gap-1 font-mono tabular-nums">
+                          <span className="text-3xl sm:text-4xl font-black text-white">{redAcc.toFixed(1)}</span>
+                          <span className="text-sm font-bold text-red-200/70">/ 4.0</span>
+                        </div>
                       </div>
-                      <span className="font-mono text-2xl font-black text-red-200 tabular-nums">
-                        {redAcc.toFixed(1)} <span className="text-xs font-bold text-red-200/70">/ 4.0</span>
-                      </span>
-                    </div>
-                    <div className="grid grid-cols-2 grid-rows-2 gap-2">
-                      <button
-                        type="button"
-                        disabled={!current || isJudgeStandby}
-                        onClick={() => setRedAcc((prev) => clampAccuracy(prev - 0.3))}
-                        className="col-start-1 row-start-1 min-h-[42px] rounded-xl bg-purple-500/25 hover:bg-purple-500/35 border border-purple-400/50 text-purple-200 font-black text-xs active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center gap-1 disabled:opacity-40"
-                      >
-                        <span>-0.3 Major</span>
-                      </button>
-                      <button
-                        type="button"
-                        disabled={!current || isJudgeStandby}
-                        onClick={() => setRedAcc((prev) => clampAccuracy(prev + 0.1))}
-                        className="col-start-1 row-start-2 min-h-[42px] rounded-xl bg-[#660f16] hover:bg-[#85141e] border border-red-300/30 text-slate-100 font-bold text-xs cursor-pointer flex items-center justify-center gap-1 disabled:opacity-40"
-                      >
-                        <Plus size={12} />
-                        <span>+0.1 Undo</span>
-                      </button>
-                      <button
-                        type="button"
-                        disabled={!current || isJudgeStandby}
-                        onClick={() => setRedAcc((prev) => clampAccuracy(prev - 0.1))}
-                        className="col-start-2 row-start-1 row-span-2 min-h-[90px] rounded-xl bg-amber-500/25 hover:bg-amber-500/35 border border-amber-400/50 text-amber-200 font-black text-sm active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center gap-1 disabled:opacity-40"
-                      >
-                        <span>-0.1 Minor</span>
-                      </button>
-                    </div>
-                  </div>
 
-                  {/* 2. Speed & Power (2.0) */}
-                  <div className="rounded-2xl bg-[#3d060b]/85 border border-red-400/30 p-3.5 flex items-center justify-between gap-3">
-                    <div>
-                      <h3 className="text-sm font-black text-white uppercase tracking-wider">Speed &amp; Power</h3>
-                      <p className="text-[10px] text-red-200/75">Max 2.0</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        disabled={!current || isJudgeStandby}
-                        onClick={() => handleAdjustCriterion(setRedSp, -0.1)}
-                        className="w-10 h-10 rounded-xl bg-[#660f16] hover:bg-[#85141e] border border-red-300/30 text-white font-black flex items-center justify-center cursor-pointer disabled:opacity-40"
-                      >
-                        <Minus size={16} />
-                      </button>
-                      <span className="w-12 text-center font-mono text-xl font-black text-emerald-300 tabular-nums">
-                        {redSp.toFixed(1)}
-                      </span>
-                      <button
-                        type="button"
-                        disabled={!current || isJudgeStandby}
-                        onClick={() => handleAdjustCriterion(setRedSp, 0.1)}
-                        className="w-10 h-10 rounded-xl bg-[#660f16] hover:bg-[#85141e] border border-red-300/30 text-white font-black flex items-center justify-center cursor-pointer disabled:opacity-40"
-                      >
-                        <Plus size={16} />
-                      </button>
-                    </div>
-                  </div>
+                      <div className="grid grid-cols-2 grid-rows-2 gap-2.5">
+                        {/* -0.3 Major (Left top) */}
+                        <button
+                          type="button"
+                          disabled={!current || isJudgeStandby}
+                          onClick={() => setRedAcc((prev) => clampAccuracy(prev - 0.3))}
+                          className="col-start-1 row-start-1 min-h-[44px] rounded-xl sm:rounded-2xl bg-[#730814] hover:bg-[#8c0a18] border border-[#f43f5e]/60 text-white font-black text-xs sm:text-sm active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center gap-1 shadow-md disabled:opacity-40"
+                        >
+                          <span>-0.3 Major</span>
+                        </button>
 
-                  {/* 3. Rhythm / Tempo / Softness / Power (2.0) */}
-                  <div className="rounded-2xl bg-[#3d060b]/85 border border-red-400/30 p-3.5 flex items-center justify-between gap-3">
-                    <div>
-                      <h3 className="text-sm font-black text-white uppercase tracking-wider">Rhythm / Tempo / Softness</h3>
-                      <p className="text-[10px] text-red-200/75">Max 2.0</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        disabled={!current || isJudgeStandby}
-                        onClick={() => handleAdjustCriterion(setRedRt, -0.1)}
-                        className="w-10 h-10 rounded-xl bg-[#660f16] hover:bg-[#85141e] border border-red-300/30 text-white font-black flex items-center justify-center cursor-pointer disabled:opacity-40"
-                      >
-                        <Minus size={16} />
-                      </button>
-                      <span className="w-12 text-center font-mono text-xl font-black text-emerald-300 tabular-nums">
-                        {redRt.toFixed(1)}
-                      </span>
-                      <button
-                        type="button"
-                        disabled={!current || isJudgeStandby}
-                        onClick={() => handleAdjustCriterion(setRedRt, 0.1)}
-                        className="w-10 h-10 rounded-xl bg-[#660f16] hover:bg-[#85141e] border border-red-300/30 text-white font-black flex items-center justify-center cursor-pointer disabled:opacity-40"
-                      >
-                        <Plus size={16} />
-                      </button>
-                    </div>
-                  </div>
+                        {/* +0.1 Undo (Left bottom) */}
+                        <button
+                          type="button"
+                          disabled={!current || isJudgeStandby}
+                          onClick={() => setRedAcc((prev) => clampAccuracy(prev + 0.1))}
+                          className="col-start-1 row-start-2 min-h-[44px] rounded-xl sm:rounded-2xl bg-[#a10e1a] hover:bg-[#bf111f] border border-[#f87171]/60 text-white font-black text-xs sm:text-sm active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center gap-1 shadow-md disabled:opacity-40"
+                        >
+                          <Plus size={14} strokeWidth={3} />
+                          <span>+0.1 Undo</span>
+                        </button>
 
-                  {/* 4. Expression of Energy (2.0) */}
-                  <div className="rounded-2xl bg-[#3d060b]/85 border border-red-400/30 p-3.5 flex items-center justify-between gap-3">
-                    <div>
-                      <h3 className="text-sm font-black text-white uppercase tracking-wider">Expression of Energy</h3>
-                      <p className="text-[10px] text-red-200/75">Max 2.0</p>
+                        {/* -0.1 Minor (Right tall button, spans 2 rows) */}
+                        <button
+                          type="button"
+                          disabled={!current || isJudgeStandby}
+                          onClick={() => setRedAcc((prev) => clampAccuracy(prev - 0.1))}
+                          className="col-start-2 row-start-1 row-span-2 min-h-[96px] rounded-2xl bg-[#593006] hover:bg-[#6e3c08] border-2 border-[#f59e0b]/60 text-[#fef08a] font-black text-base sm:text-lg active:scale-[0.98] transition-all cursor-pointer flex flex-col items-center justify-center gap-1 shadow-md disabled:opacity-40"
+                        >
+                          <span className="text-base sm:text-xl font-black tracking-wide">-0.1 Minor</span>
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
+
+                    {/* Giant PRESENTATION Button (Photo 1) */}
+                    <button
+                      type="button"
+                      disabled={!current || isJudgeStandby}
+                      onClick={() => setRedStep('presentation')}
+                      className="w-full min-h-[64px] sm:min-h-[76px] rounded-2xl sm:rounded-3xl bg-gradient-to-r from-[#b30e19] via-[#d61322] to-[#b30e19] hover:from-[#e61727] hover:to-[#b30e19] border-2 border-[#ed1c24] text-white font-black text-xl sm:text-2xl uppercase tracking-widest shadow-[0_0_24px_rgba(237,28,36,0.7)] active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center gap-3 disabled:opacity-40"
+                    >
+                      <span>PRESENTATION</span>
+                      {redSubmitSuccessAt && (!existingRed || redSubmitSuccessAt >= existingRed.submittedAt) && (
+                        <span className="text-xs font-bold bg-emerald-500/30 border border-emerald-400 px-2.5 py-1 rounded-full text-emerald-200">
+                          ✓ SUBMITTED ({round2(redAcc + redPresTotal).toFixed(2)})
+                        </span>
+                      )}
+                    </button>
+                  </div>
+                ) : (
+                  /* PHOTO 2: PRESENTATION LAYOUT */
+                  <div className="space-y-3">
+                    {/* Top back navigation */}
+                    <div className="flex items-center justify-between pb-0.5">
                       <button
                         type="button"
-                        disabled={!current || isJudgeStandby}
-                        onClick={() => handleAdjustCriterion(setRedEe, -0.1)}
-                        className="w-10 h-10 rounded-xl bg-[#660f16] hover:bg-[#85141e] border border-red-300/30 text-white font-black flex items-center justify-center cursor-pointer disabled:opacity-40"
+                        onClick={() => setRedStep('accuracy')}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#2e0205] hover:bg-[#47050a] border border-[#ed1c24]/50 text-red-200 hover:text-white font-black text-xs uppercase tracking-wider transition-all cursor-pointer shadow-sm"
                       >
-                        <Minus size={16} />
+                        <ArrowLeft size={13} />
+                        <span>&lt; Accuracy ({redAcc.toFixed(1)})</span>
                       </button>
-                      <span className="w-12 text-center font-mono text-xl font-black text-emerald-300 tabular-nums">
-                        {redEe.toFixed(1)}
+                      <span className="font-mono text-xs font-black text-red-200">
+                        Presentation: {redPresTotal.toFixed(1)} / 6.0
                       </span>
-                      <button
-                        type="button"
-                        disabled={!current || isJudgeStandby}
-                        onClick={() => handleAdjustCriterion(setRedEe, 0.1)}
-                        className="w-10 h-10 rounded-xl bg-[#660f16] hover:bg-[#85141e] border border-red-300/30 text-white font-black flex items-center justify-center cursor-pointer disabled:opacity-40"
-                      >
-                        <Plus size={16} />
-                      </button>
+                    </div>
+
+                    {/* 1. Speed & Power (16 buttons) */}
+                    <div className="rounded-2xl bg-[#380307]/85 border border-[#ed1c24]/40 p-3 sm:p-3.5 space-y-1.5 shadow-inner">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-xs sm:text-sm font-black text-white uppercase tracking-wider">Speed &amp; Power</h3>
+                        <span className="font-mono text-xs font-bold text-red-200">{redSp.toFixed(1)} / 2.0</span>
+                      </div>
+                      <div className="grid grid-cols-8 gap-1 sm:gap-1.5">
+                        {PRESENTATION_ROW_1.map((val) => (
+                          <button
+                            key={val}
+                            type="button"
+                            disabled={!current || isJudgeStandby}
+                            onClick={() => setRedSp(val)}
+                            className={cn(
+                              'h-8 sm:h-9 rounded-lg font-black text-[11px] sm:text-xs transition-all cursor-pointer flex items-center justify-center tabular-nums disabled:opacity-40',
+                              redSp === val
+                                ? 'bg-[#ed1c24] text-white border-2 border-white shadow-[0_0_14px_rgba(237,28,36,1)] scale-105 z-10'
+                                : 'bg-[#260305]/90 border border-red-400/30 text-white/90 hover:border-red-300 hover:bg-[#52050b]'
+                            )}
+                          >
+                            {val.toFixed(1)}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="grid grid-cols-8 gap-1 sm:gap-1.5">
+                        {PRESENTATION_ROW_2.map((val) => (
+                          <button
+                            key={val}
+                            type="button"
+                            disabled={!current || isJudgeStandby}
+                            onClick={() => setRedSp(val)}
+                            className={cn(
+                              'h-8 sm:h-9 rounded-lg font-black text-[11px] sm:text-xs transition-all cursor-pointer flex items-center justify-center tabular-nums disabled:opacity-40',
+                              redSp === val
+                                ? 'bg-[#ed1c24] text-white border-2 border-white shadow-[0_0_14px_rgba(237,28,36,1)] scale-105 z-10'
+                                : 'bg-[#260305]/90 border border-red-400/30 text-white/90 hover:border-red-300 hover:bg-[#52050b]'
+                            )}
+                          >
+                            {val.toFixed(1)}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* 2. Rhythm / Tempo / Softness (16 buttons) */}
+                    <div className="rounded-2xl bg-[#380307]/85 border border-[#ed1c24]/40 p-3 sm:p-3.5 space-y-1.5 shadow-inner">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-xs sm:text-sm font-black text-white uppercase tracking-wider">Rhythm / Tempo / Softness</h3>
+                        <span className="font-mono text-xs font-bold text-red-200">{redRt.toFixed(1)} / 2.0</span>
+                      </div>
+                      <div className="grid grid-cols-8 gap-1 sm:gap-1.5">
+                        {PRESENTATION_ROW_1.map((val) => (
+                          <button
+                            key={val}
+                            type="button"
+                            disabled={!current || isJudgeStandby}
+                            onClick={() => setRedRt(val)}
+                            className={cn(
+                              'h-8 sm:h-9 rounded-lg font-black text-[11px] sm:text-xs transition-all cursor-pointer flex items-center justify-center tabular-nums disabled:opacity-40',
+                              redRt === val
+                                ? 'bg-[#ed1c24] text-white border-2 border-white shadow-[0_0_14px_rgba(237,28,36,1)] scale-105 z-10'
+                                : 'bg-[#260305]/90 border border-red-400/30 text-white/90 hover:border-red-300 hover:bg-[#52050b]'
+                            )}
+                          >
+                            {val.toFixed(1)}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="grid grid-cols-8 gap-1 sm:gap-1.5">
+                        {PRESENTATION_ROW_2.map((val) => (
+                          <button
+                            key={val}
+                            type="button"
+                            disabled={!current || isJudgeStandby}
+                            onClick={() => setRedRt(val)}
+                            className={cn(
+                              'h-8 sm:h-9 rounded-lg font-black text-[11px] sm:text-xs transition-all cursor-pointer flex items-center justify-center tabular-nums disabled:opacity-40',
+                              redRt === val
+                                ? 'bg-[#ed1c24] text-white border-2 border-white shadow-[0_0_14px_rgba(237,28,36,1)] scale-105 z-10'
+                                : 'bg-[#260305]/90 border border-red-400/30 text-white/90 hover:border-red-300 hover:bg-[#52050b]'
+                            )}
+                          >
+                            {val.toFixed(1)}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* 3. Expression of Energy (16 buttons) */}
+                    <div className="rounded-2xl bg-[#380307]/85 border border-[#ed1c24]/40 p-3 sm:p-3.5 space-y-1.5 shadow-inner">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-xs sm:text-sm font-black text-white uppercase tracking-wider">Expression of Energy</h3>
+                        <span className="font-mono text-xs font-bold text-red-200">{redEe.toFixed(1)} / 2.0</span>
+                      </div>
+                      <div className="grid grid-cols-8 gap-1 sm:gap-1.5">
+                        {PRESENTATION_ROW_1.map((val) => (
+                          <button
+                            key={val}
+                            type="button"
+                            disabled={!current || isJudgeStandby}
+                            onClick={() => setRedEe(val)}
+                            className={cn(
+                              'h-8 sm:h-9 rounded-lg font-black text-[11px] sm:text-xs transition-all cursor-pointer flex items-center justify-center tabular-nums disabled:opacity-40',
+                              redEe === val
+                                ? 'bg-[#ed1c24] text-white border-2 border-white shadow-[0_0_14px_rgba(237,28,36,1)] scale-105 z-10'
+                                : 'bg-[#260305]/90 border border-red-400/30 text-white/90 hover:border-red-300 hover:bg-[#52050b]'
+                            )}
+                          >
+                            {val.toFixed(1)}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="grid grid-cols-8 gap-1 sm:gap-1.5">
+                        {PRESENTATION_ROW_2.map((val) => (
+                          <button
+                            key={val}
+                            type="button"
+                            disabled={!current || isJudgeStandby}
+                            onClick={() => setRedEe(val)}
+                            className={cn(
+                              'h-8 sm:h-9 rounded-lg font-black text-[11px] sm:text-xs transition-all cursor-pointer flex items-center justify-center tabular-nums disabled:opacity-40',
+                              redEe === val
+                                ? 'bg-[#ed1c24] text-white border-2 border-white shadow-[0_0_14px_rgba(237,28,36,1)] scale-105 z-10'
+                                : 'bg-[#260305]/90 border border-red-400/30 text-white/90 hover:border-red-300 hover:bg-[#52050b]'
+                            )}
+                          >
+                            {val.toFixed(1)}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* PHOTO 2: Bottom Bar (Math display + SUBMIT button) */}
+                    <div className="pt-3 border-t border-red-400/40 flex flex-wrap items-center justify-between gap-3">
+                      <div className="space-y-0.5 min-w-0">
+                        <div className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-red-200/90">
+                          ACCURACY + PRESENTATION = RED TOTAL / 10.0
+                        </div>
+                        <div className="flex flex-wrap items-baseline gap-1.5 sm:gap-2 font-mono font-black tabular-nums">
+                          <span className="text-xl sm:text-2xl text-white" title="Accuracy">
+                            {redAcc.toFixed(1)}
+                          </span>
+                          <span className="text-sm sm:text-base text-red-200/70">+</span>
+                          <span className="text-xl sm:text-2xl text-white" title="Presentation">
+                            {redPresTotal.toFixed(1)}
+                          </span>
+                          <span className="text-sm sm:text-base text-red-200/70">=</span>
+                          <span className="text-2xl sm:text-3xl md:text-4xl text-yellow-400">
+                            {round2(redAcc + redPresTotal).toFixed(2)}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          disabled={!current || isJudgeStandby || isSubmittingRed}
+                          onClick={() => handleManualSubmitSide('red')}
+                          className={cn(
+                            'min-h-[46px] sm:min-h-[52px] px-6 sm:px-8 rounded-xl sm:rounded-2xl font-black text-sm uppercase tracking-wider flex items-center gap-2 transition-all active:scale-[0.98] cursor-pointer disabled:opacity-40 shadow-lg',
+                            redSubmitSuccessAt && (!existingRed || redSubmitSuccessAt >= existingRed.submittedAt)
+                              ? 'bg-gradient-to-r from-emerald-500 to-green-600 border-2 border-emerald-300 text-white shadow-[0_0_18px_rgba(16,185,129,0.7)]'
+                              : 'bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-500 hover:to-emerald-600 border-2 border-emerald-400 text-white shadow-[0_0_14px_rgba(16,185,129,0.5)]'
+                          )}
+                        >
+                          {redSubmitSuccessAt && (!existingRed || redSubmitSuccessAt >= existingRed.submittedAt) ? (
+                            <>
+                              <CheckCircle2 size={18} />
+                              <span>SUBMITTED</span>
+                            </>
+                          ) : (
+                            <>
+                              <Send size={16} />
+                              <span>{isSubmittingRed ? 'SUBMITTING...' : 'SUBMIT'}</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
                     </div>
                   </div>
-                </div>
+                )}
               </div>
             ) : (
               <div className="py-16 text-center space-y-2 my-auto">
                 <p className="text-lg font-bold text-red-100/80">Single Competitor (BYE)</p>
                 <p className="text-xs text-red-200/60">No red competitor assigned for this bout.</p>
-              </div>
-            )}
-
-            {/* Red Submit Button */}
-            {hasRedCompetitor && (
-              <div className="pt-4 border-t border-red-400/35 flex items-center justify-between gap-3">
-                <div className="space-y-0.5 min-w-0">
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-red-200/80">
-                    Accuracy + Presentation = Red Total / 10.0
-                  </div>
-                  <div className="flex flex-wrap items-baseline gap-1.5 font-mono font-black tabular-nums">
-                    <span className="text-base sm:text-lg text-red-200" title="Accuracy">
-                      {redAcc.toFixed(1)}
-                    </span>
-                    <span className="text-xs sm:text-sm text-red-200/70">+</span>
-                    <span className="text-base sm:text-lg text-emerald-300" title="Presentation">
-                      {redPresTotal.toFixed(1)}
-                    </span>
-                    <span className="text-xs sm:text-sm text-red-200/70">=</span>
-                    <span className="text-2xl sm:text-3xl text-amber-300">
-                      {round2(redAcc + redPresTotal).toFixed(2)}
-                    </span>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  disabled={!current || isJudgeStandby || isSubmittingRed}
-                  onClick={() => handleManualSubmitSide('red')}
-                  className={cn(
-                    'min-h-[48px] px-6 rounded-xl font-black text-sm uppercase tracking-wider flex items-center gap-2 transition-all active:scale-[0.98] cursor-pointer disabled:opacity-40 shadow-lg',
-                    redSubmitSuccessAt && (!existingRed || redSubmitSuccessAt >= existingRed.submittedAt)
-                      ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
-                      : 'bg-red-600 hover:bg-red-500 text-white'
-                  )}
-                >
-                  {redSubmitSuccessAt ? (
-                    <>
-                      <CheckCircle2 size={16} />
-                      <span>Submitted</span>
-                    </>
-                  ) : (
-                    <>
-                      <Send size={15} />
-                      <span>{isSubmittingRed ? 'Sending...' : 'Submit Red'}</span>
-                    </>
-                  )}
-                </button>
               </div>
             )}
           </div>

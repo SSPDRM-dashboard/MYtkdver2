@@ -15138,16 +15138,16 @@ function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, b
                   <PlayerLogoBadge club={current?.blue_club} name={current?.blue_name} size="lg" className="shrink-0" />
                   <div className="text-left space-y-0.5 min-w-0 flex-1">
                     <p 
-                      style={{ fontSize: `calc(clamp(18px, 2.5vw, 34px) * (${effectiveNameScale} / 100))`, lineHeight: 1.15 }}
-                      className="text-[18px] sm:text-[26px] md:text-[34px] font-black text-[#00a2e8] uppercase tracking-tight break-words w-full text-left"
-                    >
-                      {current ? (current.privacy_mode ? "---" : cleanPlaceholder(current.blue_name)) : ""}
-                    </p>
-                    <p 
                       style={{ fontSize: `calc(clamp(9px, 1.2vw, 14px) * (${effectiveClubScale} / 100))`, lineHeight: 1.2 }}
-                      className="text-white font-black text-[8px] sm:text-sm uppercase tracking-widest break-words whitespace-normal w-full text-left"
+                      className="text-[#00a2e8] font-black text-[8px] sm:text-sm uppercase tracking-widest break-words whitespace-normal w-full text-left"
                     >
                       {current ? cleanPlaceholder(current.blue_club) : ""}
+                    </p>
+                    <p 
+                      style={{ fontSize: `calc(clamp(18px, 2.5vw, 34px) * (${effectiveNameScale} / 100))`, lineHeight: 1.15 }}
+                      className="text-[18px] sm:text-[26px] md:text-[34px] font-black text-white uppercase tracking-tight break-words w-full text-left"
+                    >
+                      {current ? (current.privacy_mode ? "---" : cleanPlaceholder(current.blue_name)) : ""}
                     </p>
                   </div>
                 </div>
@@ -15163,16 +15163,16 @@ function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, b
                       <PlayerLogoBadge club={current?.red_club} name={current?.red_name} size="lg" className="shrink-0" />
                       <div className="text-left space-y-0.5 min-w-0 flex-1">
                         <p 
-                          style={{ fontSize: `calc(clamp(18px, 2.5vw, 34px) * (${effectiveNameScale} / 100))`, lineHeight: 1.15 }}
-                          className="text-[18px] sm:text-[26px] md:text-[34px] font-black text-[#ed1c24] uppercase tracking-tight break-words w-full text-left"
-                        >
-                          {current ? (current.privacy_mode ? "---" : cleanPlaceholder(current.red_name)) : ""}
-                        </p>
-                        <p 
                           style={{ fontSize: `calc(clamp(9px, 1.2vw, 14px) * (${effectiveClubScale} / 100))`, lineHeight: 1.2 }}
-                          className="text-white font-black text-[8px] sm:text-sm uppercase tracking-widest break-words whitespace-normal w-full text-left"
+                          className="text-[#ed1c24] font-black text-[8px] sm:text-sm uppercase tracking-widest break-words whitespace-normal w-full text-left"
                         >
                           {current ? cleanPlaceholder(current.red_club) : ""}
+                        </p>
+                        <p 
+                          style={{ fontSize: `calc(clamp(18px, 2.5vw, 34px) * (${effectiveNameScale} / 100))`, lineHeight: 1.15 }}
+                          className="text-[18px] sm:text-[26px] md:text-[34px] font-black text-white uppercase tracking-tight break-words w-full text-left"
+                        >
+                          {current ? (current.privacy_mode ? "---" : cleanPlaceholder(current.red_name)) : ""}
                         </p>
                       </div>
                     </div>
@@ -15274,16 +15274,16 @@ function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, b
                       <div className="flex flex-col min-w-0 flex-1 text-left">
                         <div className="h-0.5 w-full bg-[#00a2e8] rounded-full mb-1 sm:mb-2 shadow-[0_0_8px_rgba(0,162,232,0.8)]" />
                         <span 
-                          style={{ fontSize: `calc(clamp(16px, 2vw, 24px) * (${effectiveNameScale} / 100))`, lineHeight: 1.15 }}
-                          className="font-bold text-[#00a2e8] text-[18px] sm:text-[24px] whitespace-normal break-words text-left"
-                        >
-                          {current ? (current.privacy_mode ? "---" : cleanPlaceholder(current.blue_name)) : ""}
-                        </span>
-                        <span 
                           style={{ fontSize: `calc(clamp(9px, 1.2vw, 14px) * (${effectiveClubScale} / 100))`, lineHeight: 1.2 }}
-                          className="font-bold text-white text-[9px] sm:text-sm whitespace-normal break-words text-left mt-0.5"
+                          className="font-bold text-[#00a2e8] text-[9px] sm:text-sm whitespace-normal break-words text-left mb-0.5"
                         >
                           {current ? (current.privacy_mode ? "---" : cleanPlaceholder(current.blue_club)) : ""}
+                        </span>
+                        <span 
+                          style={{ fontSize: `calc(clamp(16px, 2vw, 24px) * (${effectiveNameScale} / 100))`, lineHeight: 1.15 }}
+                          className="font-bold text-white text-[18px] sm:text-[24px] whitespace-normal break-words text-left"
+                        >
+                          {current ? (current.privacy_mode ? "---" : cleanPlaceholder(current.blue_name)) : ""}
                         </span>
                       </div>
                     </div>
@@ -15295,16 +15295,16 @@ function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, b
                       <div className="flex flex-col min-w-0 flex-1 text-left">
                         <div className="h-0.5 w-full bg-[#ed1c24] rounded-full mb-1 sm:mb-2 shadow-[0_0_8px_rgba(237,28,36,0.8)]" />
                         <span 
-                          style={{ fontSize: `calc(clamp(16px, 2vw, 24px) * (${effectiveNameScale} / 100))`, lineHeight: 1.15 }}
-                          className="font-bold text-[#ed1c24] text-[18px] sm:text-[24px] whitespace-normal break-words text-left"
-                        >
-                          {current ? (current.privacy_mode ? "---" : cleanPlaceholder(current.red_name)) : ""}
-                        </span>
-                        <span 
                           style={{ fontSize: `calc(clamp(9px, 1.2vw, 14px) * (${effectiveClubScale} / 100))`, lineHeight: 1.2 }}
-                          className="font-bold text-white text-[9px] sm:text-sm whitespace-normal break-words text-left mt-0.5"
+                          className="font-bold text-[#ed1c24] text-[9px] sm:text-sm whitespace-normal break-words text-left mb-0.5"
                         >
                           {current ? (current.privacy_mode ? "---" : cleanPlaceholder(current.red_club)) : ""}
+                        </span>
+                        <span 
+                          style={{ fontSize: `calc(clamp(16px, 2vw, 24px) * (${effectiveNameScale} / 100))`, lineHeight: 1.15 }}
+                          className="font-bold text-white text-[18px] sm:text-[24px] whitespace-normal break-words text-left"
+                        >
+                          {current ? (current.privacy_mode ? "---" : cleanPlaceholder(current.red_name)) : ""}
                         </span>
                       </div>
                     </div>
@@ -15315,16 +15315,16 @@ function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, b
                     <div className="flex flex-col min-w-0 flex-1 text-left">
                       <div className="h-0.5 w-full bg-[#00a2e8] rounded-full mb-1 sm:mb-2 shadow-[0_0_8px_rgba(0,162,232,0.8)]" />
                       <span 
-                        style={{ fontSize: `calc(clamp(16px, 2vw, 24px) * (${effectiveNameScale} / 100))`, lineHeight: 1.15 }}
-                        className="font-bold text-[#00a2e8] text-[18px] sm:text-[24px] whitespace-normal break-words text-left"
-                      >
-                        {current ? (current.privacy_mode ? "---" : cleanPlaceholder(current.blue_name)) : ""}
-                      </span>
-                      <span 
                         style={{ fontSize: `calc(clamp(9px, 1.2vw, 14px) * (${effectiveClubScale} / 100))`, lineHeight: 1.2 }}
-                        className="font-bold text-white text-[9px] sm:text-sm whitespace-normal break-words text-left mt-0.5"
+                        className="font-bold text-[#00a2e8] text-[9px] sm:text-sm whitespace-normal break-words text-left mb-0.5"
                       >
                         {current ? (current.privacy_mode ? "---" : cleanPlaceholder(current.blue_club)) : ""}
+                      </span>
+                      <span 
+                        style={{ fontSize: `calc(clamp(16px, 2vw, 24px) * (${effectiveNameScale} / 100))`, lineHeight: 1.15 }}
+                        className="font-bold text-white text-[18px] sm:text-[24px] whitespace-normal break-words text-left"
+                      >
+                        {current ? (current.privacy_mode ? "---" : cleanPlaceholder(current.blue_name)) : ""}
                       </span>
                     </div>
                   </div>
@@ -15388,7 +15388,7 @@ function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, b
                             <p 
                               className={cn(
                                 "text-[9px] sm:text-[11px] font-bold uppercase leading-normal sm:leading-tight mb-0.5 break-words whitespace-normal truncate",
-                                isRingInactive ? "text-slate-400" : "text-white"
+                                isRingInactive ? "text-slate-400" : "text-[#00a2e8]"
                               )}
                               style={effectiveStandbyClubScale !== 100 ? { fontSize: `calc((9px + (2px * (100vw - 640px) / 384)) * ${effectiveStandbyClubScale / 100})`, lineHeight: 1.15 } : undefined}
                             >
@@ -15397,7 +15397,7 @@ function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, b
                             <p 
                               className={cn(
                                 "text-[12px] sm:text-[15px] font-black uppercase tracking-[0.5px] leading-tight break-words whitespace-normal w-full truncate",
-                                isRingInactive ? "text-slate-500" : "text-[#00a2e8]"
+                                isRingInactive ? "text-slate-500" : "text-white"
                               )}
                               style={effectiveStandbyNameScale !== 100 ? { fontSize: `calc((12px + (3px * (100vw - 640px) / 384)) * ${effectiveStandbyNameScale / 100})`, lineHeight: 1.15 } : undefined}
                             >
@@ -15420,7 +15420,7 @@ function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, b
                               <p 
                                 className={cn(
                                   "text-[9px] sm:text-[11px] font-bold uppercase leading-normal sm:leading-tight mb-0.5 break-words whitespace-normal truncate",
-                                  isRingInactive ? "text-slate-400" : "text-white"
+                                  isRingInactive ? "text-slate-400" : "text-[#ed1c24]"
                                 )}
                                 style={effectiveStandbyClubScale !== 100 ? { fontSize: `calc((9px + (2px * (100vw - 640px) / 384)) * ${effectiveStandbyClubScale / 100})`, lineHeight: 1.15 } : undefined}
                               >
@@ -15429,7 +15429,7 @@ function PublicRingCard({ ring, namingMode, queueCount, showTotalBouts = true, b
                               <p 
                                 className={cn(
                                   "text-[12px] sm:text-[15px] font-black uppercase tracking-[0.5px] leading-tight break-words whitespace-normal w-full truncate",
-                                  isRingInactive ? "text-slate-500" : "text-[#ed1c24]"
+                                  isRingInactive ? "text-slate-500" : "text-white"
                                 )}
                                 style={effectiveStandbyNameScale !== 100 ? { fontSize: `calc((12px + (3px * (100vw - 640px) / 384)) * ${effectiveStandbyNameScale / 100})`, lineHeight: 1.15 } : undefined}
                               >
@@ -15470,16 +15470,16 @@ function PublicFighterSide({ color, name, club, privacy }: { color: 'blue' | 're
         <PlayerLogoBadge club={club} name={name} size="md" className="shrink-0" />
         <div className="flex-1 min-w-0 text-left">
           <p className={cn(
+            "text-sm font-bold uppercase tracking-widest whitespace-normal break-words text-left mb-0.5",
+            color === 'blue' ? "text-[#00a2e8]" : "text-[#ed1c24]"
+          )}>
+            {cleanPlaceholder(club)}
+          </p>
+          <p className={cn(
             "font-black text-white tracking-tight leading-tight whitespace-normal break-words text-left",
             getDynamicFontSize(privacy ? "---" : cleanPlaceholder(name))
           )}>
             {privacy ? "---" : cleanPlaceholder(name)}
-          </p>
-          <p className={cn(
-            "text-sm font-bold uppercase tracking-widest whitespace-normal break-words text-left",
-            color === 'blue' ? "text-[#00a2e8]" : "text-[#ed1c24]"
-          )}>
-            {cleanPlaceholder(club)}
           </p>
         </div>
       </div>
