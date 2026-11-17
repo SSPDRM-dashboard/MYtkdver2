@@ -16,7 +16,6 @@ import {
   Send,
   Sparkles,
   Zap,
-  Key,
   LayoutGrid
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -29,9 +28,7 @@ import { syncToGoogleSheets } from '../services/googleSheets';
 import Papa from 'papaparse';
 import { 
   analyzeBracketWithGemini, 
-  refineBracketWithGemini, 
-  getCustomGeminiApiKey, 
-  setCustomGeminiApiKey 
+  refineBracketWithGemini
 } from '../services/geminiService';
 
 function sanitizeForFirestore(obj: any): any {
@@ -406,8 +403,6 @@ export function AIBracketSetup({
 
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [showDuplicateModal, setShowDuplicateModal] = useState(false);
-  const [showApiKeyModal, setShowApiKeyModal] = useState(false);
-  const [apiKeyInput, setApiKeyInput] = useState(() => getCustomGeminiApiKey());
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const currentEvent = events.find(e => e.id === currentEventId);
@@ -426,8 +421,7 @@ export function AIBracketSetup({
     try {
       const rawText = await refineBracketWithGemini({
         previewData,
-        isPoomsaeMode,
-        customApiKey: apiKeyInput
+        isPoomsaeMode
       });
 
       const result = cleanAndParseJSON(rawText);
@@ -655,8 +649,7 @@ export function AIBracketSetup({
         mimeType: detectedMimeType,
         isPoomsaeMode,
         isThinkingMode,
-        adminNote,
-        customApiKey: apiKeyInput
+        adminNote
       });
 
       const result = cleanAndParseJSON(rawText);
@@ -791,8 +784,10 @@ export function AIBracketSetup({
       
       if (err instanceof Error) {
         const msg = err.message.toLowerCase();
-        if (msg.includes("503") || msg.includes("high demand") || msg.includes("unavailable")) {
-          errorMessage = "The AI service is currently experiencing high demand. Please wait a moment and click Process File again.";
+        if (msg.includes("api endpoint not found")) {
+          errorMessage = err.message;
+        } else if (msg.includes("503") || msg.includes("high demand") || msg.includes("unavailable")) {
+          errorMessage = "The AI service is currently experiencing high demand. Please wait a moment and click Process File Again.";
         } else if (msg.includes("timed out") || msg.includes("timeout")) {
           errorMessage = "The request timed out. If uploading a multi-page PDF, consider processing 1-2 pages at a time or turn off Deep Thinking Mode.";
         } else if (
@@ -803,11 +798,11 @@ export function AIBracketSetup({
           msg.includes("403") ||
           msg.includes("scope")
         ) {
-          errorMessage = "Gemini API Key authorization error (403 / PERMISSION_DENIED). Please verify your API key in the Settings > Secrets panel or click 'API Key Configured' to enter your API key.";
-        } else if (msg.includes("quota") || msg.includes("rate limit") || msg.includes("resource_exhausted")) {
-          errorMessage = "API quota exceeded. Google's per-minute rate limit resets every 60 seconds—please wait 1 minute and retry.";
-        } else if (msg.includes("model not found") || msg.includes("404")) {
-          errorMessage = "The AI model encountered a temporary connection issue. Please click Process File to try again with automatic fallback.";
+          errorMessage = "Gemini API Key authorization error. Please verify your server API key in the Settings > Secrets panel.";
+        } else if (msg.includes("quota") || msg.includes("rate limit") || msg.includes("resource_exhausted") || msg.includes("429")) {
+          errorMessage = "API quota exceeded. Please wait a minute and retry.";
+        } else if (msg.includes("upstream ai model error") || msg.includes("model not found")) {
+          errorMessage = `${err.message}. Click Process File Again to retry.`;
         } else if (msg.includes("safety")) {
           errorMessage = "The file was flagged by safety filters. Please ensure it contains only tournament data.";
         } else {
@@ -1321,57 +1316,6 @@ export function AIBracketSetup({
             </motion.div>
           </div>
         )}
-        {showApiKeyModal && (
-          <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl"
-            >
-              <div className="w-14 h-14 bg-indigo-50 rounded-2xl flex items-center justify-center mb-5 mx-auto">
-                <Key size={28} className="text-indigo-600" />
-              </div>
-              <h3 className="text-xl font-black text-center text-slate-900 mb-2">Gemini API Key</h3>
-              <p className="text-xs text-slate-500 text-center mb-6">
-                When using this app on static web hosts (Vercel, Netlify, custom domain), provide your Google Gemini API key to enable bracket extraction directly.
-              </p>
-              <div className="space-y-4">
-                <div>
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1">
-                    API Key
-                  </label>
-                  <input
-                    type="password"
-                    value={apiKeyInput}
-                    onChange={(e) => setApiKeyInput(e.target.value)}
-                    placeholder="AIzaSy..."
-                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
-                <div className="flex gap-3 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowApiKeyModal(false)}
-                    className="flex-1 px-4 py-2.5 bg-slate-100 text-slate-700 font-bold rounded-xl hover:bg-slate-200 transition-colors text-sm"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setCustomGeminiApiKey(apiKeyInput);
-                      setShowApiKeyModal(false);
-                    }}
-                    className="flex-1 px-4 py-2.5 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-colors text-sm shadow-md shadow-indigo-600/20"
-                  >
-                    Save Key
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
       </AnimatePresence>
 
       <div className="bg-white rounded-[2.5rem] p-8 border border-slate-200 shadow-sm">
@@ -1385,15 +1329,6 @@ export function AIBracketSetup({
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Upload PDF/Image to auto-generate matches & mappings</p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={() => setShowApiKeyModal(true)}
-            className="flex items-center gap-2 px-3 py-2 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 transition-colors"
-            title="Configure Gemini API Key for web deployment"
-          >
-            <Key size={14} className={apiKeyInput ? "text-emerald-600" : "text-amber-500"} />
-            <span>{apiKeyInput ? "API Key Configured" : "Set API Key"}</span>
-          </button>
         </div>
 
         {!currentEventId ? (
@@ -1488,15 +1423,6 @@ export function AIBracketSetup({
                   <span>{error}</span>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  {(error.toLowerCase().includes("api key") || error.includes("403") || error.includes("PERMISSION_DENIED")) && (
-                    <button
-                      type="button"
-                      onClick={() => setShowApiKeyModal(true)}
-                      className="px-3.5 py-1.5 bg-red-600 text-white text-xs font-black rounded-xl hover:bg-red-700 transition-colors shadow-sm"
-                    >
-                      Enter API Key
-                    </button>
-                  )}
                   {file && (
                     <button
                       type="button"

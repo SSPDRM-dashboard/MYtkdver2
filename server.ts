@@ -3,8 +3,8 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type, ThinkingLevel } from "@google/genai";
 
-function getGeminiClient(customApiKey?: string) {
-  const apiKey = customApiKey || process.env.GEMINI_API_KEY || process.env.CUSTOM_API_KEY;
+function getGeminiClient() {
+  const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     throw new Error("GEMINI_API_KEY is not configured on the server. Please check your configuration in Settings > Secrets.");
   }
@@ -98,9 +98,12 @@ async function generateWithRetry(
         throw new Error(`Model ${model} returned an empty analysis.`);
       } catch (innerErr: any) {
         const innerMsg = (innerErr?.message || "").toLowerCase();
-        // If responseSchema or thinkingConfig caused a 400/404 on this model, attempt fallback without those constraints
+        // If responseSchema or thinkingConfig caused a 400/schema/thinking error on this model, attempt fallback without those constraints
         if (
-          (innerMsg.includes("schema") || innerMsg.includes("thinking") || innerMsg.includes("400") || innerMsg.includes("404")) &&
+          !innerMsg.includes("404") &&
+          !innerMsg.includes("not_found") &&
+          !innerMsg.includes("api_key_invalid") &&
+          (innerMsg.includes("schema") || innerMsg.includes("thinking") || innerMsg.includes("400") || innerMsg.includes("invalid_argument")) &&
           (modelParams.config?.responseSchema || modelParams.config?.thinkingConfig)
         ) {
           console.warn(`[Gemini Server] Retrying ${model} without strict responseSchema/thinkingConfig constraints...`);
@@ -197,7 +200,7 @@ async function startServer() {
   // Analyze Bracket Endpoint
   app.post("/api/gemini/analyze-bracket", async (req, res) => {
     try {
-      const { base64Data, mimeType, isPoomsaeMode, isThinkingMode, adminNote, customApiKey } = req.body;
+      const { base64Data, mimeType, isPoomsaeMode, isThinkingMode, adminNote } = req.body;
 
       if (!base64Data) {
         return res.status(400).json({ error: "Missing base64Data in request payload." });
@@ -209,7 +212,7 @@ async function startServer() {
         effectiveMimeType = "application/pdf";
       }
 
-      const ai = getGeminiClient(customApiKey);
+      const ai = getGeminiClient();
       const prompt = `
         You are an expert tournament bracket analyzer. Extract all bracket structures and match data from this document/image.
         
@@ -309,7 +312,7 @@ async function startServer() {
             },
           },
         },
-        75000 // 75s timeout per model attempt so fallback can run cleanly within request limits
+        55000 // 55s timeout per model attempt so fallback completes cleanly before proxy timeouts
       );
 
       const rawText = extractResponseText(response);
@@ -321,32 +324,45 @@ async function startServer() {
     } catch (err: any) {
       console.error("Server Bracket Analysis Error:", err);
       const msg = err?.message || "";
-      const is503 = msg.includes("503") || msg.includes("high demand") || msg.includes("UNAVAILABLE");
-      const isTimeout = msg.toLowerCase().includes("timeout");
-      const is403 = msg.includes("403") || msg.includes("PERMISSION_DENIED") || msg.includes("ACCESS_TOKEN_SCOPE_INSUFFICIENT");
+      const lower = msg.toLowerCase();
+      const is503 = msg.includes("503") || lower.includes("high demand") || msg.includes("UNAVAILABLE");
+      const isTimeout = lower.includes("timeout");
+      const is403 = msg.includes("403") || msg.includes("PERMISSION_DENIED") || msg.includes("ACCESS_TOKEN_SCOPE_INSUFFICIENT") || msg.includes("API_KEY_INVALID");
+      const is429 = msg.includes("429") || msg.includes("RESOURCE_EXHAUSTED") || lower.includes("quota");
+      const isModel404 = msg.includes("404") || msg.includes("NOT_FOUND");
 
       let userMsg = msg || "Failed to analyze bracket file.";
+      let status = 500;
       if (is503) {
+        status = 503;
         userMsg = "The AI service is currently experiencing high demand. Please wait a moment and try again.";
       } else if (isTimeout) {
+        status = 504;
         userMsg = "Bracket analysis timed out while processing the document. If uploading a large or multi-page PDF, try splitting it into 1-2 pages at a time or turn off 'Deep Thinking Mode' for faster extraction.";
       } else if (is403) {
-        userMsg = "Gemini API Key Permission Denied (403). Please check your API key configuration in the Settings > Secrets panel.";
+        status = 403;
+        userMsg = "Gemini API Key Permission Denied. Please check your API key configuration in the Settings > Secrets panel.";
+      } else if (is429) {
+        status = 429;
+        userMsg = "API quota exceeded. Please wait a minute and retry.";
+      } else if (isModel404) {
+        status = 502;
+        userMsg = `Upstream AI model error: ${msg}`;
       }
-      return res.status(is503 ? 503 : (isTimeout ? 504 : (is403 ? 403 : 500))).json({ error: userMsg });
+      return res.status(status).json({ error: userMsg });
     }
   });
 
   // Refine Bracket Endpoint
   app.post("/api/gemini/refine-bracket", async (req, res) => {
     try {
-      const { previewData, isPoomsaeMode, customApiKey } = req.body;
+      const { previewData, isPoomsaeMode } = req.body;
 
       if (!previewData) {
         return res.status(400).json({ error: "Missing previewData in request payload." });
       }
 
-      const ai = getGeminiClient(customApiKey);
+      const ai = getGeminiClient();
       const prompt = `
         You are an expert tournament bracket auditor. I have extracted match data and advancement mappings from a bracket.
         Please review the following JSON and fix any logical inconsistencies.
@@ -444,13 +460,13 @@ async function startServer() {
   // Tournament Assistant Chat Endpoint
   app.post("/api/gemini/chat", async (req, res) => {
     try {
-      const { context, messages, input, customApiKey } = req.body;
+      const { context, messages, input } = req.body;
 
       if (!input && (!messages || messages.length === 0)) {
         return res.status(400).json({ error: "Missing message input in request." });
       }
 
-      const ai = getGeminiClient(customApiKey);
+      const ai = getGeminiClient();
 
       const formattedContents: any[] = [];
       if (context) {

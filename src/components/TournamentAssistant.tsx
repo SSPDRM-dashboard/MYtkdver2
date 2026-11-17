@@ -128,7 +128,7 @@ export function TournamentAssistant({
       console.error("Assistant Error:", error);
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: `Error: ${error.message || "Something went wrong. Please check your API key."}`,
+        content: `Error: ${error.message || "Something went wrong. Please try again."}`,
         timestamp: new Date()
       }]);
     } finally {

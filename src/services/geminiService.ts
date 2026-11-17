@@ -1,28 +1,26 @@
-const STORAGE_KEY = "tkd_gemini_api_key";
-
-export function getCustomGeminiApiKey(): string {
-  if (typeof window !== "undefined") {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved && saved.trim()) return saved.trim();
+async function parseApiResponse(res: Response, fallbackError: string): Promise<any> {
+  const contentType = res.headers.get("content-type") || "";
+  if (res.status === 404) {
+    throw new Error(
+      `API endpoint not found (404): This web host is not running the MY-TKD backend server (/api/gemini). Please open the full-stack app URL or start the Node server to use AI features.`
+    );
   }
-  return (
-    (typeof import.meta !== "undefined" && import.meta.env
-      ? (import.meta.env.VITE_CUSTOM_API_KEY || import.meta.env.VITE_GEMINI_API_KEY || "")
-      : "") ||
-    (typeof process !== "undefined" && process.env
-      ? (process.env.CUSTOM_API_KEY || process.env.GEMINI_API_KEY || "")
-      : "")
-  );
-}
 
-export function setCustomGeminiApiKey(key: string) {
-  if (typeof window !== "undefined") {
-    if (!key || !key.trim()) {
-      localStorage.removeItem(STORAGE_KEY);
-    } else {
-      localStorage.setItem(STORAGE_KEY, key.trim());
+  let data: any = {};
+  if (contentType.includes("application/json")) {
+    data = await res.json().catch(() => ({}));
+  } else {
+    const textErr = await res.text().catch(() => "");
+    if (!res.ok) {
+      throw new Error(`Server error (${res.status}): ${textErr.slice(0, 150) || res.statusText}`);
     }
   }
+
+  if (!res.ok) {
+    throw new Error(data.error || `${fallbackError} (HTTP ${res.status})`);
+  }
+
+  return data;
 }
 
 export async function analyzeBracketWithGemini(params: {
@@ -31,9 +29,8 @@ export async function analyzeBracketWithGemini(params: {
   isPoomsaeMode: boolean;
   isThinkingMode: boolean;
   adminNote?: string;
-  customApiKey?: string;
 }): Promise<string> {
-  const { base64Data, mimeType, isPoomsaeMode, isThinkingMode, adminNote, customApiKey } = params;
+  const { base64Data, mimeType, isPoomsaeMode, isThinkingMode, adminNote } = params;
 
   // Auto-detect PDF magic bytes (%PDF = JVBERi)
   let effectiveMimeType = mimeType || "image/png";
@@ -50,24 +47,10 @@ export async function analyzeBracketWithGemini(params: {
       isPoomsaeMode,
       isThinkingMode,
       adminNote,
-      customApiKey: customApiKey || getCustomGeminiApiKey(),
     }),
   });
 
-  const contentType = res.headers.get("content-type") || "";
-  let data: any = {};
-  if (contentType.includes("application/json")) {
-    data = await res.json().catch(() => ({}));
-  } else {
-    const textErr = await res.text().catch(() => "");
-    if (!res.ok) {
-      throw new Error(`Server error (${res.status}): ${textErr.slice(0, 150) || res.statusText}`);
-    }
-  }
-
-  if (!res.ok) {
-    throw new Error(data.error || `Server returned error (${res.status}) when analyzing bracket.`);
-  }
+  const data = await parseApiResponse(res, "Server returned an error when analyzing bracket");
 
   if (!data.rawText || !data.rawText.trim()) {
     throw new Error(data.error || "The AI service returned an empty analysis. Please retry or verify the bracket document.");
@@ -79,9 +62,8 @@ export async function analyzeBracketWithGemini(params: {
 export async function refineBracketWithGemini(params: {
   previewData: any;
   isPoomsaeMode: boolean;
-  customApiKey?: string;
 }): Promise<string> {
-  const { previewData, isPoomsaeMode, customApiKey } = params;
+  const { previewData, isPoomsaeMode } = params;
 
   const res = await fetch("/api/gemini/refine-bracket", {
     method: "POST",
@@ -89,24 +71,10 @@ export async function refineBracketWithGemini(params: {
     body: JSON.stringify({
       previewData,
       isPoomsaeMode,
-      customApiKey: customApiKey || getCustomGeminiApiKey(),
     }),
   });
 
-  const contentType = res.headers.get("content-type") || "";
-  let data: any = {};
-  if (contentType.includes("application/json")) {
-    data = await res.json().catch(() => ({}));
-  } else {
-    const textErr = await res.text().catch(() => "");
-    if (!res.ok) {
-      throw new Error(`Server error (${res.status}): ${textErr.slice(0, 150) || res.statusText}`);
-    }
-  }
-
-  if (!res.ok) {
-    throw new Error(data.error || `Server returned error (${res.status}) when refining bracket.`);
-  }
+  const data = await parseApiResponse(res, "Server returned an error when refining bracket");
 
   if (!data.rawText || !data.rawText.trim()) {
     throw new Error(data.error || "The AI service returned an empty refinement result.");
@@ -119,9 +87,8 @@ export async function chatWithGemini(params: {
   context?: string;
   messages: any[];
   input?: string;
-  customApiKey?: string;
 }): Promise<string> {
-  const { context, messages, input, customApiKey } = params;
+  const { context, messages, input } = params;
 
   const res = await fetch("/api/gemini/chat", {
     method: "POST",
@@ -130,24 +97,10 @@ export async function chatWithGemini(params: {
       context,
       messages,
       input,
-      customApiKey: customApiKey || getCustomGeminiApiKey(),
     }),
   });
 
-  const contentType = res.headers.get("content-type") || "";
-  let data: any = {};
-  if (contentType.includes("application/json")) {
-    data = await res.json().catch(() => ({}));
-  } else {
-    const textErr = await res.text().catch(() => "");
-    if (!res.ok) {
-      throw new Error(`Server error (${res.status}): ${textErr.slice(0, 150) || res.statusText}`);
-    }
-  }
-
-  if (!res.ok) {
-    throw new Error(data.error || `Server returned error (${res.status}) when generating chat response.`);
-  }
+  const data = await parseApiResponse(res, "Server returned an error when generating chat response");
 
   if (typeof data.text !== "string") {
     throw new Error("No text content returned from server chat endpoint.");
