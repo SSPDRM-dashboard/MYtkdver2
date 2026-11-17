@@ -51,10 +51,10 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { QRCodeSVG } from 'qrcode.react';
-import { MatchData, RingStatus, EventData, BoutMapping, MatchHistoryItem, AdminBoutOverride, RingWinnerBroadcast, RingTimerState, RingPoomsaeSelection, PoomsaeJudgeScore, RingPoomsaeScoringTarget, PoomsaeSideScoreSummary } from './types';
+import { MatchData, RingStatus, EventData, BoutMapping, MatchHistoryItem, AdminBoutOverride, RingWinnerBroadcast, RingTimerState, RingPoomsaeSelection, PoomsaeJudgeScore, RingPoomsaeScoringTarget, PoomsaeSideScoreSummary, PoomsaeJudgeBreakdownItem, PoomsaeJudgePresence } from './types';
 import { PoomsaeScreenView } from './components/PoomsaeScreenView';
 import { JudgeScoringView } from './components/JudgeScoringView';
-import { calculatePoomsaePanelScore, formatPoomsaeScore, round2 } from './lib/poomsaeScoring';
+import { calculatePoomsaePanelScore, clampAccuracy, clampPresentation, formatPoomsaeScore, round2 } from './lib/poomsaeScoring';
 import { TASheet } from './components/TASheet';
 import { InspectionLogs } from './components/InspectionLogs';
 import { RingSummary } from './components/RingSummary';
@@ -1771,6 +1771,7 @@ export default function App() {
   const [ringControllerModes, setRingControllerModes] = useSyncedState<Record<number, 'kyorugi' | 'poomsae'>>('tkd_ring_controller_modes', {});
   const [ringPoomsaeSelections, setRingPoomsaeSelections] = useSyncedState<Record<number, RingPoomsaeSelection>>('tkd_ring_poomsae_selection', {});
   const [poomsaeJudgeCount, setPoomsaeJudgeCount] = useSyncedState<3 | 5 | 7>('tkd_poomsae_judge_count', 5);
+  const [showPoomsaeJudgeBreakdown, setShowPoomsaeJudgeBreakdown] = useSyncedState<boolean>('tkd_show_poomsae_judge_breakdown', true);
   const [ringPoomsaeTargets, setRingPoomsaeTargets] = useSyncedState<Record<number, RingPoomsaeScoringTarget>>('tkd_ring_poomsae_targets', {});
   const [poomsaeJudgeScores, setPoomsaeJudgeScores] = useState<PoomsaeJudgeScore[]>(() => {
     try {
@@ -1778,6 +1779,13 @@ export default function App() {
       if (saved) return JSON.parse(saved) as PoomsaeJudgeScore[];
     } catch {}
     return [];
+  });
+  const [poomsaeJudgePresence, setPoomsaeJudgePresence] = useState<Record<string, PoomsaeJudgePresence>>(() => {
+    try {
+      const saved = localStorage.getItem('tkd_poomsae_judge_presence_v1');
+      if (saved) return JSON.parse(saved) as Record<string, PoomsaeJudgePresence>;
+    } catch {}
+    return {};
   });
   const [confirmedWinnerPopup, setConfirmedWinnerPopup] = useState<RingWinnerBroadcast | null>(null);
   const [winnerPopupProgressStarted, setWinnerPopupProgressStarted] = useState(false);
@@ -1978,6 +1986,124 @@ export default function App() {
     }
   };
 
+  // Real-time Firestore + BroadcastChannel sync for Poomsae Judge Panel connection presence
+  useEffect(() => {
+    let channel: BroadcastChannel | null = null;
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        channel = new BroadcastChannel('tkd_poomsae_judge_presence');
+        channel.onmessage = (event) => {
+          const msg = event.data as { type?: string; presence?: PoomsaeJudgePresence } | undefined;
+          if (!msg || msg.type !== 'presence' || !msg.presence) return;
+          const p = msg.presence;
+          setPoomsaeJudgePresence((prev) => {
+            const existing = prev[p.id];
+            if (!p.online && existing && existing.sessionId && existing.sessionId !== p.sessionId && existing.online) {
+              return prev;
+            }
+            const next = { ...prev, [p.id]: p };
+            try { localStorage.setItem('tkd_poomsae_judge_presence_v1', JSON.stringify(next)); } catch {}
+            return next;
+          });
+        };
+      }
+    } catch {}
+
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === 'tkd_poomsae_judge_presence_v1' && e.newValue) {
+        try {
+          setPoomsaeJudgePresence(JSON.parse(e.newValue) as Record<string, PoomsaeJudgePresence>);
+        } catch {}
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+
+    let unsub = () => {};
+    const handleGlobalQuota = () => {
+      unsub();
+    };
+    window.addEventListener('firestore-quota-exceeded', handleGlobalQuota);
+
+    if (!isFirestoreQuotaExceeded) {
+      try {
+        unsub = onSnapshot(collection(db, 'poomsae_judge_presence'), (snapshot) => {
+          const nextMap: Record<string, PoomsaeJudgePresence> = {};
+          snapshot.docs.forEach((d) => {
+            const data = d.data() as Omit<PoomsaeJudgePresence, 'id'>;
+            nextMap[d.id] = { id: d.id, ...data };
+          });
+          setPoomsaeJudgePresence(nextMap);
+          try {
+            localStorage.setItem('tkd_poomsae_judge_presence_v1', JSON.stringify(nextMap));
+          } catch {}
+        }, (error) => {
+          if (error.code === 'resource-exhausted' || error.message?.toLowerCase().includes('quota')) {
+            handleGlobalQuotaTrigger();
+            unsub();
+          } else if (error.code !== 'permission-denied') {
+            console.error('Firestore poomsae_judge_presence error:', error);
+          }
+        });
+      } catch (e: any) {
+        if (e?.code === 'resource-exhausted' || e?.message?.toLowerCase().includes('quota')) {
+          handleGlobalQuotaTrigger();
+        }
+      }
+    }
+
+    return () => {
+      if (channel) channel.close();
+      window.removeEventListener('storage', handleStorage);
+      window.removeEventListener('firestore-quota-exceeded', handleGlobalQuota);
+      unsub();
+    };
+  }, []);
+
+  const handleReportJudgePresence = useCallback((
+    ringNumber: number,
+    judgeNumber: number,
+    online: boolean,
+    sessionId: string
+  ) => {
+    const id = `r${ringNumber}_j${judgeNumber}`;
+    const record: PoomsaeJudgePresence = {
+      id,
+      ringNumber,
+      judgeNumber,
+      sessionId,
+      online,
+      lastSeenAt: Date.now(),
+    };
+
+    setPoomsaeJudgePresence((prev) => {
+      const existing = prev[id];
+      if (!online && existing && existing.sessionId && existing.sessionId !== sessionId && existing.online) {
+        return prev;
+      }
+      const next = { ...prev, [id]: record };
+      try {
+        localStorage.setItem('tkd_poomsae_judge_presence_v1', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        const ch = new BroadcastChannel('tkd_poomsae_judge_presence');
+        ch.postMessage({ type: 'presence', presence: record });
+        ch.close();
+      }
+    } catch {}
+
+    if (!isFirestoreQuotaExceeded) {
+      setDoc(doc(db, 'poomsae_judge_presence', id), sanitizeForFirestore(record)).catch((e: any) => {
+        if (e?.code === 'resource-exhausted' || e?.message?.toLowerCase().includes('quota')) {
+          handleGlobalQuotaTrigger();
+        }
+      });
+    }
+  }, []);
+
   const handleUpdateRingPoomsaeTarget = (
     ringNumber: number,
     patch: Partial<RingPoomsaeScoringTarget>,
@@ -2097,14 +2223,10 @@ export default function App() {
 
     const computeForSide = (side: 'blue' | 'red'): PoomsaeSideScoreSummary => {
       const sideScores = matchingBoutScores.filter((s) => s.side === side);
-      const p1Res = calculatePoomsaePanelScore(
-        sideScores.filter((s) => s.poomsaeNo === 1),
-        panelSize
-      );
-      const p2Res = calculatePoomsaePanelScore(
-        sideScores.filter((s) => s.poomsaeNo === 2),
-        panelSize
-      );
+      const p1Scores = sideScores.filter((s) => s.poomsaeNo === 1);
+      const p2Scores = sideScores.filter((s) => s.poomsaeNo === 2);
+      const p1Res = calculatePoomsaePanelScore(p1Scores, panelSize);
+      const p2Res = calculatePoomsaePanelScore(p2Scores, panelSize);
       const p1Total = p1Res.isComplete ? p1Res.totalScore : null;
       const p2Total = p2Res.isComplete ? p2Res.totalScore : null;
       let finalTotal: number | null = null;
@@ -2115,12 +2237,51 @@ export default function App() {
       } else if (p2Total !== null) {
         finalTotal = p2Total;
       }
+
+      let activePoomsaeNo: 1 | 2 = p2Res.submittedCount > 0 ? 2 : 1;
+      if (targetMatches && target?.activePoomsae) {
+        if (target.activeSide === side) {
+          activePoomsaeNo = target.activePoomsae;
+        } else if (target.activePoomsae === 2 && (p2Res.submittedCount > 0 || p1Res.submittedCount === 0)) {
+          activePoomsaeNo = 2;
+        }
+      }
+
+      const activeScores = activePoomsaeNo === 2 ? p2Scores : p1Scores;
+      const activeRes = activePoomsaeNo === 2 ? p2Res : p1Res;
+      const judgeBreakdown: PoomsaeJudgeBreakdownItem[] = Array.from({ length: panelSize }, (_, idx) => {
+        const judgeNumber = idx + 1;
+        const found = activeScores.find((s) => Number(s.judgeNumber) === judgeNumber);
+        return {
+          judgeNumber,
+          label: judgeNumber === 1 ? 'Referee' : `Judge ${judgeNumber - 1}`,
+          submitted: Boolean(found),
+          accuracy: found ? clampAccuracy(found.accuracy) : null,
+          presentation: found ? clampPresentation(found.presentation) : null,
+          droppedAccuracy: Boolean(
+            found &&
+              activeRes.dropsApplied &&
+              (activeRes.droppedAccuracyMinJudge === judgeNumber ||
+                activeRes.droppedAccuracyMaxJudge === judgeNumber)
+          ),
+          droppedPresentation: Boolean(
+            found &&
+              activeRes.dropsApplied &&
+              (activeRes.droppedPresentationMinJudge === judgeNumber ||
+                activeRes.droppedPresentationMaxJudge === judgeNumber)
+          ),
+        };
+      });
+
       return {
         p1Total,
         p2Total,
         finalTotal,
         p1Complete: p1Res.isComplete,
         p2Complete: p2Res.isComplete,
+        judgeCount: panelSize,
+        activePoomsaeNo,
+        judgeBreakdown,
       };
     };
 
@@ -3690,13 +3851,15 @@ export default function App() {
           targetBouts.set(key, { category: mapping.categoryName, bout: mapping.nextBout });
         }
         const target = targetBouts.get(key)!;
+        const rawWinnerUpper = String(match.winner || '').trim().toUpperCase();
+        const isNoWinner = ['NO WINNER', 'DOUBLE NO-SHOW', 'NO CONTEST'].includes(rawWinnerUpper);
         if (mapping.slot === 'Chung') {
-          target.blue = match.winner;
-          target.blueClub = (match.winnerClub || '').toUpperCase();
+          target.blue = isNoWinner ? 'BYE' : match.winner;
+          target.blueClub = isNoWinner ? '' : (match.winnerClub || '').toUpperCase();
         }
         if (mapping.slot === 'Hong') {
-          target.red = match.winner;
-          target.redClub = (match.winnerClub || '').toUpperCase();
+          target.red = isNoWinner ? 'BYE' : match.winner;
+          target.redClub = isNoWinner ? '' : (match.winnerClub || '').toUpperCase();
         }
         
         // If the mapping has a real category, use it instead of "Auto-Extracted"
@@ -3781,6 +3944,10 @@ export default function App() {
           }
           
           if (historyMatch && historyMatch.winner && historyMatch.winner !== '-' && historyMatch.winner.trim() !== '') {
+            const rawWinnerUpper = historyMatch.winner.trim().toUpperCase();
+            const isNoWinner = ['NO WINNER', 'DOUBLE NO-SHOW', 'NO CONTEST'].includes(rawWinnerUpper);
+            const propagatedName = isNoWinner ? 'BYE' : rawWinnerUpper;
+            const propagatedClub = isNoWinner ? '' : (historyMatch.winnerClub ? historyMatch.winnerClub.toUpperCase() : '');
             console.log(`Fallback detected: Match ${boutData.bout} (${slot}) needs WINNER OF ${sourceBoutStr}. Found winner: ${historyMatch.winner}`);
             const key = normalizeBoutNumber(boutData.bout);
             if (!targetBouts.has(key)) {
@@ -3788,11 +3955,11 @@ export default function App() {
             }
             const target = targetBouts.get(key)!;
             if (slot === 'blue' && (!target.blue || target.blue === 'WINNER' || target.blue.includes('WINNER OF'))) {
-              target.blue = historyMatch.winner.toUpperCase();
-              target.blueClub = historyMatch.winnerClub ? historyMatch.winnerClub.toUpperCase() : '';
+              target.blue = propagatedName;
+              target.blueClub = propagatedClub;
             } else if (slot === 'red' && (!target.red || target.red === 'WINNER' || target.red.includes('WINNER OF'))) {
-              target.red = historyMatch.winner.toUpperCase();
-              target.redClub = historyMatch.winnerClub ? historyMatch.winnerClub.toUpperCase() : '';
+              target.red = propagatedName;
+              target.redClub = propagatedClub;
             }
           } else {
             console.log(`Fallback checked: Match ${boutData.bout} (${slot}) needs WINNER OF ${sourceBoutStr}, but no valid winner found in history.`);
@@ -4015,14 +4182,20 @@ export default function App() {
     const ring = rings.find(r => r.ringNumber === ringNumber);
     const currentBout = ring?.currentBout;
     const isCompleted = winner === 'Completed';
-    const winnerName = isCompleted 
-      ? (currentBout?.blue_name || currentBout?.red_name || 'Completed') 
-      : (winner === 'Blue' ? currentBout?.blue_name : currentBout?.red_name);
+    const isNoWinner = winner === 'No Winner';
+    const effectiveWinType = isNoWinner ? (winType || 'WDR') : (winType || 'PTF');
+    const winnerName = isNoWinner
+      ? 'NO WINNER'
+      : isCompleted 
+        ? (currentBout?.blue_name || currentBout?.red_name || 'Completed') 
+        : (winner === 'Blue' ? currentBout?.blue_name : currentBout?.red_name);
 
     const targetSyncRing = currentBout?.originalRing || ringNumber;
-    const winnerClub = isCompleted 
-      ? (currentBout?.blue_club || currentBout?.red_club || '-') 
-      : (winner === 'Blue' ? currentBout?.blue_club : (winner === 'Red' ? currentBout?.red_club : '-'));
+    const winnerClub = isNoWinner
+      ? '-'
+      : isCompleted 
+        ? (currentBout?.blue_club || currentBout?.red_club || '-') 
+        : (winner === 'Blue' ? currentBout?.blue_club : (winner === 'Red' ? currentBout?.red_club : '-'));
 
     if (currentBout) {
       const winnerBroadcast: RingWinnerBroadcast = {
@@ -4031,7 +4204,7 @@ export default function App() {
         boutNumber: currentBout.bout || boutNumber,
         category: currentBout.category || '',
         stage: getStageForBout(currentBout.bout || boutNumber, currentBout.category || ''),
-        winnerSide: isCompleted ? 'Completed' : (winner === 'Red' ? 'Red' : 'Blue'),
+        winnerSide: isNoWinner ? 'No Winner' : (isCompleted ? 'Completed' : (winner === 'Red' ? 'Red' : 'Blue')),
         winnerName: winnerName || winner,
         winnerClub: winnerClub && winnerClub !== '-' ? winnerClub : '',
         blueName: currentBout.blue_name || '',
@@ -4041,7 +4214,7 @@ export default function App() {
         redClub: currentBout.red_club || '',
         redLogo: currentBout.red_logo || currentBout.red_flag || '',
         privacyMode: Boolean(currentBout.privacy_mode),
-        winType: winType || 'PTF',
+        winType: effectiveWinType,
         confirmedAt: Date.now()
       };
       setRingWinnerBanners(prev => ({
@@ -4105,7 +4278,7 @@ export default function App() {
         red_club: currentBout.red_club || '',
         eventId: currentEventId,
         ring: ringNumber,
-        winType: winType || 'PTF',
+        winType: effectiveWinType,
         points: currentBout.points
       };
       
@@ -4135,8 +4308,13 @@ export default function App() {
         });
       }
 
-      // Check and generate next bout
-      checkAndGenerateNextBout(boutNumber, winnerName || winner, winner === 'Blue' ? currentBout.blue_club : currentBout.red_club, currentBout.category);
+      // Check and generate next bout (if No Winner / Double No-Show, advance 'BYE' so opposing bracket winner walks over)
+      checkAndGenerateNextBout(
+        boutNumber,
+        isNoWinner ? 'BYE' : (winnerName || winner),
+        isNoWinner ? '' : (winner === 'Blue' ? currentBout.blue_club : currentBout.red_club),
+        currentBout.category
+      );
     }
     
     const currentCompletedHistory = matchHistory.filter(h => h.eventId === currentEventId && h.winner && h.winner !== '-' && h.winner.trim() !== '');
@@ -4454,12 +4632,15 @@ export default function App() {
           normHelper(h.category) === normHelper(targetCategory)
         );
         if (otherWinner) {
+          const isOtherNoWinner = ['NO WINNER', 'DOUBLE NO-SHOW', 'NO CONTEST'].includes((otherWinner.winner || '').trim().toUpperCase());
+          const resolvedOtherWinner = isOtherNoWinner ? 'BYE' : otherWinner.winner;
+          const resolvedOtherClub = isOtherNoWinner ? '' : (otherWinner.winnerClub || '');
           if (otherMapping.slot === 'Chung') {
-            blue_name = otherWinner.winner;
-            blue_club = otherWinner.winnerClub || '';
+            blue_name = resolvedOtherWinner;
+            blue_club = resolvedOtherClub;
           } else {
-            red_name = otherWinner.winner;
-            red_club = otherWinner.winnerClub || '';
+            red_name = resolvedOtherWinner;
+            red_club = resolvedOtherClub;
           }
           shouldGenerate = true;
         }
@@ -5413,6 +5594,7 @@ export default function App() {
         isStandalone={true}
         winnerDisplaySeconds={winnerDisplaySeconds}
         showFinalScore={isScreen2}
+        showJudgeBreakdown={showPoomsaeJudgeBreakdown}
         blueScoreSummary={summaries?.blue || null}
         redScoreSummary={summaries?.red || null}
       />
@@ -5465,6 +5647,7 @@ export default function App() {
           } catch {}
         }}
         onSubmitScore={handleSubmitPoomsaeJudgeScore}
+        onReportPresence={handleReportJudgePresence}
         onBack={user ? () => setIsStandaloneJudge(false) : undefined}
       />
     );
@@ -6178,6 +6361,7 @@ export default function App() {
                       const ringNum = ringObj.ringNumber;
                       const isRingActive = !!ringObj.currentBout;
                       const isSelected = activeDashboardSelectedRing === ringNum;
+                      const ringMode = ringControllerModes?.[ringNum] || 'kyorugi';
                       
                       return (
                         <button
@@ -6194,6 +6378,17 @@ export default function App() {
                         >
                           <span className="text-[9px] opacity-75 font-bold leading-none uppercase">Ring</span>
                           <span className="text-base font-black leading-tight mt-0.5">{getRingName(ringNum)}</span>
+                          {ringMode === 'poomsae' && (
+                            <span
+                              className={cn(
+                                "absolute bottom-1 left-1.5 px-1 rounded text-[7px] font-black uppercase tracking-wider",
+                                isSelected ? "bg-red-600 text-white" : "bg-red-100 text-red-600"
+                              )}
+                              title="Poomsae Mode"
+                            >
+                              P
+                            </span>
+                          )}
                           {isRingActive && (
                             <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-green-500 border border-white flex items-center justify-center animate-pulse" title="Ongoing Bout" />
                           )}
@@ -6206,11 +6401,39 @@ export default function App() {
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                   {/* Live Rings */}
                   <div className="lg:col-span-2 space-y-6">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-lg font-bold flex items-center gap-2 text-slate-800">
-                        <LayoutDashboard size={20} className="text-red-600" />
-                        Active Ring Overview (Ring {getRingName(activeDashboardSelectedRing)})
-                      </h3>
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex flex-wrap items-center gap-3 sm:gap-5">
+                        <h3 className="text-lg font-bold flex items-center gap-2 text-slate-800">
+                          <LayoutDashboard size={20} className="text-red-600" />
+                          Active Ring Overview (Ring {getRingName(activeDashboardSelectedRing)})
+                        </h3>
+                        <div className="inline-flex items-center bg-slate-200/80 p-1 rounded-xl border border-slate-200 shadow-inner" role="group" aria-label="Active Ring Controller Mode">
+                          <button
+                            type="button"
+                            onClick={() => handleSetRingControllerMode(selectedRingObj.ringNumber, 'kyorugi')}
+                            className={cn(
+                              "px-3.5 py-1.5 rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer",
+                              (ringControllerModes?.[selectedRingObj.ringNumber] || 'kyorugi') === 'kyorugi'
+                                ? "bg-slate-900 text-white shadow-sm"
+                                : "text-slate-600 hover:text-slate-900"
+                            )}
+                          >
+                            Kyorugi
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleSetRingControllerMode(selectedRingObj.ringNumber, 'poomsae')}
+                            className={cn(
+                              "px-3.5 py-1.5 rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer",
+                              (ringControllerModes?.[selectedRingObj.ringNumber] || 'kyorugi') === 'poomsae'
+                                ? "bg-red-600 text-white shadow-sm"
+                                : "text-slate-600 hover:text-slate-900"
+                            )}
+                          >
+                            Poomsae
+                          </button>
+                        </div>
+                      </div>
                       <div className="flex items-center gap-2">
                         {selectedRingObj.currentBout ? (
                           <>
@@ -6269,6 +6492,7 @@ export default function App() {
                         defaultPoomsaeJudgeCount={poomsaeJudgeCount}
                         poomsaeScoringTarget={ringPoomsaeTargets?.[selectedRingObj.ringNumber] || null}
                         poomsaeJudgeScores={poomsaeJudgeScores}
+                        poomsaeJudgePresence={poomsaeJudgePresence}
                         onUpdatePoomsaeTarget={(patch) => handleUpdateRingPoomsaeTarget(selectedRingObj.ringNumber, patch)}
                         onClearPoomsaeScores={(opts) => handleClearRingPoomsaeScores(selectedRingObj.ringNumber, opts)}
                         onUpdatePoomsaeScore={handleSubmitPoomsaeJudgeScore}
@@ -6631,6 +6855,7 @@ export default function App() {
                 canSwitchRing={user?.role === 'admin' || user?.role === 'viewer'}
                 winnerDisplaySeconds={winnerDisplaySeconds}
                 showFinalScore={isScreen2}
+                showJudgeBreakdown={showPoomsaeJudgeBreakdown}
                 blueScoreSummary={summaries?.blue || null}
                 redScoreSummary={summaries?.red || null}
               />
@@ -6766,11 +6991,13 @@ export default function App() {
                       onStopTimer={() => handleStopRingTimer(ring.ringNumber)}
                       onResetTimer={() => handleResetRingTimer(ring.ringNumber)}
                       controllerMode={ringControllerModes?.[ring.ringNumber] || 'kyorugi'}
+                      onChangeControllerMode={(mode) => handleSetRingControllerMode(ring.ringNumber, mode)}
                       poomsaeSelection={ringPoomsaeSelections?.[ring.ringNumber] || null}
                       onChangePoomsaeSelection={(field, value) => handleUpdateRingPoomsaeSelection(ring.ringNumber, field, value)}
                       defaultPoomsaeJudgeCount={poomsaeJudgeCount}
                       poomsaeScoringTarget={ringPoomsaeTargets?.[ring.ringNumber] || null}
                       poomsaeJudgeScores={poomsaeJudgeScores}
+                      poomsaeJudgePresence={poomsaeJudgePresence}
                       onUpdatePoomsaeTarget={(patch) => handleUpdateRingPoomsaeTarget(ring.ringNumber, patch)}
                       onClearPoomsaeScores={(opts) => handleClearRingPoomsaeScores(ring.ringNumber, opts)}
                       onUpdatePoomsaeScore={handleSubmitPoomsaeJudgeScore}
@@ -6817,6 +7044,7 @@ export default function App() {
                           defaultPoomsaeJudgeCount={poomsaeJudgeCount}
                           poomsaeScoringTarget={ringPoomsaeTargets?.[ring.ringNumber] || null}
                           poomsaeJudgeScores={poomsaeJudgeScores}
+                          poomsaeJudgePresence={poomsaeJudgePresence}
                           onUpdatePoomsaeTarget={(patch) => handleUpdateRingPoomsaeTarget(ring.ringNumber, patch)}
                           onClearPoomsaeScores={(opts) => handleClearRingPoomsaeScores(ring.ringNumber, opts)}
                           onUpdatePoomsaeScore={handleSubmitPoomsaeJudgeScore}
@@ -7138,6 +7366,9 @@ export default function App() {
                   mappings={mappings}
                   boutQueue={boutQueue}
                   matchHistory={matchHistory}
+                  rings={rings}
+                  backupData={backupData}
+                  currentEventId={currentEventId}
                   boutNumberingMode={boutNumberingMode}
                   onUpdateBoutNumber={handleUpdateBoutNumberFromBracket}
                   onUpdateBoutName={handleUpdateBoutNameFromBracket}
@@ -7738,6 +7969,43 @@ export default function App() {
                     </div>
                     <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 col-span-1 md:col-span-2">
                       <div>
+                        <p className="text-sm font-bold text-slate-700 font-sans flex items-center gap-2">
+                          <Monitor size={15} className="text-red-600" />
+                          Poomsae Screen 2 — Referee &amp; Judge Score Breakdown
+                        </p>
+                        <p className="text-[10px] text-slate-500 font-sans">
+                          Show or hide the Referee and Judge 1–N accuracy &amp; presentation score table below Final Score
+                        </p>
+                      </div>
+                      <div className="flex bg-slate-200 p-1 rounded-xl shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setShowPoomsaeJudgeBreakdown(true)}
+                          className={cn(
+                            "px-4 py-1.5 text-xs font-black rounded-lg transition-all cursor-pointer",
+                            showPoomsaeJudgeBreakdown
+                              ? "bg-white text-slate-900 shadow-sm"
+                              : "text-slate-500 hover:text-slate-800"
+                          )}
+                        >
+                          Show
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setShowPoomsaeJudgeBreakdown(false)}
+                          className={cn(
+                            "px-4 py-1.5 text-xs font-black rounded-lg transition-all cursor-pointer",
+                            !showPoomsaeJudgeBreakdown
+                              ? "bg-white text-slate-900 shadow-sm"
+                              : "text-slate-500 hover:text-slate-800"
+                          )}
+                        >
+                          Hide
+                        </button>
+                      </div>
+                    </div>
+                    <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 col-span-1 md:col-span-2">
+                      <div>
                         <p className="text-sm font-bold text-slate-700">Big LED Screen Font Sizing</p>
                         <p className="text-[10px] text-slate-500">Adjust active court athlete name, club name, and standby player font scaling across all LED boards and public views</p>
                       </div>
@@ -7835,6 +8103,12 @@ export default function App() {
           winnerClass = 'text-red-500 bg-red-50 border-red-200';
           iconClass = 'bg-red-50 text-red-600';
           btnColorClass = 'bg-red-600 hover:bg-red-700';
+        } else if (winner === 'No Winner') {
+          winnerName = 'NO WINNER (BOTH DID NOT SHOW UP)';
+          winnerColor = `Double ${winType || 'WDR'} — Next Round Slot: BYE`;
+          winnerClass = 'text-amber-700 bg-amber-50 border-amber-200';
+          iconClass = 'bg-amber-50 text-amber-600';
+          btnColorClass = 'bg-amber-600 hover:bg-amber-700';
         } else {
           winnerName = 'Completed / Tie';
           winnerColor = 'Completed';
@@ -7922,6 +8196,7 @@ export default function App() {
       {confirmedWinnerPopup && activeTab !== 'poomsae_screen' && activeTab !== 'poomsae_screen_2' && (() => {
         const isRedWinner = confirmedWinnerPopup.winnerSide === 'Red';
         const isCompletedResult = confirmedWinnerPopup.winnerSide === 'Completed';
+        const isNoWinnerResult = confirmedWinnerPopup.winnerSide === 'No Winner';
         const popupRingLabel = ringNamingMode === 'alphabet'
           ? String.fromCharCode(64 + confirmedWinnerPopup.ringNumber)
           : String(confirmedWinnerPopup.ringNumber);
@@ -7938,11 +8213,13 @@ export default function App() {
               exit={{ scale: 0.95, opacity: 0 }}
               className={cn(
                 'relative w-full max-w-2xl rounded-3xl border-2 p-6 sm:p-10 text-center text-white overflow-hidden shadow-[0_25px_90px_rgba(0,0,0,0.8)]',
-                isRedWinner
-                  ? 'bg-gradient-to-b from-[#ef4444] via-[#dc2626] to-[#7f1d1d] border-red-300/80 shadow-[0_0_60px_rgba(239,68,68,0.55)]'
-                  : isCompletedResult
-                    ? 'bg-gradient-to-b from-[#059669] via-[#047857] to-[#064e3b] border-emerald-300/80 shadow-[0_0_60px_rgba(16,185,129,0.55)]'
-                    : 'bg-gradient-to-b from-[#0284c7] via-[#1d4ed8] to-[#1e3a8a] border-cyan-300/80 shadow-[0_0_60px_rgba(56,189,248,0.55)]'
+                isNoWinnerResult
+                  ? 'bg-gradient-to-b from-slate-700 via-slate-800 to-slate-950 border-amber-300/80 shadow-[0_0_60px_rgba(245,158,11,0.45)]'
+                  : isRedWinner
+                    ? 'bg-gradient-to-b from-[#ef4444] via-[#dc2626] to-[#7f1d1d] border-red-300/80 shadow-[0_0_60px_rgba(239,68,68,0.55)]'
+                    : isCompletedResult
+                      ? 'bg-gradient-to-b from-[#059669] via-[#047857] to-[#064e3b] border-emerald-300/80 shadow-[0_0_60px_rgba(16,185,129,0.55)]'
+                      : 'bg-gradient-to-b from-[#0284c7] via-[#1d4ed8] to-[#1e3a8a] border-cyan-300/80 shadow-[0_0_60px_rgba(56,189,248,0.55)]'
               )}
             >
               <button
@@ -7973,32 +8250,44 @@ export default function App() {
               )}
 
               <div className="flex flex-col items-center justify-center gap-4 my-2">
-                <div className="flex items-center justify-center gap-3">
-                  <PlayerLogoBadge
-                    club={confirmedWinnerPopup.winnerClub}
-                    name={confirmedWinnerPopup.winnerName}
-                    customLogos={teamLogos}
-                    directLogo={winnerLogoDirect}
-                    size="xl"
-                    showOverride={true}
-                  />
-                  <Trophy className="w-10 h-10 sm:w-12 sm:h-12 text-amber-300 drop-shadow-lg" />
-                </div>
+                {!isNoWinnerResult && (
+                  <div className="flex items-center justify-center gap-3">
+                    <PlayerLogoBadge
+                      club={confirmedWinnerPopup.winnerClub}
+                      name={confirmedWinnerPopup.winnerName}
+                      customLogos={teamLogos}
+                      directLogo={winnerLogoDirect}
+                      size="xl"
+                      showOverride={true}
+                    />
+                    <Trophy className="w-10 h-10 sm:w-12 sm:h-12 text-amber-300 drop-shadow-lg" />
+                  </div>
+                )}
 
                 <div>
                   <p className="text-xs font-black uppercase tracking-[0.25em] text-amber-200 mb-1">
-                    {isCompletedResult ? 'Match Completed' : `${confirmedWinnerPopup.winnerSide} Winner`}
+                    {isNoWinnerResult
+                      ? 'Double No-Show'
+                      : isCompletedResult
+                        ? 'Match Completed'
+                        : `${confirmedWinnerPopup.winnerSide} Winner`}
                   </p>
                   <h2 className="text-3xl sm:text-5xl font-black italic uppercase tracking-wide text-white drop-shadow-[0_4px_14px_rgba(0,0,0,0.6)] break-words leading-tight">
-                    {confirmedWinnerPopup.privacyMode
-                      ? '---'
-                      : `${confirmedWinnerPopup.winnerName}${isCompletedResult ? ' COMPLETE' : ' WIN'}`}
+                    {isNoWinnerResult
+                      ? 'NO WINNER'
+                      : confirmedWinnerPopup.privacyMode
+                        ? '---'
+                        : `${confirmedWinnerPopup.winnerName}${isCompletedResult ? ' COMPLETE' : ' WIN'}`}
                   </h2>
-                  {confirmedWinnerPopup.winnerClub && (
+                  {isNoWinnerResult ? (
+                    <p className="mt-2 text-sm sm:text-base font-extrabold uppercase tracking-widest text-amber-200 drop-shadow">
+                      Next Round Slot Set to BYE
+                    </p>
+                  ) : confirmedWinnerPopup.winnerClub ? (
                     <p className="mt-2 text-base sm:text-xl font-extrabold uppercase tracking-widest text-amber-200 drop-shadow">
                       {confirmedWinnerPopup.winnerClub}
                     </p>
-                  )}
+                  ) : null}
                 </div>
               </div>
 
@@ -9091,11 +9380,13 @@ interface RingCardProps {
   onStopTimer?: () => void;
   onResetTimer?: () => void;
   controllerMode?: 'kyorugi' | 'poomsae';
+  onChangeControllerMode?: (mode: 'kyorugi' | 'poomsae') => void;
   poomsaeSelection?: RingPoomsaeSelection | null;
   onChangePoomsaeSelection?: (field: 'poomsae1' | 'poomsae2', value: string) => void;
   defaultPoomsaeJudgeCount?: 3 | 5 | 7;
   poomsaeScoringTarget?: RingPoomsaeScoringTarget | null;
   poomsaeJudgeScores?: PoomsaeJudgeScore[];
+  poomsaeJudgePresence?: Record<string, PoomsaeJudgePresence>;
   onUpdatePoomsaeTarget?: (patch: Partial<RingPoomsaeScoringTarget>) => void;
   onClearPoomsaeScores?: (options?: { side?: 'blue' | 'red'; poomsaeNo?: 1 | 2 }) => void;
   onUpdatePoomsaeScore?: (score: PoomsaeJudgeScore) => void;
@@ -9782,7 +10073,7 @@ function AddRingModal({ onClose, onAdd, existingRings, namingMode }: AddRingModa
   );
 }
 
-function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdate, onPointsUpdate, onUpdateTotalBouts, onStart, onDelete, onWinnerSelect, currentEventId, onForceSync, isAutoPull, onToggleAutoPull, user, boutNumberingMode = 'alphanumeric', layout = 'winner', showInspectionPopupSetting = true, onReturnToQueue, onResumeSuspended, onRemoveSuspended, onSuspendCurrentBout, transfers = [], activeNameFontScale, activeClubFontScale, getStageForBout, timerState, defaultTimerSeconds = 90, onStartTimer, onStopTimer, onResetTimer, controllerMode = 'kyorugi', poomsaeSelection, onChangePoomsaeSelection, defaultPoomsaeJudgeCount = 5, poomsaeScoringTarget, poomsaeJudgeScores = [], onUpdatePoomsaeTarget, onClearPoomsaeScores }: RingCardProps & { currentEventId?: string | null, onForceSync?: (data: MatchData) => void }) {
+function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdate, onPointsUpdate, onUpdateTotalBouts, onStart, onDelete, onWinnerSelect, currentEventId, onForceSync, isAutoPull, onToggleAutoPull, user, boutNumberingMode = 'alphanumeric', layout = 'winner', showInspectionPopupSetting = true, onReturnToQueue, onResumeSuspended, onRemoveSuspended, onSuspendCurrentBout, transfers = [], activeNameFontScale, activeClubFontScale, getStageForBout, timerState, defaultTimerSeconds = 90, onStartTimer, onStopTimer, onResetTimer, controllerMode = 'kyorugi', onChangeControllerMode, poomsaeSelection, onChangePoomsaeSelection, defaultPoomsaeJudgeCount = 5, poomsaeScoringTarget, poomsaeJudgeScores = [], poomsaeJudgePresence = {}, onUpdatePoomsaeTarget, onClearPoomsaeScores }: RingCardProps & { currentEventId?: string | null, onForceSync?: (data: MatchData) => void }) {
   const [syncedNameScale] = useSyncedState<number>('tkd_active_name_font_scale', 100);
   const [syncedClubScale] = useSyncedState<number>('tkd_active_club_font_scale', 100);
   const effectiveNameScale = activeNameFontScale ?? syncedNameScale;
@@ -9790,11 +10081,24 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
   const [now, setNow] = useState(new Date());
   const [timerTickMs, setTimerTickMs] = useState<number>(() => Date.now());
   const [copiedJudgeTag, setCopiedJudgeTag] = useState<string | null>(null);
+  const [presenceTickMs, setPresenceTickMs] = useState<number>(() => Date.now());
 
   useEffect(() => {
     const interval = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    setPresenceTickMs(Date.now());
+    const id = setInterval(() => setPresenceTickMs(Date.now()), 5000);
+    return () => clearInterval(id);
+  }, [poomsaeJudgePresence]);
+
+  const isJudgeConnected = (jNum: number): boolean => {
+    const p = poomsaeJudgePresence?.[`r${ring.ringNumber}_j${jNum}`];
+    if (!p || !p.online) return false;
+    return Math.abs(presenceTickMs - p.lastSeenAt) <= 35000;
+  };
 
   const currentBoutKeyForTimer = ring.currentBout ? `${ring.currentBout.eventId || ''}_${ring.currentBout.bout}` : 'idle';
   const isTimerForRingBout = !timerState?.boutKey || timerState.boutKey === 'idle' || timerState.boutKey === currentBoutKeyForTimer;
@@ -10040,6 +10344,40 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
           </div>
         </div>
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 flex-wrap justify-end">
+          {onChangeControllerMode && (
+            <div className="inline-flex items-center bg-slate-800 p-0.5 rounded-lg border border-slate-700" role="group" aria-label={`Ring ${ringName} Mode`}>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onChangeControllerMode('kyorugi');
+                }}
+                className={cn(
+                  "px-2 py-1 rounded-md text-[9px] font-black uppercase tracking-wider transition-all cursor-pointer",
+                  controllerMode === 'kyorugi'
+                    ? "bg-white text-slate-900 shadow-sm"
+                    : "text-slate-300 hover:text-white"
+                )}
+              >
+                Kyorugi
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onChangeControllerMode('poomsae');
+                }}
+                className={cn(
+                  "px-2 py-1 rounded-md text-[9px] font-black uppercase tracking-wider transition-all cursor-pointer",
+                  controllerMode === 'poomsae'
+                    ? "bg-red-600 text-white shadow-sm"
+                    : "text-slate-300 hover:text-white"
+                )}
+              >
+                Poomsae
+              </button>
+            </div>
+          )}
           {current && onReturnToQueue && (
             <button
               onClick={(e) => {
@@ -10431,6 +10769,7 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
                         {Array.from({ length: judgeCount }, (_, idx) => idx + 1).map((jNum) => {
                           const tag = `j_url_${jNum}`;
                           const isCopied = copiedJudgeTag === tag;
+                          const isConnected = isJudgeConnected(jNum);
                           return (
                             <button
                               key={jNum}
@@ -10442,15 +10781,29 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
                                 )
                               }
                               className={cn(
-                                "px-2 py-1 rounded-lg text-[10px] font-black uppercase border transition-colors cursor-pointer flex items-center gap-1",
+                                "px-2 py-1 rounded-lg text-[10px] font-black uppercase border transition-colors cursor-pointer flex items-center gap-1.5",
                                 isCopied
-                                  ? "bg-emerald-600 text-white border-emerald-600"
-                                  : "bg-slate-800 text-slate-200 border-slate-700 hover:bg-slate-700"
+                                  ? "bg-emerald-700 text-white border-emerald-700"
+                                  : isConnected
+                                    ? "bg-emerald-600 text-white border-emerald-500 hover:bg-emerald-700 shadow-sm"
+                                    : "bg-slate-800 text-slate-200 border-slate-700 hover:bg-slate-700"
                               )}
-                              title={`Copy Judge ${jNum} scoring URL`}
+                              title={isConnected ? `Judge ${jNum} connected — click to copy URL` : `Copy Judge ${jNum} scoring URL`}
                             >
-                              {isCopied ? <Check size={11} /> : <Copy size={11} />}
-                              <span>J{jNum} URL</span>
+                              {isCopied ? (
+                                <Check size={11} />
+                              ) : isConnected ? (
+                                <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse shrink-0" />
+                              ) : (
+                                <Copy size={11} />
+                              )}
+                              <span>
+                                {isCopied
+                                  ? 'Copied'
+                                  : isConnected
+                                    ? `J${jNum} URL · Connected`
+                                    : `J${jNum} URL`}
+                              </span>
                             </button>
                           );
                         })}
@@ -10758,7 +11111,7 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
                       </button>
                     </div>
                   ) : (
-                    layout === 'point' ? (
+                    (layout === 'point' && controllerMode !== 'poomsae') ? (
                       <>
                         <p className="text-center text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Round Points & Winners</p>
                         <div className="grid grid-cols-4 gap-x-12 gap-y-6 mb-4 items-center">
@@ -11053,7 +11406,20 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
                             </button>
                           </div>
                         </div>
-                        {!isPoomsaeMode && controllerMode !== 'poomsae' && (
+                        {!isPoomsaeMode && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const noShowMethod = selectedWinType === 'DSQ' || selectedWinType === 'DQB' ? selectedWinType : 'WDR';
+                              onWinnerSelect('No Winner', noShowMethod);
+                            }}
+                            className="w-full mt-2 mb-1 min-h-[38px] py-2 px-3 rounded-xl bg-amber-50 hover:bg-amber-500 text-amber-800 hover:text-white border border-amber-200 hover:border-amber-500 font-black text-[11px] sm:text-xs uppercase tracking-wider transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
+                            title="Use when neither competitor shows up — records No Winner and advances BYE to the next round"
+                          >
+                            <span>Double No-Show / No Winner ({selectedWinType === 'DSQ' || selectedWinType === 'DQB' ? selectedWinType : 'WDR'})</span>
+                          </button>
+                        )}
+                        {!isPoomsaeMode && (
                           <div className="mt-2 mb-2 p-1.5 sm:p-2 bg-slate-50 border border-slate-200 rounded-xl">
                             <div className="flex items-center justify-between mb-1 px-1">
                               <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Win Method</span>
@@ -11092,7 +11458,7 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
                         )}
                         <div className="flex gap-2.5 sm:gap-4">
                           <button 
-                            onClick={() => onWinnerSelect('Blue', controllerMode === 'poomsae' ? undefined : selectedWinType)}
+                            onClick={() => onWinnerSelect('Blue', selectedWinType)}
                             disabled={isBlueWinDisabled}
                             className={cn(
                               "flex-[1] min-h-[44px] sm:min-h-[48px] py-2 bg-[#00a2e8] text-white rounded-xl font-black text-xs sm:text-sm uppercase transition-all shadow-md px-2 break-words text-center flex items-center justify-center",
@@ -11104,7 +11470,7 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
                             Mark {cleanPlaceholder(current.blue_name) || 'Blue'} Win
                           </button>
                           <button 
-                            onClick={() => onWinnerSelect('Red', controllerMode === 'poomsae' ? undefined : selectedWinType)}
+                            onClick={() => onWinnerSelect('Red', selectedWinType)}
                             disabled={isRedWinDisabled}
                             className={cn(
                               "flex-[1] min-h-[44px] sm:min-h-[48px] py-2 bg-[#ed1c24] text-white rounded-xl font-black text-xs sm:text-sm uppercase transition-all shadow-md px-2 break-words text-center flex items-center justify-center",
@@ -11119,6 +11485,19 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
                       </>
                     ) : (
                       <>
+                        {!isPoomsaeMode && controllerMode !== 'poomsae' && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const noShowMethod = selectedWinType === 'DSQ' || selectedWinType === 'DQB' ? selectedWinType : 'WDR';
+                              onWinnerSelect('No Winner', noShowMethod);
+                            }}
+                            className="w-full mb-2.5 min-h-[38px] py-2 px-3 rounded-xl bg-amber-50 hover:bg-amber-500 text-amber-800 hover:text-white border border-amber-200 hover:border-amber-500 font-black text-[11px] sm:text-xs uppercase tracking-wider transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
+                            title="Use when neither competitor shows up — records No Winner and advances BYE to the next round"
+                          >
+                            <span>Double No-Show / No Winner ({selectedWinType === 'DSQ' || selectedWinType === 'DQB' ? selectedWinType : 'WDR'})</span>
+                          </button>
+                        )}
                         {controllerMode !== 'poomsae' && (
                           <div className="flex items-center justify-between mb-1 sm:mb-1.5">
                             <p className="text-[9px] sm:text-[10px] font-black text-slate-400 uppercase tracking-widest">Select Winner</p>
@@ -11167,13 +11546,13 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
                         <div className="flex gap-2 sm:gap-4 mb-1 sm:mb-2">
                           <button 
                             onClick={() => onWinnerSelect('Blue', controllerMode === 'poomsae' ? undefined : selectedWinType)}
-                            className="flex-[1.2] min-h-[46px] sm:min-h-[56px] py-2 sm:py-3 bg-blue-50 text-[#00a2e8] hover:bg-[#00a2e8] hover:text-white rounded-xl sm:rounded-2xl font-black text-xs sm:text-base md:text-[18px] uppercase transition-all border-2 border-blue-200 hover:border-[#00a2e8] active:scale-95 px-2 sm:px-4 break-words whitespace-normal flex items-center justify-center text-center leading-tight shadow-sm hover:shadow-xl hover:shadow-blue-200/50"
+                            className="flex-[1.2] min-h-[100px] py-2 sm:py-3 bg-blue-50 text-[#00a2e8] hover:bg-[#00a2e8] hover:text-white rounded-xl sm:rounded-2xl font-black text-xs sm:text-base md:text-[18px] uppercase transition-all border-2 border-blue-200 hover:border-[#00a2e8] active:scale-95 px-2 sm:px-4 break-words whitespace-normal flex items-center justify-center text-center leading-tight shadow-sm hover:shadow-xl hover:shadow-blue-200/50"
                           >
                             <span>{cleanPlaceholder(current.blue_name) || 'Blue'} Wins</span>
                           </button>
                           <button 
                             onClick={() => onWinnerSelect('Red', controllerMode === 'poomsae' ? undefined : selectedWinType)}
-                            className="flex-[1.2] min-h-[46px] sm:min-h-[56px] py-2 sm:py-3 bg-red-50 text-[#ed1c24] hover:bg-[#ed1c24] hover:text-white rounded-xl sm:rounded-2xl font-black text-xs sm:text-base md:text-[18px] uppercase transition-all border-2 border-red-200 hover:border-[#ed1c24] active:scale-95 px-2 sm:px-4 break-words whitespace-normal flex items-center justify-center text-center leading-tight shadow-sm hover:shadow-xl hover:shadow-red-200/50"
+                            className="flex-[1.2] min-h-[100px] py-2 sm:py-3 bg-red-50 text-[#ed1c24] hover:bg-[#ed1c24] hover:text-white rounded-xl sm:rounded-2xl font-black text-xs sm:text-base md:text-[18px] uppercase transition-all border-2 border-red-200 hover:border-[#ed1c24] active:scale-95 px-2 sm:px-4 break-words whitespace-normal flex items-center justify-center text-center leading-tight shadow-sm hover:shadow-xl hover:shadow-red-200/50"
                           >
                             <span>{cleanPlaceholder(current.red_name) || 'Red'} Wins</span>
                           </button>
@@ -11255,6 +11634,114 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
                 Start Ring Session
               </button>
             </div>
+
+            {controllerMode === 'poomsae' && onUpdatePoomsaeTarget && (() => {
+              const judgeCount: 3 | 5 | 7 = poomsaeScoringTarget?.judgeCount || defaultPoomsaeJudgeCount || 5;
+              const showOnScreen2 = poomsaeScoringTarget?.showFinalScoreOnScreen !== undefined ? poomsaeScoringTarget.showFinalScoreOnScreen : true;
+              const copyIdleUrl = (tag: string, url: string) => {
+                if (navigator.clipboard?.writeText) {
+                  navigator.clipboard.writeText(url).then(() => {
+                    setCopiedJudgeTag(tag);
+                    setTimeout(() => setCopiedJudgeTag((curr) => (curr === tag ? null : curr)), 1800);
+                  }).catch(() => {});
+                }
+              };
+              return (
+                <div className="w-full pt-4 mt-2 border-t border-slate-100 space-y-2.5 text-left">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-1.5">
+                      <Users2 size={13} className="text-red-600" />
+                      Poomsae Mode Quick Setup
+                    </span>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <div className="inline-flex bg-slate-100 p-0.5 rounded-lg border border-slate-200">
+                        {([3, 5, 7] as const).map((cnt) => (
+                          <button
+                            key={cnt}
+                            type="button"
+                            onClick={() => onUpdatePoomsaeTarget({ judgeCount: cnt })}
+                            className={cn(
+                              "px-2 py-1 text-[10px] font-black rounded-md transition-all cursor-pointer",
+                              judgeCount === cnt
+                                ? "bg-slate-900 text-white shadow-sm"
+                                : "text-slate-600 hover:text-slate-900"
+                            )}
+                          >
+                            {cnt}J
+                          </button>
+                        ))}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => onUpdatePoomsaeTarget({ showFinalScoreOnScreen: !showOnScreen2 })}
+                        className={cn(
+                          "px-2.5 py-1 rounded-lg text-[10px] font-black uppercase border transition-colors cursor-pointer",
+                          showOnScreen2
+                            ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                            : "bg-slate-100 text-slate-500 border-slate-200"
+                        )}
+                      >
+                        {showOnScreen2 ? "Screen 2: ON" : "Screen 2: OFF"}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => copyIdleUrl('screen1', `${window.location.origin}${window.location.pathname}?view=poomsae&ring=${ring.ringNumber}`)}
+                      className="px-2.5 py-1 rounded-lg text-[10px] font-black uppercase bg-blue-700 text-white hover:bg-blue-600 flex items-center gap-1 cursor-pointer shadow-sm transition-colors"
+                    >
+                      {copiedJudgeTag === 'screen1' ? <Check size={11} className="text-emerald-300" /> : <Copy size={11} />}
+                      <span>{copiedJudgeTag === 'screen1' ? 'Copied' : 'Screen 1 URL'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => copyIdleUrl('screen2', `${window.location.origin}${window.location.pathname}?view=poomsae2&ring=${ring.ringNumber}`)}
+                      className="px-2.5 py-1 rounded-lg text-[10px] font-black uppercase bg-slate-900 text-white hover:bg-slate-800 flex items-center gap-1 cursor-pointer transition-colors"
+                    >
+                      {copiedJudgeTag === 'screen2' ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} />}
+                      <span>{copiedJudgeTag === 'screen2' ? 'Copied' : 'Screen 2 URL'}</span>
+                    </button>
+                    {Array.from({ length: judgeCount }, (_, idx) => idx + 1).map((jNum) => {
+                      const tag = `j_idle_${jNum}`;
+                      const isCopied = copiedJudgeTag === tag;
+                      const isConnected = isJudgeConnected(jNum);
+                      return (
+                        <button
+                          key={jNum}
+                          type="button"
+                          onClick={() => copyIdleUrl(tag, `${window.location.origin}${window.location.pathname}?view=judge&ring=${ring.ringNumber}&judge=${jNum}`)}
+                          className={cn(
+                            "px-2 py-1 rounded-lg text-[10px] font-black uppercase border transition-colors cursor-pointer flex items-center gap-1.5",
+                            isCopied
+                              ? "bg-emerald-700 text-white border-emerald-700"
+                              : isConnected
+                                ? "bg-emerald-600 text-white border-emerald-500 hover:bg-emerald-700 shadow-sm"
+                                : "bg-slate-800 text-slate-200 border-slate-700 hover:bg-slate-700"
+                          )}
+                          title={isConnected ? `Judge ${jNum} connected — click to copy URL` : `Copy Judge ${jNum} scoring URL`}
+                        >
+                          {isCopied ? (
+                            <Check size={11} />
+                          ) : isConnected ? (
+                            <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse shrink-0" />
+                          ) : (
+                            <Copy size={11} />
+                          )}
+                          <span>
+                            {isCopied
+                              ? 'Copied'
+                              : isConnected
+                                ? `J${jNum} URL · Connected`
+                                : `J${jNum} URL`}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         )}
       </div>

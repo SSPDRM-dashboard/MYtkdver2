@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Check, Clock, Copy, Maximize, Minimize, Monitor, Trophy } from 'lucide-react';
-import { PoomsaeSideScoreSummary, RingPoomsaeSelection, RingStatus, RingTimerState, RingWinnerBroadcast } from '../types';
+import { PoomsaeJudgeBreakdownItem, PoomsaeSideScoreSummary, RingPoomsaeSelection, RingStatus, RingTimerState, RingWinnerBroadcast } from '../types';
 import { cn, formatBoutNumber } from '../lib/utils';
 import { getPlayerLogoOrFlag } from '../lib/teamLogos';
 import { formatPoomsaeScore } from '../lib/poomsaeScoring';
@@ -23,6 +23,7 @@ interface PoomsaeScreenViewProps {
   isStandalone?: boolean;
   winnerDisplaySeconds?: number;
   showFinalScore?: boolean;
+  showJudgeBreakdown?: boolean;
   blueScoreSummary?: PoomsaeSideScoreSummary | null;
   redScoreSummary?: PoomsaeSideScoreSummary | null;
 }
@@ -69,7 +70,8 @@ function ClubLogoEmblem({
   directLogo,
   teamLogos,
   variant,
-  reserveSlot = false
+  reserveSlot = false,
+  compact = false
 }: {
   club?: string | null;
   name?: string | null;
@@ -77,6 +79,7 @@ function ClubLogoEmblem({
   teamLogos?: Record<string, string>;
   variant: 'blue' | 'red';
   reserveSlot?: boolean;
+  compact?: boolean;
 }) {
   const [imgError, setImgError] = useState(false);
 
@@ -92,14 +95,13 @@ function ClubLogoEmblem({
     ? getPlayerLogoOrFlag(cleanClub, cleanName, teamLogos, directLogo, true)
     : null;
 
+  const sizeClass = compact
+    ? 'w-16 h-16 sm:w-20 sm:h-20 md:w-24 md:h-24 lg:w-28 lg:h-28 xl:w-32 xl:h-32'
+    : 'w-20 h-20 sm:w-28 sm:h-28 md:w-32 md:h-32 lg:w-36 lg:h-36 xl:w-40 xl:h-40';
+
   if (!hasInfo) {
     if (!reserveSlot) return null;
-    return (
-      <div
-        aria-hidden="true"
-        className="w-20 h-20 sm:w-28 sm:h-28 md:w-32 md:h-32 lg:w-36 lg:h-36 shrink-0"
-      />
-    );
+    return <div aria-hidden="true" className={cn(sizeClass, 'shrink-0')} />;
   }
 
   const initials = (cleanClub || cleanName || '')
@@ -112,7 +114,8 @@ function ClubLogoEmblem({
   return (
     <div
       className={cn(
-        'w-20 h-20 sm:w-28 sm:h-28 md:w-32 md:h-32 lg:w-36 lg:h-36 shrink-0 flex items-center justify-center overflow-hidden p-2.5 backdrop-blur-md transition-transform',
+        sizeClass,
+        'shrink-0 flex items-center justify-center overflow-hidden p-2 backdrop-blur-md transition-transform',
         variant === 'blue'
           ? 'bg-gradient-to-b from-[#06183a]/90 to-[#020b20]/95 border-2 border-cyan-400/70 shadow-[0_0_28px_rgba(34,211,238,0.35)]'
           : 'bg-gradient-to-b from-[#3d0409]/90 to-[#1a0104]/95 border-2 border-red-400/70 shadow-[0_0_28px_rgba(248,113,113,0.35)]'
@@ -129,10 +132,93 @@ function ClubLogoEmblem({
           className="w-full h-full object-contain select-none pointer-events-none drop-shadow-[0_2px_10px_rgba(0,0,0,0.6)]"
         />
       ) : (
-        <span className="text-2xl sm:text-4xl font-black tracking-wider text-white/90 uppercase select-none">
+        <span className={cn(compact ? 'text-xl sm:text-3xl lg:text-4xl' : 'text-2xl sm:text-4xl', 'font-black tracking-wider text-white/90 uppercase select-none')}>
           {initials || 'TKD'}
         </span>
       )}
+    </div>
+  );
+}
+
+function PoomsaeJudgeBreakdownTable({
+  breakdown,
+  variant
+}: {
+  breakdown?: PoomsaeJudgeBreakdownItem[] | null;
+  variant: 'blue' | 'red';
+}) {
+  if (!breakdown || breakdown.length === 0) return null;
+
+  const isSevenJudges = breakdown.length >= 7;
+
+  return (
+    <div
+      className={cn(
+        'w-full max-w-2xl xl:max-w-3xl px-2 sm:px-3 py-2 sm:py-2.5 lg:py-3 rounded-xl border-2 shadow-[0_8px_28px_rgba(0,0,0,0.5)] shrink-0',
+        variant === 'blue'
+          ? 'bg-[#0354b8]/95 border-cyan-300/65'
+          : 'bg-[#a81119]/95 border-red-300/65'
+      )}
+    >
+      <div
+        className={cn(
+          'grid gap-1.5 sm:gap-2',
+          breakdown.length === 3
+            ? 'grid-cols-3'
+            : breakdown.length === 7
+              ? 'grid-cols-7'
+              : 'grid-cols-5'
+        )}
+      >
+        {/* Header Row: Referee / Judge 1..N */}
+        {breakdown.map((item) => (
+          <div
+            key={`hdr-${item.judgeNumber}`}
+            className={cn(
+              'h-8 sm:h-10 lg:h-11 px-1.5 rounded-[6px] bg-gradient-to-b from-[#fde047] via-[#facc15] to-[#eab308] border border-amber-200/80 shadow-[0_2px_4px_rgba(0,0,0,0.45)] flex items-center justify-center text-slate-950 font-black tracking-tight leading-none whitespace-nowrap overflow-hidden',
+              isSevenJudges ? 'text-[10px] sm:text-xs md:text-sm lg:text-base' : 'text-xs sm:text-base md:text-lg lg:text-xl'
+            )}
+          >
+            {item.label}
+          </div>
+        ))}
+
+        {/* Accuracy Row */}
+        {breakdown.map((item) => (
+          <div
+            key={`acc-${item.judgeNumber}`}
+            className={cn(
+              'h-10 sm:h-12 md:h-14 lg:h-16 px-1.5 rounded-[6px] flex items-center justify-center font-black tabular-nums leading-none shadow-[inset_0_1px_2px_rgba(0,0,0,0.14)]',
+              isSevenJudges ? 'text-base sm:text-xl md:text-2xl lg:text-3xl' : 'text-xl sm:text-3xl md:text-4xl lg:text-[2.5rem]',
+              !item.submitted
+                ? 'bg-white/80 text-slate-400'
+                : item.droppedAccuracy
+                  ? 'bg-slate-400/80 text-slate-900 line-through decoration-slate-950 decoration-[3px]'
+                  : 'bg-white text-slate-950'
+            )}
+          >
+            {item.submitted && item.accuracy !== null ? item.accuracy.toFixed(1) : '--'}
+          </div>
+        ))}
+
+        {/* Presentation Row */}
+        {breakdown.map((item) => (
+          <div
+            key={`pres-${item.judgeNumber}`}
+            className={cn(
+              'h-10 sm:h-12 md:h-14 lg:h-16 px-1.5 rounded-[6px] flex items-center justify-center font-black tabular-nums leading-none shadow-[inset_0_1px_2px_rgba(0,0,0,0.14)]',
+              isSevenJudges ? 'text-base sm:text-xl md:text-2xl lg:text-3xl' : 'text-xl sm:text-3xl md:text-4xl lg:text-[2.5rem]',
+              !item.submitted
+                ? 'bg-white/80 text-slate-400'
+                : item.droppedPresentation
+                  ? 'bg-slate-400/80 text-slate-900 line-through decoration-slate-950 decoration-[3px]'
+                  : 'bg-white text-slate-950'
+            )}
+          >
+            {item.submitted && item.presentation !== null ? item.presentation.toFixed(1) : '--'}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -155,9 +241,11 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
   isStandalone = false,
   winnerDisplaySeconds = 5,
   showFinalScore = false,
+  showJudgeBreakdown = true,
   blueScoreSummary = null,
   redScoreSummary = null
 }) => {
+  const showBreakdownTable = showFinalScore && showJudgeBreakdown !== false;
   const containerRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState(false);
@@ -453,12 +541,15 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
       );
 
   const winnerDisplayText = activeWinner
-    ? activeWinner.winnerSide === 'Completed'
-      ? `${privacyMode ? '---' : cleanText(activeWinner.winnerName) || 'PERFORMER'} COMPLETE`
-      : `${privacyMode ? '---' : cleanText(activeWinner.winnerName) || (activeWinner.winnerSide === 'Blue' ? 'CHUNG' : 'HONG')} WIN`
+    ? activeWinner.winnerSide === 'No Winner'
+      ? 'NO WINNER · DOUBLE NO-SHOW'
+      : activeWinner.winnerSide === 'Completed'
+        ? `${privacyMode ? '---' : cleanText(activeWinner.winnerName) || 'PERFORMER'} COMPLETE`
+        : `${privacyMode ? '---' : cleanText(activeWinner.winnerName) || (activeWinner.winnerSide === 'Blue' ? 'CHUNG' : 'HONG')} WIN`
     : '';
 
   const winnerIsRed = activeWinner?.winnerSide === 'Red';
+  const winnerIsNoWinner = activeWinner?.winnerSide === 'No Winner';
   const hasActiveMatch = Boolean(current || activeWinner);
 
   const effectiveTimer = liveTimerOverride ?? timerState ?? null;
@@ -728,8 +819,12 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
         {/* CHUNG / BLUE SIDE */}
         <div
           className={cn(
-            'relative flex flex-col items-center justify-center px-4 sm:px-8 text-center overflow-hidden',
-            showFinalScore ? 'pt-32 pb-20 sm:pt-40 sm:pb-24' : 'pt-36 pb-20 sm:pt-44 sm:pb-24'
+            'relative flex flex-col items-center justify-center px-3 sm:px-6 text-center overflow-hidden',
+            showBreakdownTable
+              ? 'pt-24 pb-16 sm:pt-28 sm:pb-20'
+              : showFinalScore
+                ? 'pt-28 pb-18 sm:pt-36 sm:pb-22'
+                : 'pt-36 pb-20 sm:pt-44 sm:pb-24'
           )}
           style={{
             background:
@@ -763,7 +858,7 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
           />
 
           {/* Center Content Stack */}
-          <div className={cn('relative z-10 flex flex-col items-center justify-center w-full max-w-[92%] mt-2 sm:mt-4', showFinalScore ? 'gap-2.5 sm:gap-3' : 'gap-3 sm:gap-4')}>
+          <div className={cn('relative z-10 flex flex-col items-center justify-center w-full max-w-[94%]', showBreakdownTable ? 'gap-2 sm:gap-2.5 lg:gap-3' : showFinalScore ? 'gap-2.5 sm:gap-3.5' : 'mt-2 sm:mt-4 gap-3 sm:gap-4')}>
             <ClubLogoEmblem
               club={blueClub}
               name={blueName}
@@ -771,12 +866,20 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
               teamLogos={teamLogos}
               variant="blue"
               reserveSlot={hasActiveMatch}
+              compact={showBreakdownTable}
             />
 
             {/* Club Name Angled Bar */}
-            <div className="w-full max-w-lg sm:max-w-xl px-2 shrink-0">
+            <div className={cn('w-full px-2 shrink-0', showFinalScore ? 'max-w-2xl xl:max-w-3xl' : 'max-w-lg sm:max-w-xl')}>
               <div
-                className="relative min-h-[3.25rem] sm:min-h-[3.75rem] md:min-h-[4.25rem] py-1.5 flex items-center justify-center px-7 sm:px-11 bg-gradient-to-r from-[#04183b] via-[#093275] to-[#04183b] border border-cyan-300/70 shadow-[0_0_24px_rgba(6,182,212,0.45)]"
+                className={cn(
+                  'relative flex items-center justify-center px-7 sm:px-11 bg-gradient-to-r from-[#04183b] via-[#093275] to-[#04183b] border border-cyan-300/70 shadow-[0_0_24px_rgba(6,182,212,0.45)]',
+                  showBreakdownTable
+                    ? 'min-h-[2.75rem] sm:min-h-[3.25rem] md:min-h-[3.75rem] lg:min-h-[4.25rem] py-1.5'
+                    : showFinalScore
+                      ? 'min-h-[3.25rem] sm:min-h-[3.75rem] md:min-h-[4.5rem] py-1.5'
+                      : 'min-h-[3.25rem] sm:min-h-[3.75rem] md:min-h-[4.25rem] py-1.5'
+                )}
                 style={{
                   clipPath: 'polygon(4% 0%, 100% 0%, 96% 100%, 0% 100%)'
                 }}
@@ -784,24 +887,37 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
                 <p
                   className={cn(
                     'w-full font-black text-white uppercase tracking-wider break-words whitespace-normal leading-tight drop-shadow',
-                    (blueClub || '').length > 32
-                      ? 'text-xs sm:text-base md:text-lg'
-                      : (blueClub || '').length > 22
-                        ? 'text-xs sm:text-lg md:text-xl'
-                        : 'text-sm sm:text-xl md:text-2xl'
+                    showFinalScore
+                      ? (blueClub || '').length > 32
+                        ? 'text-xs sm:text-base md:text-lg lg:text-xl'
+                        : (blueClub || '').length > 22
+                          ? 'text-sm sm:text-lg md:text-xl lg:text-2xl'
+                          : 'text-base sm:text-xl md:text-2xl lg:text-[1.65rem]'
+                      : (blueClub || '').length > 32
+                        ? 'text-xs sm:text-base md:text-lg'
+                        : (blueClub || '').length > 22
+                          ? 'text-xs sm:text-lg md:text-xl'
+                          : 'text-sm sm:text-xl md:text-2xl'
                   )}
                 >
                   {blueClub || (hasActiveMatch ? '---' : 'CHUNG CLUB')}
                 </p>
               </div>
               {/* Center flare divider */}
-              <div className="mx-auto mt-2 sm:mt-2.5 h-[2px] w-4/5 bg-gradient-to-r from-transparent via-cyan-300 to-transparent shadow-[0_0_12px_#67e8f9]" />
+              <div className={cn('mx-auto h-[2px] w-4/5 bg-gradient-to-r from-transparent via-cyan-300 to-transparent shadow-[0_0_12px_#67e8f9]', showBreakdownTable ? 'mt-1.5' : 'mt-2 sm:mt-2.5')} />
             </div>
 
             {/* Player Name Chamfered Frame */}
-            <div className="w-full max-w-lg sm:max-w-xl px-1 shrink-0">
+            <div className={cn('w-full px-1 shrink-0', showFinalScore ? 'max-w-2xl xl:max-w-3xl' : 'max-w-lg sm:max-w-xl')}>
               <div
-                className="relative min-h-[6.5rem] sm:min-h-[7.5rem] md:min-h-[9.5rem] lg:min-h-[10.5rem] py-3 flex items-center justify-center px-6 sm:px-10 bg-gradient-to-b from-[#031538]/95 via-[#052359]/90 to-[#020d26]/95 border-2 border-cyan-400/80 shadow-[0_0_32px_rgba(34,211,238,0.4),inset_0_0_22px_rgba(14,165,233,0.28)]"
+                className={cn(
+                  'relative flex items-center justify-center px-6 sm:px-10 bg-gradient-to-b from-[#031538]/95 via-[#052359]/90 to-[#020d26]/95 border-2 border-cyan-400/80 shadow-[0_0_32px_rgba(34,211,238,0.4),inset_0_0_22px_rgba(14,165,233,0.28)]',
+                  showBreakdownTable
+                    ? 'min-h-[4.75rem] sm:min-h-[6rem] md:min-h-[7.25rem] lg:min-h-[8.5rem] py-2.5'
+                    : showFinalScore
+                      ? 'min-h-[6rem] sm:min-h-[7.5rem] md:min-h-[9rem] lg:min-h-[10.5rem] py-3'
+                      : 'min-h-[6.5rem] sm:min-h-[7.5rem] md:min-h-[9.5rem] lg:min-h-[10.5rem] py-3'
+                )}
                 style={{
                   clipPath: 'polygon(4% 0%, 96% 0%, 100% 22%, 100% 78%, 96% 100%, 4% 100%, 0% 78%, 0% 22%)'
                 }}
@@ -809,11 +925,17 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
                 <h2
                   className={cn(
                     'font-black italic text-white uppercase tracking-wide break-words whitespace-normal leading-tight drop-shadow-[0_4px_12px_rgba(0,0,0,0.8)]',
-                    (blueName || '').length > 36
-                      ? 'text-base sm:text-xl md:text-2xl lg:text-3xl'
-                      : (blueName || '').length > 22
-                        ? 'text-lg sm:text-2xl md:text-3xl lg:text-4xl'
-                        : 'text-2xl sm:text-4xl md:text-5xl lg:text-[3.25rem]'
+                    showBreakdownTable
+                      ? (blueName || '').length > 36
+                        ? 'text-base sm:text-xl md:text-2xl lg:text-3xl'
+                        : (blueName || '').length > 22
+                          ? 'text-lg sm:text-2xl md:text-3xl lg:text-4xl'
+                          : 'text-xl sm:text-3xl md:text-4xl lg:text-5xl xl:text-[3.35rem]'
+                      : (blueName || '').length > 36
+                        ? 'text-base sm:text-xl md:text-2xl lg:text-3xl'
+                        : (blueName || '').length > 22
+                          ? 'text-lg sm:text-2xl md:text-3xl lg:text-4xl'
+                          : 'text-2xl sm:text-4xl md:text-5xl lg:text-[3.25rem]'
                   )}
                 >
                   {blueName || (hasActiveMatch ? '---' : 'READY')}
@@ -821,35 +943,53 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
               </div>
             </div>
 
-            {/* Poomsae Screen 2: Clean Official Final Score Display */}
+            {/* Poomsae Screen 2: Clean Official Final Score Display + Judge Breakdown Table */}
             {showFinalScore && hasActiveMatch && (
-              <div className="w-full max-w-sm sm:max-w-md px-1 shrink-0">
-                <div
-                  className="px-6 py-2.5 sm:py-3 bg-[#020d26]/92 border-2 border-cyan-300/80 shadow-[0_0_28px_rgba(34,211,238,0.35)] flex flex-col items-center justify-center"
-                  style={{
-                    clipPath: 'polygon(6% 0%, 94% 0%, 100% 28%, 100% 72%, 94% 100%, 6% 100%, 0% 72%, 0% 28%)'
-                  }}
-                >
-                  <span className="text-[10px] sm:text-xs font-black uppercase tracking-[0.22em] text-cyan-300">
-                    Final Score
-                  </span>
-                  <span className="font-mono text-3xl sm:text-5xl md:text-6xl font-black text-white tabular-nums tracking-tight leading-none mt-0.5 drop-shadow-[0_3px_12px_rgba(0,0,0,0.8)]">
-                    {blueScoreSummary?.finalTotal !== null && blueScoreSummary?.finalTotal !== undefined
-                      ? formatPoomsaeScore(blueScoreSummary.finalTotal)
-                      : '-.--'}
-                  </span>
-                  {blueScoreSummary?.p1Total !== null &&
-                    blueScoreSummary?.p1Total !== undefined &&
-                    blueScoreSummary?.p2Total !== null &&
-                    blueScoreSummary?.p2Total !== undefined && (
-                      <div className="mt-1 flex items-center gap-2 text-[11px] sm:text-xs font-mono font-bold text-cyan-200/90 tabular-nums">
-                        <span>P1: {formatPoomsaeScore(blueScoreSummary.p1Total)}</span>
-                        <span aria-hidden="true">·</span>
-                        <span>P2: {formatPoomsaeScore(blueScoreSummary.p2Total)}</span>
-                      </div>
+              <>
+                <div className="w-full max-w-lg sm:max-w-xl lg:max-w-2xl px-1 shrink-0">
+                  <div
+                    className={cn(
+                      'px-6 bg-[#020d26]/92 border-2 border-cyan-300/80 shadow-[0_0_28px_rgba(34,211,238,0.35)] flex flex-col items-center justify-center',
+                      showBreakdownTable ? 'py-2 sm:py-2.5 lg:py-3' : 'py-3 sm:py-4'
                     )}
+                    style={{
+                      clipPath: 'polygon(6% 0%, 94% 0%, 100% 28%, 100% 72%, 94% 100%, 6% 100%, 0% 72%, 0% 28%)'
+                    }}
+                  >
+                    <span className="text-xs sm:text-sm md:text-base font-black uppercase tracking-[0.24em] text-cyan-300">
+                      Final Score
+                    </span>
+                    <span
+                      className={cn(
+                        'font-mono font-black text-white tabular-nums tracking-tight leading-none mt-1 drop-shadow-[0_3px_12px_rgba(0,0,0,0.8)]',
+                        showBreakdownTable
+                          ? 'text-3xl sm:text-5xl md:text-6xl lg:text-[4.25rem] xl:text-[4.75rem]'
+                          : 'text-4xl sm:text-6xl md:text-7xl xl:text-[5.25rem]'
+                      )}
+                    >
+                      {blueScoreSummary?.finalTotal !== null && blueScoreSummary?.finalTotal !== undefined
+                        ? formatPoomsaeScore(blueScoreSummary.finalTotal)
+                        : '-.--'}
+                    </span>
+                    {blueScoreSummary?.p1Total !== null &&
+                      blueScoreSummary?.p1Total !== undefined &&
+                      blueScoreSummary?.p2Total !== null &&
+                      blueScoreSummary?.p2Total !== undefined && (
+                        <div className="mt-1.5 flex items-center gap-2.5 text-xs sm:text-sm md:text-base font-mono font-bold text-cyan-200/90 tabular-nums">
+                          <span>P1: {formatPoomsaeScore(blueScoreSummary.p1Total)}</span>
+                          <span aria-hidden="true">·</span>
+                          <span>P2: {formatPoomsaeScore(blueScoreSummary.p2Total)}</span>
+                        </div>
+                      )}
+                  </div>
                 </div>
-              </div>
+                {showBreakdownTable && (
+                  <PoomsaeJudgeBreakdownTable
+                    breakdown={blueScoreSummary?.judgeBreakdown}
+                    variant="blue"
+                  />
+                )}
+              </>
             )}
           </div>
         </div>
@@ -858,8 +998,12 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
         {!isSoloPoomsae && (
           <div
             className={cn(
-              'relative flex flex-col items-center justify-center px-4 sm:px-8 text-center overflow-hidden',
-              showFinalScore ? 'pt-32 pb-20 sm:pt-40 sm:pb-24' : 'pt-36 pb-20 sm:pt-44 sm:pb-24'
+              'relative flex flex-col items-center justify-center px-3 sm:px-6 text-center overflow-hidden',
+              showBreakdownTable
+                ? 'pt-24 pb-16 sm:pt-28 sm:pb-20'
+                : showFinalScore
+                  ? 'pt-28 pb-18 sm:pt-36 sm:pb-22'
+                  : 'pt-36 pb-20 sm:pt-44 sm:pb-24'
             )}
             style={{
               background:
@@ -893,7 +1037,7 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
             />
 
             {/* Center Content Stack */}
-            <div className={cn('relative z-10 flex flex-col items-center justify-center w-full max-w-[92%] mt-2 sm:mt-4', showFinalScore ? 'gap-2.5 sm:gap-3' : 'gap-3 sm:gap-4')}>
+            <div className={cn('relative z-10 flex flex-col items-center justify-center w-full max-w-[94%]', showBreakdownTable ? 'gap-2 sm:gap-2.5 lg:gap-3' : showFinalScore ? 'gap-2.5 sm:gap-3.5' : 'mt-2 sm:mt-4 gap-3 sm:gap-4')}>
               <ClubLogoEmblem
                 club={redClub}
                 name={redName}
@@ -901,12 +1045,20 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
                 teamLogos={teamLogos}
                 variant="red"
                 reserveSlot={hasActiveMatch}
+                compact={showBreakdownTable}
               />
 
               {/* Club Name Angled Bar */}
-              <div className="w-full max-w-lg sm:max-w-xl px-2 shrink-0">
+              <div className={cn('w-full px-2 shrink-0', showFinalScore ? 'max-w-2xl xl:max-w-3xl' : 'max-w-lg sm:max-w-xl')}>
                 <div
-                  className="relative min-h-[3.25rem] sm:min-h-[3.75rem] md:min-h-[4.25rem] py-1.5 flex items-center justify-center px-7 sm:px-11 bg-gradient-to-r from-[#450609] via-[#8c0c14] to-[#450609] border border-red-300/70 shadow-[0_0_24px_rgba(239,68,68,0.45)]"
+                  className={cn(
+                    'relative flex items-center justify-center px-7 sm:px-11 bg-gradient-to-r from-[#450609] via-[#8c0c14] to-[#450609] border border-red-300/70 shadow-[0_0_24px_rgba(239,68,68,0.45)]',
+                    showBreakdownTable
+                      ? 'min-h-[2.75rem] sm:min-h-[3.25rem] md:min-h-[3.75rem] lg:min-h-[4.25rem] py-1.5'
+                      : showFinalScore
+                        ? 'min-h-[3.25rem] sm:min-h-[3.75rem] md:min-h-[4.5rem] py-1.5'
+                        : 'min-h-[3.25rem] sm:min-h-[3.75rem] md:min-h-[4.25rem] py-1.5'
+                  )}
                   style={{
                     clipPath: 'polygon(4% 0%, 100% 0%, 96% 100%, 0% 100%)'
                   }}
@@ -914,24 +1066,37 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
                   <p
                     className={cn(
                       'w-full font-black text-white uppercase tracking-wider break-words whitespace-normal leading-tight drop-shadow',
-                      (redClub || '').length > 32
-                        ? 'text-xs sm:text-base md:text-lg'
-                        : (redClub || '').length > 22
-                          ? 'text-xs sm:text-lg md:text-xl'
-                          : 'text-sm sm:text-xl md:text-2xl'
+                      showFinalScore
+                        ? (redClub || '').length > 32
+                          ? 'text-xs sm:text-base md:text-lg lg:text-xl'
+                          : (redClub || '').length > 22
+                            ? 'text-sm sm:text-lg md:text-xl lg:text-2xl'
+                            : 'text-base sm:text-xl md:text-2xl lg:text-[1.65rem]'
+                        : (redClub || '').length > 32
+                          ? 'text-xs sm:text-base md:text-lg'
+                          : (redClub || '').length > 22
+                            ? 'text-xs sm:text-lg md:text-xl'
+                            : 'text-sm sm:text-xl md:text-2xl'
                     )}
                   >
                     {redClub || (hasActiveMatch ? '---' : 'HONG CLUB')}
                   </p>
                 </div>
                 {/* Center flare divider */}
-                <div className="mx-auto mt-2 sm:mt-2.5 h-[2px] w-4/5 bg-gradient-to-r from-transparent via-red-300 to-transparent shadow-[0_0_12px_#fca5a5]" />
+                <div className={cn('mx-auto h-[2px] w-4/5 bg-gradient-to-r from-transparent via-red-300 to-transparent shadow-[0_0_12px_#fca5a5]', showBreakdownTable ? 'mt-1.5' : 'mt-2 sm:mt-2.5')} />
               </div>
 
               {/* Player Name Chamfered Frame */}
-              <div className="w-full max-w-lg sm:max-w-xl px-1 shrink-0">
+              <div className={cn('w-full px-1 shrink-0', showFinalScore ? 'max-w-2xl xl:max-w-3xl' : 'max-w-lg sm:max-w-xl')}>
                 <div
-                  className="relative min-h-[6.5rem] sm:min-h-[7.5rem] md:min-h-[9.5rem] lg:min-h-[10.5rem] py-3 flex items-center justify-center px-6 sm:px-10 bg-gradient-to-b from-[#3d0307]/95 via-[#68070e]/90 to-[#240103]/95 border-2 border-red-400/80 shadow-[0_0_32px_rgba(248,113,113,0.4),inset_0_0_22px_rgba(239,68,68,0.28)]"
+                  className={cn(
+                    'relative flex items-center justify-center px-6 sm:px-10 bg-gradient-to-b from-[#3d0307]/95 via-[#68070e]/90 to-[#240103]/95 border-2 border-red-400/80 shadow-[0_0_32px_rgba(248,113,113,0.4),inset_0_0_22px_rgba(239,68,68,0.28)]',
+                    showBreakdownTable
+                      ? 'min-h-[4.75rem] sm:min-h-[6rem] md:min-h-[7.25rem] lg:min-h-[8.5rem] py-2.5'
+                      : showFinalScore
+                        ? 'min-h-[6rem] sm:min-h-[7.5rem] md:min-h-[9rem] lg:min-h-[10.5rem] py-3'
+                        : 'min-h-[6.5rem] sm:min-h-[7.5rem] md:min-h-[9.5rem] lg:min-h-[10.5rem] py-3'
+                  )}
                   style={{
                     clipPath: 'polygon(4% 0%, 96% 0%, 100% 22%, 100% 78%, 96% 100%, 4% 100%, 0% 78%, 0% 22%)'
                   }}
@@ -939,11 +1104,17 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
                   <h2
                     className={cn(
                       'font-black italic text-white uppercase tracking-wide break-words whitespace-normal leading-tight drop-shadow-[0_4px_12px_rgba(0,0,0,0.8)]',
-                      (redName || '').length > 36
-                        ? 'text-base sm:text-xl md:text-2xl lg:text-3xl'
-                        : (redName || '').length > 22
-                          ? 'text-lg sm:text-2xl md:text-3xl lg:text-4xl'
-                          : 'text-2xl sm:text-4xl md:text-5xl lg:text-[3.25rem]'
+                      showBreakdownTable
+                        ? (redName || '').length > 36
+                          ? 'text-base sm:text-xl md:text-2xl lg:text-3xl'
+                          : (redName || '').length > 22
+                            ? 'text-lg sm:text-2xl md:text-3xl lg:text-4xl'
+                            : 'text-xl sm:text-3xl md:text-4xl lg:text-5xl xl:text-[3.35rem]'
+                        : (redName || '').length > 36
+                          ? 'text-base sm:text-xl md:text-2xl lg:text-3xl'
+                          : (redName || '').length > 22
+                            ? 'text-lg sm:text-2xl md:text-3xl lg:text-4xl'
+                            : 'text-2xl sm:text-4xl md:text-5xl lg:text-[3.25rem]'
                     )}
                   >
                     {redName || (hasActiveMatch ? '---' : 'READY')}
@@ -951,35 +1122,53 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
                 </div>
               </div>
 
-              {/* Poomsae Screen 2: Clean Official Final Score Display */}
+              {/* Poomsae Screen 2: Clean Official Final Score Display + Judge Breakdown Table */}
               {showFinalScore && hasActiveMatch && (
-                <div className="w-full max-w-sm sm:max-w-md px-1 shrink-0">
-                  <div
-                    className="px-6 py-2.5 sm:py-3 bg-[#240103]/92 border-2 border-red-300/80 shadow-[0_0_28px_rgba(248,113,113,0.35)] flex flex-col items-center justify-center"
-                    style={{
-                      clipPath: 'polygon(6% 0%, 94% 0%, 100% 28%, 100% 72%, 94% 100%, 6% 100%, 0% 72%, 0% 28%)'
-                    }}
-                  >
-                    <span className="text-[10px] sm:text-xs font-black uppercase tracking-[0.22em] text-red-200">
-                      Final Score
-                    </span>
-                    <span className="font-mono text-3xl sm:text-5xl md:text-6xl font-black text-white tabular-nums tracking-tight leading-none mt-0.5 drop-shadow-[0_3px_12px_rgba(0,0,0,0.8)]">
-                      {redScoreSummary?.finalTotal !== null && redScoreSummary?.finalTotal !== undefined
-                        ? formatPoomsaeScore(redScoreSummary.finalTotal)
-                        : '-.--'}
-                    </span>
-                    {redScoreSummary?.p1Total !== null &&
-                      redScoreSummary?.p1Total !== undefined &&
-                      redScoreSummary?.p2Total !== null &&
-                      redScoreSummary?.p2Total !== undefined && (
-                        <div className="mt-1 flex items-center gap-2 text-[11px] sm:text-xs font-mono font-bold text-red-200/90 tabular-nums">
-                          <span>P1: {formatPoomsaeScore(redScoreSummary.p1Total)}</span>
-                          <span aria-hidden="true">·</span>
-                          <span>P2: {formatPoomsaeScore(redScoreSummary.p2Total)}</span>
-                        </div>
+                <>
+                  <div className="w-full max-w-lg sm:max-w-xl lg:max-w-2xl px-1 shrink-0">
+                    <div
+                      className={cn(
+                        'px-6 bg-[#240103]/92 border-2 border-red-300/80 shadow-[0_0_28px_rgba(248,113,113,0.35)] flex flex-col items-center justify-center',
+                        showBreakdownTable ? 'py-2 sm:py-2.5 lg:py-3' : 'py-3 sm:py-4'
                       )}
+                      style={{
+                        clipPath: 'polygon(6% 0%, 94% 0%, 100% 28%, 100% 72%, 94% 100%, 6% 100%, 0% 72%, 0% 28%)'
+                      }}
+                    >
+                      <span className="text-xs sm:text-sm md:text-base font-black uppercase tracking-[0.24em] text-red-200">
+                        Final Score
+                      </span>
+                      <span
+                        className={cn(
+                          'font-mono font-black text-white tabular-nums tracking-tight leading-none mt-1 drop-shadow-[0_3px_12px_rgba(0,0,0,0.8)]',
+                          showBreakdownTable
+                            ? 'text-3xl sm:text-5xl md:text-6xl lg:text-[4.25rem] xl:text-[4.75rem]'
+                            : 'text-4xl sm:text-6xl md:text-7xl xl:text-[5.25rem]'
+                        )}
+                      >
+                        {redScoreSummary?.finalTotal !== null && redScoreSummary?.finalTotal !== undefined
+                          ? formatPoomsaeScore(redScoreSummary.finalTotal)
+                          : '-.--'}
+                      </span>
+                      {redScoreSummary?.p1Total !== null &&
+                        redScoreSummary?.p1Total !== undefined &&
+                        redScoreSummary?.p2Total !== null &&
+                        redScoreSummary?.p2Total !== undefined && (
+                          <div className="mt-1.5 flex items-center gap-2.5 text-xs sm:text-sm md:text-base font-mono font-bold text-red-200/90 tabular-nums">
+                            <span>P1: {formatPoomsaeScore(redScoreSummary.p1Total)}</span>
+                            <span aria-hidden="true">·</span>
+                            <span>P2: {formatPoomsaeScore(redScoreSummary.p2Total)}</span>
+                          </div>
+                        )}
+                    </div>
                   </div>
-                </div>
+                  {showBreakdownTable && (
+                    <PoomsaeJudgeBreakdownTable
+                      breakdown={redScoreSummary?.judgeBreakdown}
+                      variant="red"
+                    />
+                  )}
+                </>
               )}
             </div>
           </div>
@@ -1034,22 +1223,42 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
           </div>
         </div>
 
-        {/* WINNER POPUP MODAL (Matches Photo 2 layout) */}
+        {/* WINNER POPUP MODAL */}
         {activeWinner && (() => {
           const winnerLogo = activeWinner.winnerSide === 'Red' ? activeWinner.redLogo : activeWinner.blueLogo;
           const displayCat = cleanText(activeWinner.category);
+          const isCompactScreen2 = showFinalScore;
           return (
-            <div className="absolute inset-4 sm:inset-10 md:inset-16 lg:inset-24 z-50 flex items-center justify-center pointer-events-auto">
+            <div
+              className={cn(
+                'absolute z-50 flex items-center justify-center pointer-events-auto',
+                isCompactScreen2
+                  ? 'inset-0 p-4 sm:p-6 bg-black/25 backdrop-blur-[1px]'
+                  : 'inset-4 sm:inset-10 md:inset-16 lg:inset-24'
+              )}
+            >
               <div
                 className={cn(
-                  'relative w-full h-full border-2 border-white/90 rounded-2xl flex flex-col items-center justify-center px-6 sm:px-12 py-10 text-center overflow-hidden shadow-[0_25px_85px_rgba(0,0,0,0.9)]',
-                  winnerIsRed
-                    ? 'bg-gradient-to-b from-[#e60000] via-[#c40000] to-[#990000] shadow-[0_0_80px_rgba(255,0,0,0.7)]'
-                    : 'bg-gradient-to-b from-[#1a75ff] via-[#0052cc] to-[#003d99] shadow-[0_0_80px_rgba(0,82,204,0.7)]'
+                  'relative border-2 border-white/90 rounded-2xl flex flex-col items-center justify-center text-center overflow-hidden shadow-[0_25px_85px_rgba(0,0,0,0.9)]',
+                  isCompactScreen2
+                    ? 'w-[92%] sm:w-[84%] lg:w-[78%] min-h-[54%] max-h-[70%] px-6 sm:px-10 pt-16 pb-8'
+                    : 'w-full h-full px-6 sm:px-12 py-10',
+                  winnerIsNoWinner
+                    ? 'bg-gradient-to-b from-slate-700 via-slate-800 to-slate-950 shadow-[0_0_80px_rgba(245,158,11,0.45)]'
+                    : winnerIsRed
+                      ? 'bg-gradient-to-b from-[#e60000] via-[#c40000] to-[#990000] shadow-[0_0_80px_rgba(255,0,0,0.7)]'
+                      : 'bg-gradient-to-b from-[#1a75ff] via-[#0052cc] to-[#003d99] shadow-[0_0_80px_rgba(0,82,204,0.7)]'
                 )}
               >
                 {/* Top Header: Ring & Bout */}
-                <div className="absolute top-4 sm:top-6 left-0 right-0 flex items-center justify-center gap-2 text-xs sm:text-sm md:text-base font-black uppercase tracking-widest text-white/95 px-4 drop-shadow">
+                <div
+                  className={cn(
+                    'absolute left-0 right-0 flex items-center justify-center gap-2 font-black uppercase tracking-widest text-white/95 px-4 drop-shadow',
+                    isCompactScreen2
+                      ? 'top-3.5 sm:top-4 text-xs sm:text-sm'
+                      : 'top-4 sm:top-6 text-xs sm:text-sm md:text-base'
+                  )}
+                >
                   <span>RING {ringName}</span>
                   <span aria-hidden="true">•</span>
                   <span>BOUT {formatBoutNumber(ring.ringNumber, activeWinner.boutNumber, effectiveBoutMode)}</span>
@@ -1063,40 +1272,75 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
 
                 {/* Category Name */}
                 {displayCat && (
-                  <div className="absolute top-12 sm:top-14 left-4 right-4 text-[11px] sm:text-xs md:text-sm font-bold uppercase tracking-wider text-cyan-200/95 truncate px-4 drop-shadow">
+                  <div
+                    className={cn(
+                      'absolute left-4 right-4 font-bold uppercase tracking-wider text-cyan-200/95 truncate px-4 drop-shadow',
+                      isCompactScreen2
+                        ? 'top-9 sm:top-10 text-[11px] sm:text-xs md:text-sm'
+                        : 'top-12 sm:top-14 text-[11px] sm:text-xs md:text-sm'
+                    )}
+                  >
                     {displayCat}
                   </div>
                 )}
 
                 {/* Center Content: Logo + Winner Label + Athlete Name + Club */}
-                <div className="flex flex-col items-center justify-center gap-3 sm:gap-4 max-w-[92%] mt-8">
+                <div
+                  className={cn(
+                    'flex flex-col items-center justify-center max-w-[94%]',
+                    isCompactScreen2 ? 'gap-2.5 sm:gap-3 mt-4' : 'gap-3 sm:gap-4 mt-8'
+                  )}
+                >
                   {/* Logo / Emblem / Trophy */}
-                  <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-black/35 border-2 border-white/55 shadow-xl flex items-center justify-center overflow-hidden p-2">
+                  <div
+                    className={cn(
+                      'bg-black/35 border-2 border-white/55 shadow-xl flex items-center justify-center overflow-hidden',
+                      isCompactScreen2
+                        ? 'w-14 h-14 sm:w-16 sm:h-16 rounded-2xl p-1.5'
+                        : 'w-16 h-16 sm:w-20 sm:h-20 rounded-2xl p-2'
+                    )}
+                  >
                     {winnerLogo ? (
                       <img src={winnerLogo} alt="Winner Logo" className="w-full h-full object-contain drop-shadow" />
                     ) : (
-                      <Trophy size={36} className="text-amber-300 drop-shadow-[0_2px_8px_rgba(251,191,36,0.6)]" />
+                      <Trophy
+                        size={isCompactScreen2 ? 30 : 36}
+                        className="text-amber-300 drop-shadow-[0_2px_8px_rgba(251,191,36,0.6)]"
+                      />
                     )}
                   </div>
 
                   {/* Winner Side / Status Label */}
-                  <span className="text-xs sm:text-sm md:text-base font-black uppercase tracking-[0.25em] text-amber-300 drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)]">
-                    {activeWinner.winnerSide === 'Completed'
-                      ? 'PERFORMER COMPLETE'
-                      : winnerIsRed
-                        ? 'RED WINNER'
-                        : 'BLUE WINNER'}
+                  <span
+                    className={cn(
+                      'font-black uppercase tracking-[0.24em] text-amber-300 drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)]',
+                      isCompactScreen2 ? 'text-xs sm:text-sm' : 'text-xs sm:text-sm md:text-base'
+                    )}
+                  >
+                    {winnerIsNoWinner
+                      ? 'DOUBLE NO-SHOW'
+                      : activeWinner.winnerSide === 'Completed'
+                        ? 'PERFORMER COMPLETE'
+                        : winnerIsRed
+                          ? 'RED WINNER'
+                          : 'BLUE WINNER'}
                   </span>
 
                   {/* Athlete Name (Large Italic Uppercase) */}
                   <h1
                     className={cn(
                       'font-black italic text-white uppercase tracking-wide drop-shadow-[0_4px_16px_rgba(0,0,0,0.8)] leading-tight break-words whitespace-normal max-w-full',
-                      cleanText(activeWinner.winnerName).length > 34
-                        ? 'text-xl sm:text-2xl md:text-3xl lg:text-4xl'
-                        : cleanText(activeWinner.winnerName).length > 22
-                          ? 'text-2xl sm:text-3xl md:text-4xl lg:text-5xl'
-                          : 'text-3xl sm:text-5xl md:text-6xl lg:text-[4rem]'
+                      isCompactScreen2
+                        ? cleanText(activeWinner.winnerName).length > 34
+                          ? 'text-xl sm:text-2xl md:text-3xl'
+                          : cleanText(activeWinner.winnerName).length > 22
+                            ? 'text-2xl sm:text-3xl md:text-4xl'
+                            : 'text-2xl sm:text-4xl md:text-5xl'
+                        : cleanText(activeWinner.winnerName).length > 34
+                          ? 'text-xl sm:text-2xl md:text-3xl lg:text-4xl'
+                          : cleanText(activeWinner.winnerName).length > 22
+                            ? 'text-2xl sm:text-3xl md:text-4xl lg:text-5xl'
+                            : 'text-3xl sm:text-5xl md:text-6xl lg:text-[4rem]'
                     )}
                   >
                     {cleanText(activeWinner.winnerName) || 'WINNER'}
@@ -1107,9 +1351,13 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
                     <p
                       className={cn(
                         'font-black text-amber-200 uppercase tracking-wider drop-shadow-[0_3px_10px_rgba(0,0,0,0.8)] break-words whitespace-normal max-w-full leading-tight',
-                        cleanText(activeWinner.winnerClub).length > 30
-                          ? 'text-sm sm:text-xl md:text-2xl'
-                          : 'text-base sm:text-2xl md:text-3xl'
+                        isCompactScreen2
+                          ? cleanText(activeWinner.winnerClub).length > 30
+                            ? 'text-sm sm:text-lg md:text-xl'
+                            : 'text-base sm:text-xl md:text-2xl'
+                          : cleanText(activeWinner.winnerClub).length > 30
+                            ? 'text-sm sm:text-xl md:text-2xl'
+                            : 'text-base sm:text-2xl md:text-3xl'
                       )}
                     >
                       {cleanText(activeWinner.winnerClub)}

@@ -122,7 +122,7 @@ export interface RingWinnerBroadcast {
   boutNumber: string | number;
   category: string;
   stage?: string;
-  winnerSide: 'Blue' | 'Red' | 'Completed';
+  winnerSide: 'Blue' | 'Red' | 'Completed' | 'No Winner';
   winnerName: string;
   winnerClub: string;
   blueName: string;
@@ -185,11 +185,33 @@ export interface RingPoomsaeScoringTarget {
   updatedAt: number;
 }
 
+export interface PoomsaeJudgeBreakdownItem {
+  judgeNumber: number;
+  label: string;
+  submitted: boolean;
+  accuracy: number | null;
+  presentation: number | null;
+  droppedAccuracy: boolean;
+  droppedPresentation: boolean;
+}
+
 export interface PoomsaeSideScoreSummary {
   p1Total: number | null;
   p2Total: number | null;
   finalTotal: number | null;
   p1Complete: boolean;
   p2Complete: boolean;
+  judgeCount?: 3 | 5 | 7;
+  activePoomsaeNo?: 1 | 2;
+  judgeBreakdown?: PoomsaeJudgeBreakdownItem[];
+}
+
+export interface PoomsaeJudgePresence {
+  id: string;
+  ringNumber: number;
+  judgeNumber: number;
+  sessionId: string;
+  online: boolean;
+  lastSeenAt: number;
 }
 

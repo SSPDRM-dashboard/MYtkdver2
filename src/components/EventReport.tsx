@@ -204,7 +204,7 @@ export function getMatchParticipants(m: RawMatch): {
     winnerRaw = m.blueName;
   }
 
-  if (!winnerRaw || winnerRaw === '-' || winnerRaw.toLowerCase() === 'bye') {
+  if (!winnerRaw || winnerRaw === '-' || ['bye', 'no winner', 'double no-show', 'no contest'].includes(winnerRaw.toLowerCase())) {
     return { winnerName: '', winnerClub: '', loserName: '', loserClub: '', isCompleted: false };
   }
   const wLower = winnerRaw.toLowerCase();
