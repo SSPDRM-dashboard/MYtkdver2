@@ -55,8 +55,10 @@ export function SearchWinner({
     const computeSide = (side: 'blue' | 'red') => {
       const sideScores = matching.filter((s) => s.side === side);
       if (sideScores.length === 0) return null;
-      const p1 = calculatePoomsaePanelScore(sideScores.filter((s) => s.poomsaeNo === 1), poomsaeJudgeCount);
-      const p2 = calculatePoomsaePanelScore(sideScores.filter((s) => s.poomsaeNo === 2), poomsaeJudgeCount);
+      const p1Raw = sideScores.filter((s) => s.poomsaeNo === 1);
+      const p2Raw = sideScores.filter((s) => s.poomsaeNo === 2);
+      const p1 = calculatePoomsaePanelScore(p1Raw, poomsaeJudgeCount);
+      const p2 = calculatePoomsaePanelScore(p2Raw, poomsaeJudgeCount);
       const hasP1 = p1.submittedCount > 0;
       const hasP2 = p2.submittedCount > 0;
       if (!hasP1 && !hasP2) return null;
@@ -65,10 +67,23 @@ export function SearchWinner({
         : hasP1
           ? p1.totalScore
           : p2.totalScore;
+      const buildJudgeList = (raw: PoomsaeJudgeScore[]) =>
+        Array.from({ length: poomsaeJudgeCount }, (_, idx) => {
+          const jIdx = idx + 1;
+          const found = raw.find((s) => s.judgeNumber === jIdx);
+          return {
+            judgeIndex: jIdx,
+            score: found ? round2(found.accuracy + found.presentation) : null,
+            accuracy: found ? found.accuracy : null,
+            presentation: found ? found.presentation : null,
+          };
+        });
       return {
         finalScore,
         p1Score: hasP1 ? p1.totalScore : null,
         p2Score: hasP2 ? p2.totalScore : null,
+        p1Judges: hasP1 ? buildJudgeList(p1Raw) : [],
+        p2Judges: hasP2 ? buildJudgeList(p2Raw) : [],
         acc: hasP1 && hasP2 ? round2((p1.avgAccuracy + p2.avgAccuracy) / 2) : (hasP1 ? p1.avgAccuracy : p2.avgAccuracy),
         pres: hasP1 && hasP2 ? round2((p1.avgPresentation + p2.avgPresentation) / 2) : (hasP1 ? p1.avgPresentation : p2.avgPresentation),
       };
@@ -482,18 +497,75 @@ export function SearchWinner({
                             </div>
                           </div>
                           {poomsaePts.blue && (
-                            <div className="mt-3 pt-2.5 border-t border-blue-200/70 flex items-center justify-between gap-2">
-                              <div className="text-[10px] font-mono text-slate-600 space-x-2">
-                                {poomsaePts.blue.p1Score !== null && (
-                                  <span>P1: <strong className="text-slate-800">{formatPoomsaeScore(poomsaePts.blue.p1Score)}</strong></span>
-                                )}
-                                {poomsaePts.blue.p2Score !== null && (
-                                  <span>P2: <strong className="text-slate-800">{formatPoomsaeScore(poomsaePts.blue.p2Score)}</strong></span>
-                                )}
+                            <div className="mt-3 pt-2.5 border-t border-blue-200/70 space-y-2.5">
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="text-[10px] font-mono text-slate-600 space-y-0.5">
+                                  <div className="space-x-2">
+                                    {poomsaePts.blue.p1Score !== null && (
+                                      <span>P1: <strong className="text-slate-800">{formatPoomsaeScore(poomsaePts.blue.p1Score)}</strong></span>
+                                    )}
+                                    {poomsaePts.blue.p2Score !== null && (
+                                      <span>P2: <strong className="text-slate-800">{formatPoomsaeScore(poomsaePts.blue.p2Score)}</strong></span>
+                                    )}
+                                  </div>
+                                  <div className="text-[10px] text-slate-500">
+                                    Acc <strong className="text-blue-700">{formatPoomsaeScore(poomsaePts.blue.acc)}</strong> · Pres <strong className="text-blue-700">{formatPoomsaeScore(poomsaePts.blue.pres)}</strong>
+                                  </div>
+                                </div>
+                                <span className="font-mono text-base font-black text-blue-700 bg-white px-2.5 py-0.5 rounded-lg border border-blue-200 shadow-sm tabular-nums">
+                                  {formatPoomsaeScore(poomsaePts.blue.finalScore)}
+                                </span>
                               </div>
-                              <span className="font-mono text-base font-black text-blue-700 bg-white px-2.5 py-0.5 rounded-lg border border-blue-200 shadow-sm tabular-nums">
-                                {formatPoomsaeScore(poomsaePts.blue.finalScore)}
-                              </span>
+                              {poomsaePts.blue.p1Judges.length > 0 && (
+                                <div>
+                                  {poomsaePts.blue.p2Judges.length > 0 && (
+                                    <div className="text-[9px] font-black uppercase tracking-wider text-blue-600/80 mb-1">P1 Referees</div>
+                                  )}
+                                  <div className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${poomsaePts.blue.p1Judges.length}, minmax(0, 1fr))` }}>
+                                    {poomsaePts.blue.p1Judges.map((j) => (
+                                      <div
+                                        key={`b-p1-${j.judgeIndex}`}
+                                        className="bg-white/90 border border-blue-200/80 rounded-lg py-1.5 px-1 text-center font-mono"
+                                      >
+                                        <div className="text-[9px] font-bold text-slate-400 leading-none">J{j.judgeIndex}</div>
+                                        <div className="text-xs font-black text-blue-700 mt-0.5 tabular-nums">
+                                          {j.score !== null ? formatPoomsaeScore(j.score) : '--'}
+                                        </div>
+                                        {j.score !== null && (
+                                          <div className="mt-1 pt-1 border-t border-blue-100 text-[9px] leading-tight text-slate-500 tabular-nums">
+                                            <div>A: <strong className="text-slate-700">{formatPoomsaeScore(j.accuracy ?? 0)}</strong></div>
+                                            <div>P: <strong className="text-slate-700">{formatPoomsaeScore(j.presentation ?? 0)}</strong></div>
+                                          </div>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                              {poomsaePts.blue.p2Judges.length > 0 && (
+                                <div>
+                                  <div className="text-[9px] font-black uppercase tracking-wider text-blue-600/80 mb-1">P2 Referees</div>
+                                  <div className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${poomsaePts.blue.p2Judges.length}, minmax(0, 1fr))` }}>
+                                    {poomsaePts.blue.p2Judges.map((j) => (
+                                      <div
+                                        key={`b-p2-${j.judgeIndex}`}
+                                        className="bg-white/90 border border-blue-200/80 rounded-lg py-1.5 px-1 text-center font-mono"
+                                      >
+                                        <div className="text-[9px] font-bold text-slate-400 leading-none">J{j.judgeIndex}</div>
+                                        <div className="text-xs font-black text-blue-700 mt-0.5 tabular-nums">
+                                          {j.score !== null ? formatPoomsaeScore(j.score) : '--'}
+                                        </div>
+                                        {j.score !== null && (
+                                          <div className="mt-1 pt-1 border-t border-blue-100 text-[9px] leading-tight text-slate-500 tabular-nums">
+                                            <div>A: <strong className="text-slate-700">{formatPoomsaeScore(j.accuracy ?? 0)}</strong></div>
+                                            <div>P: <strong className="text-slate-700">{formatPoomsaeScore(j.presentation ?? 0)}</strong></div>
+                                          </div>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>
@@ -520,18 +592,75 @@ export function SearchWinner({
                             </div>
                           </div>
                           {poomsaePts.red && (
-                            <div className="mt-3 pt-2.5 border-t border-red-200/70 flex items-center justify-between gap-2">
-                              <div className="text-[10px] font-mono text-slate-600 space-x-2">
-                                {poomsaePts.red.p1Score !== null && (
-                                  <span>P1: <strong className="text-slate-800">{formatPoomsaeScore(poomsaePts.red.p1Score)}</strong></span>
-                                )}
-                                {poomsaePts.red.p2Score !== null && (
-                                  <span>P2: <strong className="text-slate-800">{formatPoomsaeScore(poomsaePts.red.p2Score)}</strong></span>
-                                )}
+                            <div className="mt-3 pt-2.5 border-t border-red-200/70 space-y-2.5">
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="text-[10px] font-mono text-slate-600 space-y-0.5">
+                                  <div className="space-x-2">
+                                    {poomsaePts.red.p1Score !== null && (
+                                      <span>P1: <strong className="text-slate-800">{formatPoomsaeScore(poomsaePts.red.p1Score)}</strong></span>
+                                    )}
+                                    {poomsaePts.red.p2Score !== null && (
+                                      <span>P2: <strong className="text-slate-800">{formatPoomsaeScore(poomsaePts.red.p2Score)}</strong></span>
+                                    )}
+                                  </div>
+                                  <div className="text-[10px] text-slate-500">
+                                    Acc <strong className="text-red-700">{formatPoomsaeScore(poomsaePts.red.acc)}</strong> · Pres <strong className="text-red-700">{formatPoomsaeScore(poomsaePts.red.pres)}</strong>
+                                  </div>
+                                </div>
+                                <span className="font-mono text-base font-black text-red-700 bg-white px-2.5 py-0.5 rounded-lg border border-red-200 shadow-sm tabular-nums">
+                                  {formatPoomsaeScore(poomsaePts.red.finalScore)}
+                                </span>
                               </div>
-                              <span className="font-mono text-base font-black text-red-700 bg-white px-2.5 py-0.5 rounded-lg border border-red-200 shadow-sm tabular-nums">
-                                {formatPoomsaeScore(poomsaePts.red.finalScore)}
-                              </span>
+                              {poomsaePts.red.p1Judges.length > 0 && (
+                                <div>
+                                  {poomsaePts.red.p2Judges.length > 0 && (
+                                    <div className="text-[9px] font-black uppercase tracking-wider text-red-600/80 mb-1">P1 Referees</div>
+                                  )}
+                                  <div className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${poomsaePts.red.p1Judges.length}, minmax(0, 1fr))` }}>
+                                    {poomsaePts.red.p1Judges.map((j) => (
+                                      <div
+                                        key={`r-p1-${j.judgeIndex}`}
+                                        className="bg-white/90 border border-red-200/80 rounded-lg py-1.5 px-1 text-center font-mono"
+                                      >
+                                        <div className="text-[9px] font-bold text-slate-400 leading-none">J{j.judgeIndex}</div>
+                                        <div className="text-xs font-black text-red-700 mt-0.5 tabular-nums">
+                                          {j.score !== null ? formatPoomsaeScore(j.score) : '--'}
+                                        </div>
+                                        {j.score !== null && (
+                                          <div className="mt-1 pt-1 border-t border-red-100 text-[9px] leading-tight text-slate-500 tabular-nums">
+                                            <div>A: <strong className="text-slate-700">{formatPoomsaeScore(j.accuracy ?? 0)}</strong></div>
+                                            <div>P: <strong className="text-slate-700">{formatPoomsaeScore(j.presentation ?? 0)}</strong></div>
+                                          </div>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                              {poomsaePts.red.p2Judges.length > 0 && (
+                                <div>
+                                  <div className="text-[9px] font-black uppercase tracking-wider text-red-600/80 mb-1">P2 Referees</div>
+                                  <div className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${poomsaePts.red.p2Judges.length}, minmax(0, 1fr))` }}>
+                                    {poomsaePts.red.p2Judges.map((j) => (
+                                      <div
+                                        key={`r-p2-${j.judgeIndex}`}
+                                        className="bg-white/90 border border-red-200/80 rounded-lg py-1.5 px-1 text-center font-mono"
+                                      >
+                                        <div className="text-[9px] font-bold text-slate-400 leading-none">J{j.judgeIndex}</div>
+                                        <div className="text-xs font-black text-red-700 mt-0.5 tabular-nums">
+                                          {j.score !== null ? formatPoomsaeScore(j.score) : '--'}
+                                        </div>
+                                        {j.score !== null && (
+                                          <div className="mt-1 pt-1 border-t border-red-100 text-[9px] leading-tight text-slate-500 tabular-nums">
+                                            <div>A: <strong className="text-slate-700">{formatPoomsaeScore(j.accuracy ?? 0)}</strong></div>
+                                            <div>P: <strong className="text-slate-700">{formatPoomsaeScore(j.presentation ?? 0)}</strong></div>
+                                          </div>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>
