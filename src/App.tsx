@@ -54,7 +54,8 @@ import { QRCodeSVG } from 'qrcode.react';
 import { MatchData, RingStatus, EventData, BoutMapping, MatchHistoryItem, AdminBoutOverride, RingWinnerBroadcast, RingTimerState, RingPoomsaeSelection, PoomsaeJudgeScore, RingPoomsaeScoringTarget, PoomsaeSideScoreSummary, PoomsaeJudgeBreakdownItem, PoomsaeJudgePresence } from './types';
 import { PoomsaeScreenView } from './components/PoomsaeScreenView';
 import { JudgeScoringView } from './components/JudgeScoringView';
-import { calculatePoomsaePanelScore, clampAccuracy, clampPresentation, formatPoomsaeScore, round2 } from './lib/poomsaeScoring';
+import { WaychampSettings } from './components/WaychampSettings';
+import { buildPoomsaeJudgeScoreDocId, calculatePoomsaePanelScore, clampAccuracy, clampPresentation, formatPoomsaeScore, round2 } from './lib/poomsaeScoring';
 import { TASheet } from './components/TASheet';
 import { InspectionLogs } from './components/InspectionLogs';
 import { RingSummary } from './components/RingSummary';
@@ -6495,6 +6496,7 @@ export default function App() {
                         poomsaeJudgePresence={poomsaeJudgePresence}
                         onUpdatePoomsaeTarget={(patch) => handleUpdateRingPoomsaeTarget(selectedRingObj.ringNumber, patch)}
                         onClearPoomsaeScores={(opts) => handleClearRingPoomsaeScores(selectedRingObj.ringNumber, opts)}
+                        onSubmitPoomsaeScore={handleSubmitPoomsaeJudgeScore}
                         onUpdatePoomsaeScore={handleSubmitPoomsaeJudgeScore}
                       />
                     </div>
@@ -7000,6 +7002,7 @@ export default function App() {
                       poomsaeJudgePresence={poomsaeJudgePresence}
                       onUpdatePoomsaeTarget={(patch) => handleUpdateRingPoomsaeTarget(ring.ringNumber, patch)}
                       onClearPoomsaeScores={(opts) => handleClearRingPoomsaeScores(ring.ringNumber, opts)}
+                      onSubmitPoomsaeScore={handleSubmitPoomsaeJudgeScore}
                       onUpdatePoomsaeScore={handleSubmitPoomsaeJudgeScore}
                     />
                   ))
@@ -7047,6 +7050,7 @@ export default function App() {
                           poomsaeJudgePresence={poomsaeJudgePresence}
                           onUpdatePoomsaeTarget={(patch) => handleUpdateRingPoomsaeTarget(ring.ringNumber, patch)}
                           onClearPoomsaeScores={(opts) => handleClearRingPoomsaeScores(ring.ringNumber, opts)}
+                          onSubmitPoomsaeScore={handleSubmitPoomsaeJudgeScore}
                           onUpdatePoomsaeScore={handleSubmitPoomsaeJudgeScore}
                         />
                       ))}
@@ -7317,6 +7321,8 @@ export default function App() {
               onRestoreMatch={handleRestoreMatch}
               boutQueue={boutQueue}
               backupData={backupData}
+              poomsaeJudgeScores={poomsaeJudgeScores}
+              poomsaeJudgeCount={poomsaeJudgeCount}
             />
           )}
 
@@ -7384,6 +7390,12 @@ export default function App() {
 
           {activeTab === 'settings' && user?.role === 'admin' && (
             <div className="max-w-4xl mx-auto space-y-8">
+              <WaychampSettings
+                rings={rings.filter(r => !r.isDeleted && r.ringNumber <= visibleRingsCount)}
+                eventName={getCurrentEventName() || publicEventName || ''}
+                eventDate={getCurrentEventDate() || ''}
+                namingMode={ringNamingMode}
+              />
               <div className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm space-y-6">
                 <h3 className="text-xl font-bold flex items-center gap-2">
                   <Settings size={24} className="text-slate-400" />
@@ -7447,6 +7459,32 @@ export default function App() {
                     <p className="text-[10px] text-slate-500 mt-2">
                       Deploy a Google Apps Script as a Web App to receive match data.
                     </p>
+                  </div>
+
+                  <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-bold text-slate-700">Number of Judges (Current Championship)</p>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        Sets the default Poomsae judge panel count (3, 5, or 7 Judges) used across all rings and judge devices.
+                      </p>
+                    </div>
+                    <div className="inline-flex bg-white p-1 rounded-xl border border-slate-200 shadow-sm shrink-0">
+                      {([3, 5, 7] as const).map((cnt) => (
+                        <button
+                          key={cnt}
+                          type="button"
+                          onClick={() => setPoomsaeJudgeCount(cnt)}
+                          className={cn(
+                            "px-3.5 py-1.5 rounded-lg text-xs font-black uppercase transition-all cursor-pointer",
+                            poomsaeJudgeCount === cnt
+                              ? "bg-slate-900 text-white shadow-sm"
+                              : "text-slate-600 hover:text-slate-900"
+                          )}
+                        >
+                          {cnt} Judges
+                        </button>
+                      ))}
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -9389,6 +9427,7 @@ interface RingCardProps {
   poomsaeJudgePresence?: Record<string, PoomsaeJudgePresence>;
   onUpdatePoomsaeTarget?: (patch: Partial<RingPoomsaeScoringTarget>) => void;
   onClearPoomsaeScores?: (options?: { side?: 'blue' | 'red'; poomsaeNo?: 1 | 2 }) => void;
+  onSubmitPoomsaeScore?: (score: PoomsaeJudgeScore) => Promise<void> | void;
   onUpdatePoomsaeScore?: (score: PoomsaeJudgeScore) => void;
 }
 
@@ -10073,7 +10112,7 @@ function AddRingModal({ onClose, onAdd, existingRings, namingMode }: AddRingModa
   );
 }
 
-function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdate, onPointsUpdate, onUpdateTotalBouts, onStart, onDelete, onWinnerSelect, currentEventId, onForceSync, isAutoPull, onToggleAutoPull, user, boutNumberingMode = 'alphanumeric', layout = 'winner', showInspectionPopupSetting = true, onReturnToQueue, onResumeSuspended, onRemoveSuspended, onSuspendCurrentBout, transfers = [], activeNameFontScale, activeClubFontScale, getStageForBout, timerState, defaultTimerSeconds = 90, onStartTimer, onStopTimer, onResetTimer, controllerMode = 'kyorugi', onChangeControllerMode, poomsaeSelection, onChangePoomsaeSelection, defaultPoomsaeJudgeCount = 5, poomsaeScoringTarget, poomsaeJudgeScores = [], poomsaeJudgePresence = {}, onUpdatePoomsaeTarget, onClearPoomsaeScores }: RingCardProps & { currentEventId?: string | null, onForceSync?: (data: MatchData) => void }) {
+function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdate, onPointsUpdate, onUpdateTotalBouts, onStart, onDelete, onWinnerSelect, currentEventId, onForceSync, isAutoPull, onToggleAutoPull, user, boutNumberingMode = 'alphanumeric', layout = 'winner', showInspectionPopupSetting = true, onReturnToQueue, onResumeSuspended, onRemoveSuspended, onSuspendCurrentBout, transfers = [], activeNameFontScale, activeClubFontScale, getStageForBout, timerState, defaultTimerSeconds = 90, onStartTimer, onStopTimer, onResetTimer, controllerMode = 'kyorugi', onChangeControllerMode, poomsaeSelection, onChangePoomsaeSelection, defaultPoomsaeJudgeCount = 5, poomsaeScoringTarget, poomsaeJudgeScores = [], poomsaeJudgePresence = {}, onUpdatePoomsaeTarget, onClearPoomsaeScores, onSubmitPoomsaeScore }: RingCardProps & { currentEventId?: string | null, onForceSync?: (data: MatchData) => void }) {
   const [syncedNameScale] = useSyncedState<number>('tkd_active_name_font_scale', 100);
   const [syncedClubScale] = useSyncedState<number>('tkd_active_club_font_scale', 100);
   const effectiveNameScale = activeNameFontScale ?? syncedNameScale;
@@ -10093,6 +10132,52 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
     const id = setInterval(() => setPresenceTickMs(Date.now()), 5000);
     return () => clearInterval(id);
   }, [poomsaeJudgePresence]);
+
+  const [editingJudge, setEditingJudge] = useState<{
+    side: 'blue' | 'red';
+    poomsaeNo: 1 | 2;
+    judgeNumber: number;
+    accuracy: string;
+    presentation: string;
+  } | null>(null);
+  const [isSavingJudgeEdit, setIsSavingJudgeEdit] = useState(false);
+
+  const handleSaveJudgeEdit = async () => {
+    if (!editingJudge || !ring.currentBout || !onSubmitPoomsaeScore) return;
+    setIsSavingJudgeEdit(true);
+    try {
+      const eventIdStr = String(ring.currentBout.eventId || currentEventId || 'default');
+      const boutStr = String(ring.currentBout.bout);
+      const accNum = clampAccuracy(parseFloat(editingJudge.accuracy) || 0);
+      const presNum = clampPresentation(parseFloat(editingJudge.presentation) || 0);
+      const docId = buildPoomsaeJudgeScoreDocId({
+        ringNumber: ring.ringNumber,
+        eventId: eventIdStr,
+        boutNumber: boutStr,
+        side: editingJudge.side,
+        poomsaeNo: editingJudge.poomsaeNo,
+        judgeNumber: editingJudge.judgeNumber,
+      });
+      const payload: PoomsaeJudgeScore = {
+        id: docId,
+        ringNumber: ring.ringNumber,
+        eventId: eventIdStr,
+        boutNumber: boutStr,
+        boutKey: `${eventIdStr}_${boutStr}`,
+        side: editingJudge.side,
+        poomsaeNo: editingJudge.poomsaeNo,
+        judgeNumber: editingJudge.judgeNumber,
+        accuracy: accNum,
+        presentation: presNum,
+        total: round2(accNum + presNum),
+        submittedAt: Date.now(),
+      };
+      await onSubmitPoomsaeScore(payload);
+      setEditingJudge(null);
+    } finally {
+      setIsSavingJudgeEdit(false);
+    }
+  };
 
   const isJudgeConnected = (jNum: number): boolean => {
     const p = poomsaeJudgePresence?.[`r${ring.ringNumber}_j${jNum}`];
@@ -10488,7 +10573,32 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
               ) : null;
             })()}
             <div className="space-y-2 sm:space-y-3">
-              {/* Poomsae 1 & 2 Selection (Shown in Poomsae controller mode before Match Timer) */}
+              <div className="flex items-start justify-between pb-1 sm:pb-2">
+                <div className="flex flex-col gap-1 min-w-0 pr-2">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <Shield size={16} className={cn("shrink-0 mt-0.5", current.privacy_mode ? "text-red-500" : "text-green-500")} />
+                    <span className="text-xs sm:text-sm md:text-[15px] font-bold text-slate-600 uppercase leading-snug break-words whitespace-normal">{cleanPlaceholder(current.category)}</span>
+                  </div>
+                  {current.privacy_mode && (
+                    <span className="text-[9px] font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded w-fit inline-block">PDPA ACTIVE</span>
+                  )}
+                </div>
+                <span className="text-[9px] sm:text-[10px] font-bold text-red-600 bg-red-50 border border-red-100 px-2 py-0.5 rounded uppercase flex items-center gap-1.5 shadow-sm shrink-0">
+                  Live <div className="w-1.5 h-1.5 bg-red-600 rounded-full animate-pulse" />
+                </span>
+              </div>
+              
+              <div className="flex items-start gap-2.5 sm:gap-4">
+                <FighterSide color="blue" name={cleanPlaceholder(current.blue_name)} club={cleanPlaceholder(current.blue_club)} privacy={current.privacy_mode} inspected={current.blue_inspected} activeNameFontScale={effectiveNameScale} activeClubFontScale={effectiveClubScale} />
+                {!isPoomsaeMode && (
+                  <>
+                    <div className="text-[10px] sm:text-xs font-black text-slate-300 italic mt-4 sm:mt-6 shrink-0">VS</div>
+                    <FighterSide color="red" name={cleanPlaceholder(current.red_name)} club={cleanPlaceholder(current.red_club)} privacy={current.privacy_mode} inspected={current.red_inspected} activeNameFontScale={effectiveNameScale} activeClubFontScale={effectiveClubScale} />
+                  </>
+                )}
+              </div>
+
+              {/* Poomsae 1 & 2 Selection (Shown in Poomsae controller mode right on top of Match Timer) */}
               {controllerMode === 'poomsae' && onChangePoomsaeSelection && (() => {
                 const isSelForCurrentBout =
                   !poomsaeSelection?.boutKey ||
@@ -10497,7 +10607,7 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
                 const valPoomsae1 = isSelForCurrentBout ? (poomsaeSelection?.poomsae1 || '') : '';
                 const valPoomsae2 = isSelForCurrentBout ? (poomsaeSelection?.poomsae2 || '') : '';
                 return (
-                  <div className="pb-3 border-b border-slate-100">
+                  <div className="pt-3 border-t border-slate-100">
                     <div className="grid grid-cols-2 gap-2 sm:gap-3">
                       <div className="space-y-1 min-w-0">
                         <label
@@ -10545,31 +10655,6 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
                   </div>
                 );
               })()}
-
-              <div className="flex items-start justify-between pb-1 sm:pb-2">
-                <div className="flex flex-col gap-1 min-w-0 pr-2">
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <Shield size={16} className={cn("shrink-0 mt-0.5", current.privacy_mode ? "text-red-500" : "text-green-500")} />
-                    <span className="text-xs sm:text-sm md:text-[15px] font-bold text-slate-600 uppercase leading-snug break-words whitespace-normal">{cleanPlaceholder(current.category)}</span>
-                  </div>
-                  {current.privacy_mode && (
-                    <span className="text-[9px] font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded w-fit inline-block">PDPA ACTIVE</span>
-                  )}
-                </div>
-                <span className="text-[9px] sm:text-[10px] font-bold text-red-600 bg-red-50 border border-red-100 px-2 py-0.5 rounded uppercase flex items-center gap-1.5 shadow-sm shrink-0">
-                  Live <div className="w-1.5 h-1.5 bg-red-600 rounded-full animate-pulse" />
-                </span>
-              </div>
-              
-              <div className="flex items-start gap-2.5 sm:gap-4">
-                <FighterSide color="blue" name={cleanPlaceholder(current.blue_name)} club={cleanPlaceholder(current.blue_club)} privacy={current.privacy_mode} inspected={current.blue_inspected} activeNameFontScale={effectiveNameScale} activeClubFontScale={effectiveClubScale} />
-                {!isPoomsaeMode && (
-                  <>
-                    <div className="text-[10px] sm:text-xs font-black text-slate-300 italic mt-4 sm:mt-6 shrink-0">VS</div>
-                    <FighterSide color="red" name={cleanPlaceholder(current.red_name)} club={cleanPlaceholder(current.red_club)} privacy={current.privacy_mode} inspected={current.red_inspected} activeNameFontScale={effectiveNameScale} activeClubFontScale={effectiveClubScale} />
-                  </>
-                )}
-              </div>
 
               {/* Match Timer Controls (Shown in Poomsae controller mode; Kyorugi controller is without timer) */}
               {controllerMode === 'poomsae' && (onStartTimer || onStopTimer) && (
@@ -10870,14 +10955,22 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
                                     key={jNum}
                                     type="button"
                                     onClick={() =>
-                                      copyWithFeedback(
-                                        tag,
-                                        `${window.location.origin}${window.location.pathname}?view=judge&ring=${ring.ringNumber}&judge=${jNum}`
-                                      )
+                                      setEditingJudge({
+                                        side: 'blue',
+                                        poomsaeNo: activePoomsae,
+                                        judgeNumber: jNum,
+                                        accuracy: scoreDoc ? scoreDoc.accuracy.toFixed(1) : '4.0',
+                                        presentation: scoreDoc ? scoreDoc.presentation.toFixed(1) : '6.0',
+                                      })
                                     }
+                                    title={`Click to edit Judge ${jNum} score for Blue`}
                                     className={cn(
-                                      "p-1 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center justify-center min-h-[52px]",
-                                      scoreDoc ? "bg-emerald-50/80 border-emerald-300 text-slate-900" : "bg-white border-slate-200 text-slate-500"
+                                      "p-1 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center justify-center min-h-[52px] hover:ring-2 hover:ring-blue-400",
+                                      editingJudge?.side === 'blue' && editingJudge?.judgeNumber === jNum && editingJudge?.poomsaeNo === activePoomsae
+                                        ? "bg-blue-100 border-blue-500 ring-2 ring-blue-500 text-slate-900"
+                                        : scoreDoc
+                                          ? "bg-emerald-50/80 border-emerald-300 text-slate-900"
+                                          : "bg-white border-slate-200 text-slate-500"
                                     )}
                                   >
                                     <span className="text-[9px] font-black uppercase">J{jNum}</span>
@@ -10903,6 +10996,60 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
                                 );
                               })}
                             </div>
+
+                            {editingJudge && editingJudge.side === 'blue' && editingJudge.poomsaeNo === activePoomsae && (
+                              <div className="bg-white border border-blue-300 rounded-xl p-2.5 space-y-2 shadow-sm">
+                                <div className="flex items-center justify-between text-[10px] font-black uppercase text-blue-700">
+                                  <span>Edit J{editingJudge.judgeNumber} (Blue · P{activePoomsae})</span>
+                                  <span className="font-mono text-slate-900">
+                                    Total: {round2(clampAccuracy(parseFloat(editingJudge.accuracy) || 0) + clampPresentation(parseFloat(editingJudge.presentation) || 0)).toFixed(2)}
+                                  </span>
+                                </div>
+                                <div className="grid grid-cols-2 gap-2">
+                                  <label className="space-y-0.5">
+                                    <span className="block text-[9px] font-bold uppercase text-slate-500">Accuracy (0–4.0)</span>
+                                    <input
+                                      type="number"
+                                      step="0.1"
+                                      min="0"
+                                      max="4"
+                                      value={editingJudge.accuracy}
+                                      onChange={(e) => setEditingJudge({ ...editingJudge, accuracy: e.target.value })}
+                                      className="w-full px-2 py-1 rounded-lg border border-slate-300 text-xs font-mono font-bold text-slate-900 outline-none focus:border-blue-500"
+                                    />
+                                  </label>
+                                  <label className="space-y-0.5">
+                                    <span className="block text-[9px] font-bold uppercase text-slate-500">Pres (0–6.0)</span>
+                                    <input
+                                      type="number"
+                                      step="0.1"
+                                      min="0"
+                                      max="6"
+                                      value={editingJudge.presentation}
+                                      onChange={(e) => setEditingJudge({ ...editingJudge, presentation: e.target.value })}
+                                      className="w-full px-2 py-1 rounded-lg border border-slate-300 text-xs font-mono font-bold text-slate-900 outline-none focus:border-blue-500"
+                                    />
+                                  </label>
+                                </div>
+                                <div className="flex items-center justify-end gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingJudge(null)}
+                                    className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 text-[10px] font-bold uppercase cursor-pointer"
+                                  >
+                                    Cancel
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={isSavingJudgeEdit}
+                                    onClick={handleSaveJudgeEdit}
+                                    className="px-3 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-black uppercase cursor-pointer disabled:opacity-50"
+                                  >
+                                    {isSavingJudgeEdit ? 'Saving...' : 'Save'}
+                                  </button>
+                                </div>
+                              </div>
+                            )}
 
                             <div className="bg-slate-900 text-white rounded-xl p-2.5 flex items-center justify-between text-xs font-mono">
                               <span>Acc {formatPoomsaeScore(blueRes.avgAccuracy)} + Pres {formatPoomsaeScore(blueRes.avgPresentation)}</span>
@@ -10953,14 +11100,22 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
                                     key={jNum}
                                     type="button"
                                     onClick={() =>
-                                      copyWithFeedback(
-                                        tag,
-                                        `${window.location.origin}${window.location.pathname}?view=judge&ring=${ring.ringNumber}&judge=${jNum}`
-                                      )
+                                      setEditingJudge({
+                                        side: 'red',
+                                        poomsaeNo: activePoomsae,
+                                        judgeNumber: jNum,
+                                        accuracy: scoreDoc ? scoreDoc.accuracy.toFixed(1) : '4.0',
+                                        presentation: scoreDoc ? scoreDoc.presentation.toFixed(1) : '6.0',
+                                      })
                                     }
+                                    title={`Click to edit Judge ${jNum} score for Red`}
                                     className={cn(
-                                      "p-1 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center justify-center min-h-[52px]",
-                                      scoreDoc ? "bg-emerald-50/80 border-emerald-300 text-slate-900" : "bg-white border-slate-200 text-slate-500"
+                                      "p-1 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center justify-center min-h-[52px] hover:ring-2 hover:ring-red-400",
+                                      editingJudge?.side === 'red' && editingJudge?.judgeNumber === jNum && editingJudge?.poomsaeNo === activePoomsae
+                                        ? "bg-red-100 border-red-500 ring-2 ring-red-500 text-slate-900"
+                                        : scoreDoc
+                                          ? "bg-emerald-50/80 border-emerald-300 text-slate-900"
+                                          : "bg-white border-slate-200 text-slate-500"
                                     )}
                                   >
                                     <span className="text-[9px] font-black uppercase">J{jNum}</span>
@@ -10987,6 +11142,60 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
                               })}
                             </div>
 
+                            {editingJudge && editingJudge.side === 'red' && editingJudge.poomsaeNo === activePoomsae && (
+                              <div className="bg-white border border-red-300 rounded-xl p-2.5 space-y-2 shadow-sm">
+                                <div className="flex items-center justify-between text-[10px] font-black uppercase text-red-700">
+                                  <span>Edit J{editingJudge.judgeNumber} (Red · P{activePoomsae})</span>
+                                  <span className="font-mono text-slate-900">
+                                    Total: {round2(clampAccuracy(parseFloat(editingJudge.accuracy) || 0) + clampPresentation(parseFloat(editingJudge.presentation) || 0)).toFixed(2)}
+                                  </span>
+                                </div>
+                                <div className="grid grid-cols-2 gap-2">
+                                  <label className="space-y-0.5">
+                                    <span className="block text-[9px] font-bold uppercase text-slate-500">Accuracy (0–4.0)</span>
+                                    <input
+                                      type="number"
+                                      step="0.1"
+                                      min="0"
+                                      max="4"
+                                      value={editingJudge.accuracy}
+                                      onChange={(e) => setEditingJudge({ ...editingJudge, accuracy: e.target.value })}
+                                      className="w-full px-2 py-1 rounded-lg border border-slate-300 text-xs font-mono font-bold text-slate-900 outline-none focus:border-red-500"
+                                    />
+                                  </label>
+                                  <label className="space-y-0.5">
+                                    <span className="block text-[9px] font-bold uppercase text-slate-500">Pres (0–6.0)</span>
+                                    <input
+                                      type="number"
+                                      step="0.1"
+                                      min="0"
+                                      max="6"
+                                      value={editingJudge.presentation}
+                                      onChange={(e) => setEditingJudge({ ...editingJudge, presentation: e.target.value })}
+                                      className="w-full px-2 py-1 rounded-lg border border-slate-300 text-xs font-mono font-bold text-slate-900 outline-none focus:border-red-500"
+                                    />
+                                  </label>
+                                </div>
+                                <div className="flex items-center justify-end gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingJudge(null)}
+                                    className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 text-[10px] font-bold uppercase cursor-pointer"
+                                  >
+                                    Cancel
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={isSavingJudgeEdit}
+                                    onClick={handleSaveJudgeEdit}
+                                    className="px-3 py-1 rounded-lg bg-red-600 hover:bg-red-700 text-white text-[10px] font-black uppercase cursor-pointer disabled:opacity-50"
+                                  >
+                                    {isSavingJudgeEdit ? 'Saving...' : 'Save'}
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+
                             <div className="bg-slate-900 text-white rounded-xl p-2.5 flex items-center justify-between text-xs font-mono">
                               <span>Acc {formatPoomsaeScore(redRes.avgAccuracy)} + Pres {formatPoomsaeScore(redRes.avgPresentation)}</span>
                               <span className="text-amber-300 font-black text-sm">
@@ -10999,11 +11208,55 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
                     </div>
 
                     {/* Final Calculated Match Score Output Bar */}
-                    <div className="bg-slate-900 text-white rounded-xl p-3 flex items-center justify-between gap-3 font-mono">
+                    <div className="bg-slate-900 text-white rounded-xl p-3 flex flex-wrap items-center justify-between gap-3 font-mono">
                       <div>
                         <div className="text-[9px] uppercase tracking-wider text-slate-400 font-bold">Match Totals</div>
                         <div className="text-xs text-slate-200">Official Poomsae Final Score Summary</div>
                       </div>
+                      {(() => {
+                        const winnerColor: 'BLUE' | 'RED' | 'TIE' | null = hasRedAthlete
+                          ? blueFinal !== null && redFinal !== null
+                            ? blueFinal > redFinal
+                              ? 'BLUE'
+                              : redFinal > blueFinal
+                                ? 'RED'
+                                : 'TIE'
+                            : null
+                          : blueFinal !== null
+                            ? 'BLUE'
+                            : null;
+
+                        if (!winnerColor) return null;
+
+                        if (winnerColor === 'BLUE') {
+                          return (
+                            <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-[#0077c8]/30 border border-cyan-400/60 shadow-sm">
+                              <span className="w-2.5 h-2.5 rounded-full bg-[#00a2e8] shrink-0" />
+                              <span className="text-xs sm:text-sm font-black tracking-wider uppercase text-cyan-300">
+                                BLUE WINNER
+                              </span>
+                            </div>
+                          );
+                        }
+                        if (winnerColor === 'RED') {
+                          return (
+                            <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-[#d91e2a]/30 border border-red-400/60 shadow-sm">
+                              <span className="w-2.5 h-2.5 rounded-full bg-[#ff3b47] shrink-0" />
+                              <span className="text-xs sm:text-sm font-black tracking-wider uppercase text-red-300">
+                                RED WINNER
+                              </span>
+                            </div>
+                          );
+                        }
+                        return (
+                          <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-amber-500/20 border border-amber-400/60 shadow-sm">
+                            <span className="w-2.5 h-2.5 rounded-full bg-amber-400 shrink-0" />
+                            <span className="text-xs sm:text-sm font-black tracking-wider uppercase text-amber-300">
+                              TIE
+                            </span>
+                          </div>
+                        );
+                      })()}
                       <div className="flex items-center gap-4 text-right">
                         <div>
                           <div className="text-[9px] uppercase text-cyan-300 font-black">Blue Final</div>

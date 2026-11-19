@@ -1227,22 +1227,11 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
         {activeWinner && (() => {
           const winnerLogo = activeWinner.winnerSide === 'Red' ? activeWinner.redLogo : activeWinner.blueLogo;
           const displayCat = cleanText(activeWinner.category);
-          const isCompactScreen2 = showFinalScore;
           return (
-            <div
-              className={cn(
-                'absolute z-50 flex items-center justify-center pointer-events-auto',
-                isCompactScreen2
-                  ? 'inset-0 p-4 sm:p-6 bg-black/25 backdrop-blur-[1px]'
-                  : 'inset-4 sm:inset-10 md:inset-16 lg:inset-24'
-              )}
-            >
+            <div className="absolute inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/25 backdrop-blur-[1px] pointer-events-auto">
               <div
                 className={cn(
-                  'relative border-2 border-white/90 rounded-2xl flex flex-col items-center justify-center text-center overflow-hidden shadow-[0_25px_85px_rgba(0,0,0,0.9)]',
-                  isCompactScreen2
-                    ? 'w-[92%] sm:w-[84%] lg:w-[78%] min-h-[54%] max-h-[70%] px-6 sm:px-10 pt-16 pb-8'
-                    : 'w-full h-full px-6 sm:px-12 py-10',
+                  'relative w-[92%] sm:w-[84%] lg:w-[78%] min-h-[54%] max-h-[70%] px-6 sm:px-10 pt-16 pb-8 border-2 border-white/90 rounded-2xl flex flex-col items-center justify-center text-center overflow-hidden shadow-[0_25px_85px_rgba(0,0,0,0.9)]',
                   winnerIsNoWinner
                     ? 'bg-gradient-to-b from-slate-700 via-slate-800 to-slate-950 shadow-[0_0_80px_rgba(245,158,11,0.45)]'
                     : winnerIsRed
@@ -1251,14 +1240,7 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
                 )}
               >
                 {/* Top Header: Ring & Bout */}
-                <div
-                  className={cn(
-                    'absolute left-0 right-0 flex items-center justify-center gap-2 font-black uppercase tracking-widest text-white/95 px-4 drop-shadow',
-                    isCompactScreen2
-                      ? 'top-3.5 sm:top-4 text-xs sm:text-sm'
-                      : 'top-4 sm:top-6 text-xs sm:text-sm md:text-base'
-                  )}
-                >
+                <div className="absolute top-3.5 sm:top-4 left-0 right-0 flex items-center justify-center gap-2 text-xs sm:text-sm font-black uppercase tracking-widest text-white/95 px-4 drop-shadow">
                   <span>RING {ringName}</span>
                   <span aria-hidden="true">•</span>
                   <span>BOUT {formatBoutNumber(ring.ringNumber, activeWinner.boutNumber, effectiveBoutMode)}</span>
@@ -1272,51 +1254,27 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
 
                 {/* Category Name */}
                 {displayCat && (
-                  <div
-                    className={cn(
-                      'absolute left-4 right-4 font-bold uppercase tracking-wider text-cyan-200/95 truncate px-4 drop-shadow',
-                      isCompactScreen2
-                        ? 'top-9 sm:top-10 text-[11px] sm:text-xs md:text-sm'
-                        : 'top-12 sm:top-14 text-[11px] sm:text-xs md:text-sm'
-                    )}
-                  >
+                  <div className="absolute top-9 sm:top-10 left-4 right-4 text-[11px] sm:text-xs md:text-sm font-bold uppercase tracking-wider text-cyan-200/95 truncate px-4 drop-shadow">
                     {displayCat}
                   </div>
                 )}
 
                 {/* Center Content: Logo + Winner Label + Athlete Name + Club */}
-                <div
-                  className={cn(
-                    'flex flex-col items-center justify-center max-w-[94%]',
-                    isCompactScreen2 ? 'gap-2.5 sm:gap-3 mt-4' : 'gap-3 sm:gap-4 mt-8'
-                  )}
-                >
+                <div className="flex flex-col items-center justify-center max-w-[94%] gap-2.5 sm:gap-3 mt-4">
                   {/* Logo / Emblem / Trophy */}
-                  <div
-                    className={cn(
-                      'bg-black/35 border-2 border-white/55 shadow-xl flex items-center justify-center overflow-hidden',
-                      isCompactScreen2
-                        ? 'w-14 h-14 sm:w-16 sm:h-16 rounded-2xl p-1.5'
-                        : 'w-16 h-16 sm:w-20 sm:h-20 rounded-2xl p-2'
-                    )}
-                  >
+                  <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl p-1.5 bg-black/35 border-2 border-white/55 shadow-xl flex items-center justify-center overflow-hidden">
                     {winnerLogo ? (
                       <img src={winnerLogo} alt="Winner Logo" className="w-full h-full object-contain drop-shadow" />
                     ) : (
                       <Trophy
-                        size={isCompactScreen2 ? 30 : 36}
+                        size={30}
                         className="text-amber-300 drop-shadow-[0_2px_8px_rgba(251,191,36,0.6)]"
                       />
                     )}
                   </div>
 
                   {/* Winner Side / Status Label */}
-                  <span
-                    className={cn(
-                      'font-black uppercase tracking-[0.24em] text-amber-300 drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)]',
-                      isCompactScreen2 ? 'text-xs sm:text-sm' : 'text-xs sm:text-sm md:text-base'
-                    )}
-                  >
+                  <span className="text-xs sm:text-sm font-black uppercase tracking-[0.24em] text-amber-300 drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)]">
                     {winnerIsNoWinner
                       ? 'DOUBLE NO-SHOW'
                       : activeWinner.winnerSide === 'Completed'
@@ -1330,17 +1288,11 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
                   <h1
                     className={cn(
                       'font-black italic text-white uppercase tracking-wide drop-shadow-[0_4px_16px_rgba(0,0,0,0.8)] leading-tight break-words whitespace-normal max-w-full',
-                      isCompactScreen2
-                        ? cleanText(activeWinner.winnerName).length > 34
-                          ? 'text-xl sm:text-2xl md:text-3xl'
-                          : cleanText(activeWinner.winnerName).length > 22
-                            ? 'text-2xl sm:text-3xl md:text-4xl'
-                            : 'text-2xl sm:text-4xl md:text-5xl'
-                        : cleanText(activeWinner.winnerName).length > 34
-                          ? 'text-xl sm:text-2xl md:text-3xl lg:text-4xl'
-                          : cleanText(activeWinner.winnerName).length > 22
-                            ? 'text-2xl sm:text-3xl md:text-4xl lg:text-5xl'
-                            : 'text-3xl sm:text-5xl md:text-6xl lg:text-[4rem]'
+                      cleanText(activeWinner.winnerName).length > 34
+                        ? 'text-xl sm:text-2xl md:text-3xl'
+                        : cleanText(activeWinner.winnerName).length > 22
+                          ? 'text-2xl sm:text-3xl md:text-4xl'
+                          : 'text-2xl sm:text-4xl md:text-5xl'
                     )}
                   >
                     {cleanText(activeWinner.winnerName) || 'WINNER'}
@@ -1351,13 +1303,9 @@ export const PoomsaeScreenView: React.FC<PoomsaeScreenViewProps> = ({
                     <p
                       className={cn(
                         'font-black text-amber-200 uppercase tracking-wider drop-shadow-[0_3px_10px_rgba(0,0,0,0.8)] break-words whitespace-normal max-w-full leading-tight',
-                        isCompactScreen2
-                          ? cleanText(activeWinner.winnerClub).length > 30
-                            ? 'text-sm sm:text-lg md:text-xl'
-                            : 'text-base sm:text-xl md:text-2xl'
-                          : cleanText(activeWinner.winnerClub).length > 30
-                            ? 'text-sm sm:text-xl md:text-2xl'
-                            : 'text-base sm:text-2xl md:text-3xl'
+                        cleanText(activeWinner.winnerClub).length > 30
+                          ? 'text-sm sm:text-lg md:text-xl'
+                          : 'text-base sm:text-xl md:text-2xl'
                       )}
                     >
                       {cleanText(activeWinner.winnerClub)}

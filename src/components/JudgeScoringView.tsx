@@ -387,6 +387,12 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
   }, [ring.ringNumber, judgeNumber, onReportPresence]);
 
   const isJudgeStandby = judgeNumber > effectiveJudgeCount;
+  const isBlueLocked = Boolean(
+    existingBlue || (blueSubmitSuccessAt && (!existingBlue || blueSubmitSuccessAt >= existingBlue.submittedAt))
+  );
+  const isRedLocked = Boolean(
+    existingRed || (redSubmitSuccessAt && (!existingRed || redSubmitSuccessAt >= existingRed.submittedAt))
+  );
 
   const bluePresTotal = clampPresentation(round1(blueSp + blueRt + blueEe));
   const redPresTotal = clampPresentation(round1(redSp + redRt + redEe));
@@ -402,6 +408,7 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
   const handleManualSubmitSide = async (side: 'blue' | 'red') => {
     if (!current || isJudgeStandby) return;
     const isBlue = side === 'blue';
+    if ((isBlue && isBlueLocked) || (!isBlue && isRedLocked)) return;
     if (isBlue) setIsSubmittingBlue(true);
     else setIsSubmittingRed(true);
     setSubmitError(null);
@@ -639,9 +646,9 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                       {/* -0.1 Minor (Left tall button, spans 2 rows) */}
                       <button
                         type="button"
-                        disabled={!current || isJudgeStandby}
+                        disabled={!current || isJudgeStandby || isBlueLocked}
                         onClick={() => setBlueAcc((prev) => clampAccuracy(prev - 0.1))}
-                        className="col-start-1 row-start-1 row-span-2 min-h-[76px] sm:min-h-[96px] rounded-xl sm:rounded-2xl bg-[#33352f] hover:bg-[#3f4139] border-2 border-[#b5a642]/60 text-[#fde047] font-black text-xs sm:text-base md:text-lg active:scale-[0.98] transition-all cursor-pointer flex flex-col items-center justify-center p-1 shadow-md disabled:opacity-40 select-none touch-manipulation"
+                        className="col-start-1 row-start-1 row-span-2 min-h-[76px] sm:min-h-[96px] rounded-xl sm:rounded-2xl bg-[#33352f] hover:bg-[#3f4139] border-2 border-[#b5a642]/60 text-[#fde047] font-black text-xs sm:text-base md:text-lg active:scale-[0.98] transition-all cursor-pointer flex flex-col items-center justify-center p-1 shadow-md disabled:opacity-40 disabled:cursor-not-allowed select-none touch-manipulation"
                       >
                         <span className="text-xs sm:text-base md:text-xl font-black tracking-wide">-0.1 Minor</span>
                       </button>
@@ -649,9 +656,9 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                       {/* -0.3 Major (Right top) */}
                       <button
                         type="button"
-                        disabled={!current || isJudgeStandby}
+                        disabled={!current || isJudgeStandby || isBlueLocked}
                         onClick={() => setBlueAcc((prev) => clampAccuracy(prev - 0.3))}
-                        className="col-start-2 row-start-1 min-h-[36px] sm:min-h-[44px] rounded-lg sm:rounded-xl bg-[#4b1d7d] hover:bg-[#5c2499] border border-[#a855f7]/60 text-white font-black text-[10px] sm:text-xs md:text-sm active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center p-1 shadow-md disabled:opacity-40 select-none touch-manipulation"
+                        className="col-start-2 row-start-1 min-h-[36px] sm:min-h-[44px] rounded-lg sm:rounded-xl bg-[#4b1d7d] hover:bg-[#5c2499] border border-[#a855f7]/60 text-white font-black text-[10px] sm:text-xs md:text-sm active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center p-1 shadow-md disabled:opacity-40 disabled:cursor-not-allowed select-none touch-manipulation"
                       >
                         <span>-0.3 Major</span>
                       </button>
@@ -659,9 +666,9 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                       {/* +0.1 Undo (Right bottom) */}
                       <button
                         type="button"
-                        disabled={!current || isJudgeStandby}
+                        disabled={!current || isJudgeStandby || isBlueLocked}
                         onClick={() => setBlueAcc((prev) => clampAccuracy(prev + 0.1))}
-                        className="col-start-2 row-start-2 min-h-[36px] sm:min-h-[44px] rounded-lg sm:rounded-xl bg-[#0055b3] hover:bg-[#0066d6] border border-[#38bdf8]/60 text-white font-black text-[10px] sm:text-xs md:text-sm active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center gap-0.5 p-1 shadow-md disabled:opacity-40 select-none touch-manipulation"
+                        className="col-start-2 row-start-2 min-h-[36px] sm:min-h-[44px] rounded-lg sm:rounded-xl bg-[#0055b3] hover:bg-[#0066d6] border border-[#38bdf8]/60 text-white font-black text-[10px] sm:text-xs md:text-sm active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center gap-0.5 p-1 shadow-md disabled:opacity-40 disabled:cursor-not-allowed select-none touch-manipulation"
                       >
                         <Plus size={12} strokeWidth={3} />
                         <span>+0.1 Undo</span>
@@ -713,7 +720,7 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                         <button
                           key={val}
                           type="button"
-                          disabled={!current || isJudgeStandby}
+                          disabled={!current || isJudgeStandby || isBlueLocked}
                           onClick={() => setBlueSp(val)}
                           className={cn(
                             'h-7 sm:h-8 md:h-9 rounded font-black text-[8px] sm:text-[11px] md:text-xs p-0 transition-all cursor-pointer flex items-center justify-center tabular-nums leading-none overflow-hidden select-none touch-manipulation active:scale-95 disabled:opacity-40',
@@ -731,7 +738,7 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                         <button
                           key={val}
                           type="button"
-                          disabled={!current || isJudgeStandby}
+                          disabled={!current || isJudgeStandby || isBlueLocked}
                           onClick={() => setBlueSp(val)}
                           className={cn(
                             'h-7 sm:h-8 md:h-9 rounded font-black text-[8px] sm:text-[11px] md:text-xs p-0 transition-all cursor-pointer flex items-center justify-center tabular-nums leading-none overflow-hidden select-none touch-manipulation active:scale-95 disabled:opacity-40',
@@ -757,7 +764,7 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                         <button
                           key={val}
                           type="button"
-                          disabled={!current || isJudgeStandby}
+                          disabled={!current || isJudgeStandby || isBlueLocked}
                           onClick={() => setBlueRt(val)}
                           className={cn(
                             'h-7 sm:h-8 md:h-9 rounded font-black text-[8px] sm:text-[11px] md:text-xs p-0 transition-all cursor-pointer flex items-center justify-center tabular-nums leading-none overflow-hidden select-none touch-manipulation active:scale-95 disabled:opacity-40',
@@ -775,7 +782,7 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                         <button
                           key={val}
                           type="button"
-                          disabled={!current || isJudgeStandby}
+                          disabled={!current || isJudgeStandby || isBlueLocked}
                           onClick={() => setBlueRt(val)}
                           className={cn(
                             'h-7 sm:h-8 md:h-9 rounded font-black text-[8px] sm:text-[11px] md:text-xs p-0 transition-all cursor-pointer flex items-center justify-center tabular-nums leading-none overflow-hidden select-none touch-manipulation active:scale-95 disabled:opacity-40',
@@ -801,7 +808,7 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                         <button
                           key={val}
                           type="button"
-                          disabled={!current || isJudgeStandby}
+                          disabled={!current || isJudgeStandby || isBlueLocked}
                           onClick={() => setBlueEe(val)}
                           className={cn(
                             'h-7 sm:h-8 md:h-9 rounded font-black text-[8px] sm:text-[11px] md:text-xs p-0 transition-all cursor-pointer flex items-center justify-center tabular-nums leading-none overflow-hidden select-none touch-manipulation active:scale-95 disabled:opacity-40',
@@ -819,7 +826,7 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                         <button
                           key={val}
                           type="button"
-                          disabled={!current || isJudgeStandby}
+                          disabled={!current || isJudgeStandby || isBlueLocked}
                           onClick={() => setBlueEe(val)}
                           className={cn(
                             'h-7 sm:h-8 md:h-9 rounded font-black text-[8px] sm:text-[11px] md:text-xs p-0 transition-all cursor-pointer flex items-center justify-center tabular-nums leading-none overflow-hidden select-none touch-manipulation active:scale-95 disabled:opacity-40',
@@ -868,19 +875,19 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
 
                       <button
                         type="button"
-                        disabled={!current || isJudgeStandby || isSubmittingBlue}
+                        disabled={!current || isJudgeStandby || isSubmittingBlue || isBlueLocked}
                         onClick={() => handleManualSubmitSide('blue')}
                         className={cn(
-                          'flex-1 sm:flex-initial min-h-[36px] sm:min-h-[48px] px-3 sm:px-6 rounded-lg sm:rounded-xl font-black text-[10px] sm:text-sm uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] cursor-pointer disabled:opacity-40 shadow-lg select-none touch-manipulation',
-                          blueSubmitSuccessAt && (!existingBlue || blueSubmitSuccessAt >= existingBlue.submittedAt)
+                          'flex-1 sm:flex-initial min-h-[36px] sm:min-h-[48px] px-3 sm:px-6 rounded-lg sm:rounded-xl font-black text-[10px] sm:text-sm uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] cursor-pointer disabled:opacity-75 disabled:cursor-not-allowed shadow-lg select-none touch-manipulation',
+                          isBlueLocked
                             ? 'bg-gradient-to-r from-emerald-500 to-green-600 border border-emerald-300 text-white shadow-[0_0_12px_rgba(16,185,129,0.7)]'
                             : 'bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-500 hover:to-emerald-600 border border-emerald-400 text-white shadow-[0_0_10px_rgba(16,185,129,0.5)]'
                         )}
                       >
-                        {blueSubmitSuccessAt && (!existingBlue || blueSubmitSuccessAt >= existingBlue.submittedAt) ? (
+                        {isBlueLocked ? (
                           <>
                             <CheckCircle2 size={14} />
-                            <span>SUBMITTED</span>
+                            <span>SUBMITTED (LOCKED)</span>
                           </>
                         ) : (
                           <>
@@ -958,9 +965,9 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                         {/* -0.3 Major (Left top) */}
                         <button
                           type="button"
-                          disabled={!current || isJudgeStandby}
+                          disabled={!current || isJudgeStandby || isRedLocked}
                           onClick={() => setRedAcc((prev) => clampAccuracy(prev - 0.3))}
-                          className="col-start-1 row-start-1 min-h-[36px] sm:min-h-[44px] rounded-lg sm:rounded-xl bg-[#730814] hover:bg-[#8c0a18] border border-[#f43f5e]/60 text-white font-black text-[10px] sm:text-xs md:text-sm active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center p-1 shadow-md disabled:opacity-40 select-none touch-manipulation"
+                          className="col-start-1 row-start-1 min-h-[36px] sm:min-h-[44px] rounded-lg sm:rounded-xl bg-[#730814] hover:bg-[#8c0a18] border border-[#f43f5e]/60 text-white font-black text-[10px] sm:text-xs md:text-sm active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center p-1 shadow-md disabled:opacity-40 disabled:cursor-not-allowed select-none touch-manipulation"
                         >
                           <span>-0.3 Major</span>
                         </button>
@@ -968,9 +975,9 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                         {/* +0.1 Undo (Left bottom) */}
                         <button
                           type="button"
-                          disabled={!current || isJudgeStandby}
+                          disabled={!current || isJudgeStandby || isRedLocked}
                           onClick={() => setRedAcc((prev) => clampAccuracy(prev + 0.1))}
-                          className="col-start-1 row-start-2 min-h-[36px] sm:min-h-[44px] rounded-lg sm:rounded-xl bg-[#a10e1a] hover:bg-[#bf111f] border border-[#f87171]/60 text-white font-black text-[10px] sm:text-xs md:text-sm active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center gap-0.5 p-1 shadow-md disabled:opacity-40 select-none touch-manipulation"
+                          className="col-start-1 row-start-2 min-h-[36px] sm:min-h-[44px] rounded-lg sm:rounded-xl bg-[#a10e1a] hover:bg-[#bf111f] border border-[#f87171]/60 text-white font-black text-[10px] sm:text-xs md:text-sm active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center gap-0.5 p-1 shadow-md disabled:opacity-40 disabled:cursor-not-allowed select-none touch-manipulation"
                         >
                           <Plus size={12} strokeWidth={3} />
                           <span>+0.1 Undo</span>
@@ -979,9 +986,9 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                         {/* -0.1 Minor (Right tall button, spans 2 rows) */}
                         <button
                           type="button"
-                          disabled={!current || isJudgeStandby}
+                          disabled={!current || isJudgeStandby || isRedLocked}
                           onClick={() => setRedAcc((prev) => clampAccuracy(prev - 0.1))}
-                          className="col-start-2 row-start-1 row-span-2 min-h-[76px] sm:min-h-[96px] rounded-xl sm:rounded-2xl bg-[#593006] hover:bg-[#6e3c08] border-2 border-[#f59e0b]/60 text-[#fef08a] font-black text-xs sm:text-base md:text-lg active:scale-[0.98] transition-all cursor-pointer flex flex-col items-center justify-center p-1 shadow-md disabled:opacity-40 select-none touch-manipulation"
+                          className="col-start-2 row-start-1 row-span-2 min-h-[76px] sm:min-h-[96px] rounded-xl sm:rounded-2xl bg-[#593006] hover:bg-[#6e3c08] border-2 border-[#f59e0b]/60 text-[#fef08a] font-black text-xs sm:text-base md:text-lg active:scale-[0.98] transition-all cursor-pointer flex flex-col items-center justify-center p-1 shadow-md disabled:opacity-40 disabled:cursor-not-allowed select-none touch-manipulation"
                         >
                           <span className="text-xs sm:text-base md:text-xl font-black tracking-wide">-0.1 Minor</span>
                         </button>
@@ -1032,7 +1039,7 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                           <button
                             key={val}
                             type="button"
-                            disabled={!current || isJudgeStandby}
+                            disabled={!current || isJudgeStandby || isRedLocked}
                             onClick={() => setRedSp(val)}
                             className={cn(
                               'h-7 sm:h-8 md:h-9 rounded font-black text-[8px] sm:text-[11px] md:text-xs p-0 transition-all cursor-pointer flex items-center justify-center tabular-nums leading-none overflow-hidden select-none touch-manipulation active:scale-95 disabled:opacity-40',
@@ -1050,7 +1057,7 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                           <button
                             key={val}
                             type="button"
-                            disabled={!current || isJudgeStandby}
+                            disabled={!current || isJudgeStandby || isRedLocked}
                             onClick={() => setRedSp(val)}
                             className={cn(
                               'h-7 sm:h-8 md:h-9 rounded font-black text-[8px] sm:text-[11px] md:text-xs p-0 transition-all cursor-pointer flex items-center justify-center tabular-nums leading-none overflow-hidden select-none touch-manipulation active:scale-95 disabled:opacity-40',
@@ -1076,7 +1083,7 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                           <button
                             key={val}
                             type="button"
-                            disabled={!current || isJudgeStandby}
+                            disabled={!current || isJudgeStandby || isRedLocked}
                             onClick={() => setRedRt(val)}
                             className={cn(
                               'h-7 sm:h-8 md:h-9 rounded font-black text-[8px] sm:text-[11px] md:text-xs p-0 transition-all cursor-pointer flex items-center justify-center tabular-nums leading-none overflow-hidden select-none touch-manipulation active:scale-95 disabled:opacity-40',
@@ -1094,7 +1101,7 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                           <button
                             key={val}
                             type="button"
-                            disabled={!current || isJudgeStandby}
+                            disabled={!current || isJudgeStandby || isRedLocked}
                             onClick={() => setRedRt(val)}
                             className={cn(
                               'h-7 sm:h-8 md:h-9 rounded font-black text-[8px] sm:text-[11px] md:text-xs p-0 transition-all cursor-pointer flex items-center justify-center tabular-nums leading-none overflow-hidden select-none touch-manipulation active:scale-95 disabled:opacity-40',
@@ -1120,7 +1127,7 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                           <button
                             key={val}
                             type="button"
-                            disabled={!current || isJudgeStandby}
+                            disabled={!current || isJudgeStandby || isRedLocked}
                             onClick={() => setRedEe(val)}
                             className={cn(
                               'h-7 sm:h-8 md:h-9 rounded font-black text-[8px] sm:text-[11px] md:text-xs p-0 transition-all cursor-pointer flex items-center justify-center tabular-nums leading-none overflow-hidden select-none touch-manipulation active:scale-95 disabled:opacity-40',
@@ -1138,7 +1145,7 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
                           <button
                             key={val}
                             type="button"
-                            disabled={!current || isJudgeStandby}
+                            disabled={!current || isJudgeStandby || isRedLocked}
                             onClick={() => setRedEe(val)}
                             className={cn(
                               'h-7 sm:h-8 md:h-9 rounded font-black text-[8px] sm:text-[11px] md:text-xs p-0 transition-all cursor-pointer flex items-center justify-center tabular-nums leading-none overflow-hidden select-none touch-manipulation active:scale-95 disabled:opacity-40',
@@ -1187,19 +1194,19 @@ export const JudgeScoringView: React.FC<JudgeScoringViewProps> = ({
 
                         <button
                           type="button"
-                          disabled={!current || isJudgeStandby || isSubmittingRed}
+                          disabled={!current || isJudgeStandby || isSubmittingRed || isRedLocked}
                           onClick={() => handleManualSubmitSide('red')}
                           className={cn(
-                            'flex-1 sm:flex-initial min-h-[36px] sm:min-h-[48px] px-3 sm:px-6 rounded-lg sm:rounded-xl font-black text-[10px] sm:text-sm uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] cursor-pointer disabled:opacity-40 shadow-lg select-none touch-manipulation',
-                            redSubmitSuccessAt && (!existingRed || redSubmitSuccessAt >= existingRed.submittedAt)
+                            'flex-1 sm:flex-initial min-h-[36px] sm:min-h-[48px] px-3 sm:px-6 rounded-lg sm:rounded-xl font-black text-[10px] sm:text-sm uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] cursor-pointer disabled:opacity-75 disabled:cursor-not-allowed shadow-lg select-none touch-manipulation',
+                            isRedLocked
                               ? 'bg-gradient-to-r from-emerald-500 to-green-600 border border-emerald-300 text-white shadow-[0_0_12px_rgba(16,185,129,0.7)]'
                               : 'bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-500 hover:to-emerald-600 border border-emerald-400 text-white shadow-[0_0_10px_rgba(16,185,129,0.5)]'
                           )}
                         >
-                          {redSubmitSuccessAt && (!existingRed || redSubmitSuccessAt >= existingRed.submittedAt) ? (
+                          {isRedLocked ? (
                             <>
                               <CheckCircle2 size={14} />
-                              <span>SUBMITTED</span>
+                              <span>SUBMITTED (LOCKED)</span>
                             </>
                           ) : (
                             <>

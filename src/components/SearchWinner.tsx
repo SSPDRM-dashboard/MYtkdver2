@@ -1,7 +1,8 @@
 import React, { useState, useMemo } from 'react';
 import { Search, Trophy, RotateCcw, AlertTriangle, User, Hash, Sparkles, X, ChevronRight, CheckCircle2 } from 'lucide-react';
-import { MatchHistoryItem, MatchData, BoutMapping } from '../types';
+import { MatchHistoryItem, MatchData, BoutMapping, PoomsaeJudgeScore } from '../types';
 import { isBoutMatch, cn } from '../lib/utils';
+import { calculatePoomsaePanelScore, formatPoomsaeScore, round2 } from '../lib/poomsaeScoring';
 import { motion, AnimatePresence } from 'motion/react';
 import { PlayerLogoBadge } from './PlayerLogoBadge';
 
@@ -11,6 +12,8 @@ interface SearchWinnerProps {
   onRestoreMatch?: (match: MatchHistoryItem) => void;
   boutQueue?: { id: string; data: MatchData }[];
   backupData?: Record<string, { mappings: BoutMapping[], matches: MatchData[] }>;
+  poomsaeJudgeScores?: PoomsaeJudgeScore[];
+  poomsaeJudgeCount?: 3 | 5 | 7;
 }
 
 export type SearchCriteria = 'name' | 'bout' | 'all';
@@ -24,7 +27,15 @@ interface BoutResolvedDetails {
   winnerClub: string;
 }
 
-export function SearchWinner({ matchHistory, currentEventId, onRestoreMatch, boutQueue = [], backupData = {} }: SearchWinnerProps) {
+export function SearchWinner({
+  matchHistory,
+  currentEventId,
+  onRestoreMatch,
+  boutQueue = [],
+  backupData = {},
+  poomsaeJudgeScores = [],
+  poomsaeJudgeCount = 5,
+}: SearchWinnerProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchCriteria, setSearchCriteria] = useState<SearchCriteria>('name');
   const [results, setResults] = useState<MatchHistoryItem[]>([]);
@@ -32,6 +43,41 @@ export function SearchWinner({ matchHistory, currentEventId, onRestoreMatch, bou
   const [hasSearched, setHasSearched] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
+
+  const getPoomsaeBoutPoints = (item: MatchHistoryItem) => {
+    const matching = poomsaeJudgeScores.filter((s) => {
+      if (currentEventId && s.eventId && s.eventId !== 'default' && s.eventId !== currentEventId) {
+        return false;
+      }
+      return isBoutMatch(s.boutNumber, item.bout);
+    });
+
+    const computeSide = (side: 'blue' | 'red') => {
+      const sideScores = matching.filter((s) => s.side === side);
+      if (sideScores.length === 0) return null;
+      const p1 = calculatePoomsaePanelScore(sideScores.filter((s) => s.poomsaeNo === 1), poomsaeJudgeCount);
+      const p2 = calculatePoomsaePanelScore(sideScores.filter((s) => s.poomsaeNo === 2), poomsaeJudgeCount);
+      const hasP1 = p1.submittedCount > 0;
+      const hasP2 = p2.submittedCount > 0;
+      if (!hasP1 && !hasP2) return null;
+      const finalScore = hasP1 && hasP2
+        ? round2((p1.totalScore + p2.totalScore) / 2)
+        : hasP1
+          ? p1.totalScore
+          : p2.totalScore;
+      return {
+        finalScore,
+        p1Score: hasP1 ? p1.totalScore : null,
+        p2Score: hasP2 ? p2.totalScore : null,
+        acc: hasP1 && hasP2 ? round2((p1.avgAccuracy + p2.avgAccuracy) / 2) : (hasP1 ? p1.avgAccuracy : p2.avgAccuracy),
+        pres: hasP1 && hasP2 ? round2((p1.avgPresentation + p2.avgPresentation) / 2) : (hasP1 ? p1.avgPresentation : p2.avgPresentation),
+      };
+    };
+
+    const blue = computeSide('blue');
+    const red = computeSide('red');
+    return { blue, red, hasAny: Boolean(blue || red) };
+  };
 
   // Helper to resolve competitor and winner names using matchHistory, active queue, and backups
   const resolveBoutDetails = (item: MatchHistoryItem): BoutResolvedDetails => {
@@ -410,6 +456,9 @@ export function SearchWinner({ matchHistory, currentEventId, onRestoreMatch, bou
                       </div>
                       
                       {/* Corner Comparisons */}
+                      {(() => {
+                        const poomsaePts = getPoomsaeBoutPoints(selectedMatch);
+                        return (
                       <div className="pt-6 pb-2 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-2 gap-4 text-left">
                         <div className={cn(
                           "p-4 rounded-xl border flex flex-col transition-all",
@@ -432,6 +481,21 @@ export function SearchWinner({ matchHistory, currentEventId, onRestoreMatch, bou
                               <span className="text-xs font-medium text-slate-500 uppercase block truncate mt-0.5">{selectedMatchDetails.blueClub}</span>
                             </div>
                           </div>
+                          {poomsaePts.blue && (
+                            <div className="mt-3 pt-2.5 border-t border-blue-200/70 flex items-center justify-between gap-2">
+                              <div className="text-[10px] font-mono text-slate-600 space-x-2">
+                                {poomsaePts.blue.p1Score !== null && (
+                                  <span>P1: <strong className="text-slate-800">{formatPoomsaeScore(poomsaePts.blue.p1Score)}</strong></span>
+                                )}
+                                {poomsaePts.blue.p2Score !== null && (
+                                  <span>P2: <strong className="text-slate-800">{formatPoomsaeScore(poomsaePts.blue.p2Score)}</strong></span>
+                                )}
+                              </div>
+                              <span className="font-mono text-base font-black text-blue-700 bg-white px-2.5 py-0.5 rounded-lg border border-blue-200 shadow-sm tabular-nums">
+                                {formatPoomsaeScore(poomsaePts.blue.finalScore)}
+                              </span>
+                            </div>
+                          )}
                         </div>
 
                         <div className={cn(
@@ -455,8 +519,25 @@ export function SearchWinner({ matchHistory, currentEventId, onRestoreMatch, bou
                               <span className="text-xs font-medium text-slate-500 uppercase block truncate mt-0.5">{selectedMatchDetails.redClub}</span>
                             </div>
                           </div>
+                          {poomsaePts.red && (
+                            <div className="mt-3 pt-2.5 border-t border-red-200/70 flex items-center justify-between gap-2">
+                              <div className="text-[10px] font-mono text-slate-600 space-x-2">
+                                {poomsaePts.red.p1Score !== null && (
+                                  <span>P1: <strong className="text-slate-800">{formatPoomsaeScore(poomsaePts.red.p1Score)}</strong></span>
+                                )}
+                                {poomsaePts.red.p2Score !== null && (
+                                  <span>P2: <strong className="text-slate-800">{formatPoomsaeScore(poomsaePts.red.p2Score)}</strong></span>
+                                )}
+                              </div>
+                              <span className="font-mono text-base font-black text-red-700 bg-white px-2.5 py-0.5 rounded-lg border border-red-200 shadow-sm tabular-nums">
+                                {formatPoomsaeScore(poomsaePts.red.finalScore)}
+                              </span>
+                            </div>
+                          )}
                         </div>
                       </div>
+                        );
+                      })()}
 
                       {/* Restore Match Option */}
                       {onRestoreMatch && !showSuccess && (

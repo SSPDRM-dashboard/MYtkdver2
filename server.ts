@@ -197,6 +197,376 @@ async function startServer() {
     res.json({ status: "ok" });
   });
 
+  // ============================================================================
+  // WAYCHAMP OVR & HTTP MATCH ACTION BRIDGE (Bidirectional)
+  // ============================================================================
+  interface WaychampLogEntry {
+    id: string;
+    timestamp: string;
+    endpoint: 'ovr' | 'match-action';
+    method: string;
+    path: string;
+    query: Record<string, any>;
+    mat: string;
+    body: any;
+    summary: string;
+  }
+
+  interface WaychampMatStatus {
+    mat: string;
+    ringNumber: number;
+    connected: boolean;
+    lastSeenAt: string;
+    lastAction: string;
+    boutNumber?: string;
+    round?: number | string;
+    blueScore?: number;
+    redScore?: number;
+    blueGamJeom?: number;
+    redGamJeom?: number;
+    winner?: 'blue' | 'red' | null;
+    rawPayload?: any;
+  }
+
+  interface WaychampPendingResult {
+    id: string;
+    receivedAt: string;
+    mat: string;
+    ringNumber: number;
+    boutNumber: string;
+    winner: 'blue' | 'red';
+    blueScore?: number;
+    redScore?: number;
+    rawPayload?: any;
+  }
+
+  const waychampState: {
+    enabled: boolean;
+    eventName: string;
+    eventDate: string;
+    rings: any[];
+    lastSyncedAt: string | null;
+    incomingLogs: WaychampLogEntry[];
+    liveMatStatus: Record<string, WaychampMatStatus>;
+    pendingResults: WaychampPendingResult[];
+  } = {
+    enabled: false,
+    eventName: "",
+    eventDate: "",
+    rings: [],
+    lastSyncedAt: null,
+    incomingLogs: [],
+    liveMatStatus: {},
+    pendingResults: [],
+  };
+
+  function resolveMatAndRing(rawMat: any): { mat: string; ringNumber: number } {
+    const str = String(rawMat ?? "").trim().toUpperCase();
+    if (!str) return { mat: "A", ringNumber: 1 };
+    if (/^[A-Z]$/.test(str)) {
+      return { mat: str, ringNumber: str.charCodeAt(0) - 64 };
+    }
+    const numMatch = str.match(/\d+/);
+    if (numMatch) {
+      const n = Math.max(1, parseInt(numMatch[0], 10));
+      const letter = n >= 1 && n <= 26 ? String.fromCharCode(64 + n) : String(n);
+      return { mat: letter, ringNumber: n };
+    }
+    return { mat: str, ringNumber: 1 };
+  }
+
+  function extractMatFromReq(req: express.Request): { mat: string; ringNumber: number } {
+    const q = req.query || {};
+    const b = (req.body && typeof req.body === "object") ? req.body : {};
+    const candidate =
+      q.mat ?? q.Mat ?? q.court ?? q.Court ?? q.ring ?? q.Ring ?? q.field ??
+      b.mat ?? b.Mat ?? b.court ?? b.Court ?? b.ring ?? b.Ring ?? b.field ??
+      b.matName ?? b.courtName ?? "";
+    return resolveMatAndRing(candidate);
+  }
+
+  function parseWaychampPayload(body: any) {
+    if (!body || typeof body !== "object") return {};
+    const blueScoreRaw = body.blueScore ?? body.chungScore ?? body.blue_score ?? body.scoreBlue ?? body.blue?.score;
+    const redScoreRaw = body.redScore ?? body.hongScore ?? body.red_score ?? body.scoreRed ?? body.red?.score;
+    const blueGjRaw = body.blueGamJeom ?? body.chungGamJeom ?? body.blue_gamjeom ?? body.blue?.gamJeom;
+    const redGjRaw = body.redGamJeom ?? body.hongGamJeom ?? body.red_gamjeom ?? body.red?.gamJeom;
+    const roundRaw = body.round ?? body.currentRound ?? body.roundNumber;
+    const boutRaw = body.boutNumber ?? body.bout ?? body.matchNumber ?? body.matchNo ?? body.matchId ?? body.MatchNumber;
+    const actionRaw = body.action ?? body.event ?? body.type ?? body.status ?? body.Action ?? "update";
+
+    let winner: 'blue' | 'red' | null = null;
+    const winnerRaw = String(body.winner ?? body.winnerSide ?? body.Winner ?? "").trim().toLowerCase();
+    if (winnerRaw === "blue" || winnerRaw === "chung" || winnerRaw === "b") winner = "blue";
+    else if (winnerRaw === "red" || winnerRaw === "hong" || winnerRaw === "r") winner = "red";
+
+    return {
+      boutNumber: boutRaw !== undefined ? String(boutRaw) : undefined,
+      round: roundRaw,
+      blueScore: blueScoreRaw !== undefined ? Number(blueScoreRaw) : undefined,
+      redScore: redScoreRaw !== undefined ? Number(redScoreRaw) : undefined,
+      blueGamJeom: blueGjRaw !== undefined ? Number(blueGjRaw) : undefined,
+      redGamJeom: redGjRaw !== undefined ? Number(redGjRaw) : undefined,
+      winner,
+      action: String(actionRaw),
+    };
+  }
+
+  function formatRingForWaychamp(ringObj: any, mat: string, ringNumber: number) {
+    const bouts: any[] = [];
+    const pushBout = (b: any, statusLabel: string) => {
+      if (!b) return;
+      bouts.push({
+        matchNumber: String(b.bout ?? ""),
+        boutNumber: String(b.bout ?? ""),
+        mat,
+        ring: ringNumber,
+        status: statusLabel,
+        category: String(b.category ?? ""),
+        stage: String(b.stage ?? ""),
+        blue: {
+          name: String(b.blue_name ?? ""),
+          club: String(b.blue_club ?? ""),
+          country: String(b.blue_club ?? ""),
+        },
+        red: {
+          name: String(b.red_name ?? ""),
+          club: String(b.red_club ?? ""),
+          country: String(b.red_club ?? ""),
+        },
+        blueName: String(b.blue_name ?? ""),
+        blueClub: String(b.blue_club ?? ""),
+        redName: String(b.red_name ?? ""),
+        redClub: String(b.red_club ?? ""),
+      });
+    };
+
+    if (ringObj) {
+      pushBout(ringObj.currentBout, "LIVE");
+      pushBout(ringObj.onDeck, "ON_DECK");
+      pushBout(ringObj.inTheHole, "IN_THE_HOLE");
+    }
+
+    return {
+      status: "ok",
+      connected: true,
+      supplier: "Waychamp",
+      system: "MY-TKD",
+      eventName: waychampState.eventName,
+      eventDate: waychampState.eventDate,
+      mat,
+      ringNumber,
+      currentMatch: bouts[0] || null,
+      matches: bouts,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  // Permissive CORS for Waychamp desktop PSS client on mat laptops
+  app.use("/api/waychamp", (req, res, next) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+    res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, Accept");
+    if (req.method === "OPTIONS") {
+      return res.sendStatus(200);
+    }
+    next();
+  });
+
+  // Frontend -> Server: sync current tournament rings & bouts so Waychamp can pull them
+  app.post("/api/waychamp/sync-rings", (req, res) => {
+    const { eventName, eventDate, rings } = req.body || {};
+    waychampState.eventName = String(eventName ?? "");
+    waychampState.eventDate = String(eventDate ?? "");
+    waychampState.rings = Array.isArray(rings) ? rings : [];
+    waychampState.lastSyncedAt = new Date().toISOString();
+    return res.json({
+      status: "ok",
+      syncedRingCount: waychampState.rings.length,
+      lastSyncedAt: waychampState.lastSyncedAt,
+    });
+  });
+
+  // Frontend -> Server: toggle Waychamp integration ON / OFF
+  app.post("/api/waychamp/toggle", (req, res) => {
+    const { enabled } = req.body || {};
+    waychampState.enabled = Boolean(enabled);
+    return res.json({ status: "ok", enabled: waychampState.enabled });
+  });
+
+  // Frontend -> Server: inspect Waychamp connection status, logs, and pending results
+  app.get("/api/waychamp/status", (_req, res) => {
+    return res.json({
+      status: "ok",
+      enabled: waychampState.enabled,
+      eventName: waychampState.eventName,
+      eventDate: waychampState.eventDate,
+      syncedRingCount: waychampState.rings.length,
+      lastSyncedAt: waychampState.lastSyncedAt,
+      liveMatStatus: waychampState.liveMatStatus,
+      incomingLogs: waychampState.incomingLogs,
+      pendingResults: waychampState.pendingResults,
+    });
+  });
+
+  app.post("/api/waychamp/clear-logs", (_req, res) => {
+    waychampState.incomingLogs = [];
+    waychampState.pendingResults = [];
+    return res.json({ status: "ok" });
+  });
+
+  app.post("/api/waychamp/ack-result", (req, res) => {
+    const { id } = req.body || {};
+    waychampState.pendingResults = waychampState.pendingResults.filter((r) => r.id !== id);
+    return res.json({ status: "ok" });
+  });
+
+  // Waychamp OVR Endpoint (handles GET/POST on /api/waychamp/ovr and any sub-paths Waychamp appends)
+  const handleWaychampOvr = (req: express.Request, res: express.Response) => {
+    if (!waychampState.enabled) {
+      return res.status(503).json({
+        status: "disabled",
+        connected: false,
+        message: "Waychamp OVR integration is currently turned OFF by admin.",
+      });
+    }
+    const { mat, ringNumber } = extractMatFromReq(req);
+    const parsed = parseWaychampPayload(req.body);
+    const nowIso = new Date().toISOString();
+
+    const prev = waychampState.liveMatStatus[mat];
+    waychampState.liveMatStatus[mat] = {
+      mat,
+      ringNumber,
+      connected: true,
+      lastSeenAt: nowIso,
+      lastAction: req.method === "GET" ? "OVR Poll / Connection Check" : (parsed.action || "OVR Update"),
+      boutNumber: parsed.boutNumber ?? prev?.boutNumber,
+      round: parsed.round ?? prev?.round,
+      blueScore: parsed.blueScore ?? prev?.blueScore,
+      redScore: parsed.redScore ?? prev?.redScore,
+      blueGamJeom: parsed.blueGamJeom ?? prev?.blueGamJeom,
+      redGamJeom: parsed.redGamJeom ?? prev?.redGamJeom,
+      winner: parsed.winner ?? prev?.winner ?? null,
+      rawPayload: req.method === "GET" ? req.query : req.body,
+    };
+
+    if (parsed.winner && parsed.boutNumber) {
+      waychampState.pendingResults.unshift({
+        id: `wc_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        receivedAt: nowIso,
+        mat,
+        ringNumber,
+        boutNumber: parsed.boutNumber,
+        winner: parsed.winner,
+        blueScore: parsed.blueScore,
+        redScore: parsed.redScore,
+        rawPayload: req.body,
+      });
+      if (waychampState.pendingResults.length > 30) {
+        waychampState.pendingResults.length = 30;
+      }
+    }
+
+    waychampState.incomingLogs.unshift({
+      id: `log_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      timestamp: nowIso,
+      endpoint: "ovr",
+      method: req.method,
+      path: req.originalUrl,
+      query: req.query as Record<string, any>,
+      mat,
+      body: req.body,
+      summary:
+        req.method === "GET"
+          ? `Mat ${mat} (Ring ${ringNumber}) OVR GET / Connection`
+          : `Mat ${mat} (Ring ${ringNumber}) ${parsed.action || "POST"}${parsed.winner ? ` — Winner: ${parsed.winner.toUpperCase()}` : ""}`,
+    });
+    if (waychampState.incomingLogs.length > 50) {
+      waychampState.incomingLogs.length = 50;
+    }
+
+    const ringObj = waychampState.rings.find((r: any) => Number(r.ringNumber) === ringNumber);
+    return res.json(formatRingForWaychamp(ringObj, mat, ringNumber));
+  };
+
+  app.all("/api/waychamp/ovr", handleWaychampOvr);
+  app.all("/api/waychamp/ovr/*", handleWaychampOvr);
+
+  // Waychamp HTTP Match Action Endpoint
+  const handleWaychampMatchAction = (req: express.Request, res: express.Response) => {
+    if (!waychampState.enabled) {
+      return res.status(503).json({
+        status: "disabled",
+        received: false,
+        message: "Waychamp HTTP Match Action integration is currently turned OFF by admin.",
+      });
+    }
+    const { mat, ringNumber } = extractMatFromReq(req);
+    const parsed = parseWaychampPayload(req.body);
+    const nowIso = new Date().toISOString();
+
+    const prev = waychampState.liveMatStatus[mat];
+    waychampState.liveMatStatus[mat] = {
+      mat,
+      ringNumber,
+      connected: true,
+      lastSeenAt: nowIso,
+      lastAction: parsed.action || `HTTP Match Action (${req.method})`,
+      boutNumber: parsed.boutNumber ?? prev?.boutNumber,
+      round: parsed.round ?? prev?.round,
+      blueScore: parsed.blueScore ?? prev?.blueScore,
+      redScore: parsed.redScore ?? prev?.redScore,
+      blueGamJeom: parsed.blueGamJeom ?? prev?.blueGamJeom,
+      redGamJeom: parsed.redGamJeom ?? prev?.redGamJeom,
+      winner: parsed.winner ?? prev?.winner ?? null,
+      rawPayload: req.method === "GET" ? req.query : req.body,
+    };
+
+    if (parsed.winner && parsed.boutNumber) {
+      waychampState.pendingResults.unshift({
+        id: `wc_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        receivedAt: nowIso,
+        mat,
+        ringNumber,
+        boutNumber: parsed.boutNumber,
+        winner: parsed.winner,
+        blueScore: parsed.blueScore,
+        redScore: parsed.redScore,
+        rawPayload: req.body,
+      });
+      if (waychampState.pendingResults.length > 30) {
+        waychampState.pendingResults.length = 30;
+      }
+    }
+
+    waychampState.incomingLogs.unshift({
+      id: `log_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      timestamp: nowIso,
+      endpoint: "match-action",
+      method: req.method,
+      path: req.originalUrl,
+      query: req.query as Record<string, any>,
+      mat,
+      body: req.body,
+      summary: `Mat ${mat} (Ring ${ringNumber}) Match Action: ${parsed.action || req.method}`,
+    });
+    if (waychampState.incomingLogs.length > 50) {
+      waychampState.incomingLogs.length = 50;
+    }
+
+    return res.json({
+      status: "ok",
+      received: true,
+      mat,
+      ringNumber,
+      timestamp: nowIso,
+    });
+  };
+
+  app.all("/api/waychamp/match-action", handleWaychampMatchAction);
+  app.all("/api/waychamp/match-action/*", handleWaychampMatchAction);
+
   // Analyze Bracket Endpoint
   app.post("/api/gemini/analyze-bracket", async (req, res) => {
     try {
