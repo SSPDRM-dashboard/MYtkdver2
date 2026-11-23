@@ -47,7 +47,8 @@ import {
   Clock,
   Square,
   Copy,
-  Users2
+  Users2,
+  Volume2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { QRCodeSVG } from 'qrcode.react';
@@ -56,6 +57,7 @@ import { PoomsaeScreenView } from './components/PoomsaeScreenView';
 import { JudgeScoringView } from './components/JudgeScoringView';
 import { WaychampSettings } from './components/WaychampSettings';
 import { buildPoomsaeJudgeScoreDocId, calculatePoomsaePanelScore, clampAccuracy, clampPresentation, formatPoomsaeScore, round2 } from './lib/poomsaeScoring';
+import { speakTaekwondoCommand, stopTaekwondoVoice, TaekwondoVoicePhase } from './lib/taekwondoVoice';
 import { TASheet } from './components/TASheet';
 import { InspectionLogs } from './components/InspectionLogs';
 import { RingSummary } from './components/RingSummary';
@@ -10218,6 +10220,19 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
     r3Winner: '' as 'Blue' | 'Red' | ''
   });
   const [selectedWinType, setSelectedWinType] = useState<string>('PTF');
+  const [activeVoicePhase, setActiveVoicePhase] = useState<TaekwondoVoicePhase>(null);
+  const onStartTimerRef = useRef(onStartTimer);
+  const onStopTimerRef = useRef(onStopTimer);
+  const isRingTimerRunningRef = useRef(isRingTimerRunning);
+  onStartTimerRef.current = onStartTimer;
+  onStopTimerRef.current = onStopTimer;
+  isRingTimerRunningRef.current = isRingTimerRunning;
+
+  useEffect(() => {
+    return () => {
+      stopTaekwondoVoice();
+    };
+  }, []);
   
   // Reset selected win type to PTF when bout changes
   useEffect(() => {
@@ -10717,6 +10732,67 @@ function RingCard({ ring, namingMode, categories, clubs, queueCount = 0, onUpdat
                     >
                       <Square size={13} fill="currentColor" />
                       <span>Stop Timer</span>
+                    </button>
+                  </div>
+                  {/* Voice Command Buttons (Below Start Timer & Stop Timer) */}
+                  <div className="grid grid-cols-2 gap-2.5 sm:gap-4">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        speakTaekwondoCommand('joombi_shijak', setActiveVoicePhase, () => {
+                          if (!isRingTimerRunningRef.current) {
+                            onStartTimerRef.current?.();
+                          }
+                        })
+                      }
+                      className={cn(
+                        "min-h-[42px] sm:min-h-[46px] py-2 px-3 rounded-xl font-black text-xs sm:text-sm uppercase tracking-wider transition-all flex items-center justify-center gap-2 border-2 shadow-sm cursor-pointer active:scale-95",
+                        activeVoicePhase === 'joombi' || activeVoicePhase === 'shijak'
+                          ? "bg-blue-600 text-white border-blue-600 shadow-blue-200"
+                          : "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-600 hover:text-white hover:border-blue-600"
+                      )}
+                      title="Play Joombi ... Shijak! and start the match timer"
+                    >
+                      <Volume2
+                        size={15}
+                        className={activeVoicePhase === 'joombi' || activeVoicePhase === 'shijak' ? 'animate-pulse' : ''}
+                      />
+                      <span>
+                        {activeVoicePhase === 'joombi'
+                          ? 'Joombi...'
+                          : activeVoicePhase === 'shijak'
+                            ? 'Shijak!'
+                            : 'Joombi - Shijak'}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        speakTaekwondoCommand('barro_shore', setActiveVoicePhase, () => {
+                          if (isRingTimerRunningRef.current) {
+                            onStopTimerRef.current?.();
+                          }
+                        })
+                      }
+                      className={cn(
+                        "min-h-[42px] sm:min-h-[46px] py-2 px-3 rounded-xl font-black text-xs sm:text-sm uppercase tracking-wider transition-all flex items-center justify-center gap-2 border-2 shadow-sm cursor-pointer active:scale-95",
+                        activeVoicePhase === 'barro' || activeVoicePhase === 'shore'
+                          ? "bg-amber-600 text-white border-amber-600 shadow-amber-200"
+                          : "bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-600 hover:text-white hover:border-amber-600"
+                      )}
+                      title="Play Barro ... Shore! and stop the match timer"
+                    >
+                      <Volume2
+                        size={15}
+                        className={activeVoicePhase === 'barro' || activeVoicePhase === 'shore' ? 'animate-pulse' : ''}
+                      />
+                      <span>
+                        {activeVoicePhase === 'barro'
+                          ? 'Barro...'
+                          : activeVoicePhase === 'shore'
+                            ? 'Shore!'
+                            : 'Barro - Shore'}
+                      </span>
                     </button>
                   </div>
                 </div>
